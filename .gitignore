@@ -1,0 +1,8 @@
+# ignore all .txt files
+# *.txt
+
+# ignore all files in the log directory
+dist/
+
+# ignore specific file
+specific_file_to_ignore.py
