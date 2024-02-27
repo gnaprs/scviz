@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scviz"
-version = "0.0.2"
+version = "0.0.3"
 authors = [
   { name="Marion Pang", email="sr_pang@hotmail.com" },
 ]
@@ -15,6 +15,16 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
+]
+dependencies = [
+  "numpy",
+  "pandas",
+  "matplotlib",
+  "seaborn",
+  "upsetplot",
+  "sklearn",
+  "scipy",
+  "decimal"
 ]
 
 [project.urls]
