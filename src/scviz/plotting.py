@@ -217,57 +217,77 @@ def plot_pca_3d(ax, data, cases, cmap=plt.cm.get_cmap('viridis'), s=20, alpha=.8
 
     return ax, pca
 
-def plot_heatmap_annotated(ax,data,cases,genes, cmap=plt.cm.seismic,norm_values=[4,5.5,7],linewidth=.5,annotate=True, square=False, search='gene'):
-    # search can also be 'protein' for UNIPROT protein accession number, or 'gene' for gene symbol, 
-    # or 'description' for protein description, or 'pathway' for pathway name, or 'GO' for gene ontology term, or 'all' for all columns
+def plot_heatmap_annotated(ax, data, cases, genes, search='gene', cmap=plt.cm.seismic, norm_values=[4,5.5,7], linewidth=.5, annotate=True, square=False):
+    """Plot an annotated heatmap of protein abundance data, searching from a specific gene list.
 
-    # extract columns that contain the abundance data for the specified method and amount
-    for j in range(len(cases)):
-        vars = ['Abundance: '] + cases[j]
+    Parameters:
+    ax (matplotlib.axes.Axes): The axes on which to plot the heatmap.
+    data (pandas.DataFrame): The protein abundance data.
+    cases (list): The cases to include in the heatmap.
+    genes (list): The genes to include in the heatmap. Can also be accession numbers, descriptions, or pathways.
+    search (str): The search term to use. Can be 'gene', 'protein', 'description', 'pathway', or 'all'.
+    cmap (matplotlib.colors.Colormap): The colormap to use for the heatmap.
+    norm_values (list): The low, mid, and high values used to set colorbar scale. Can be assymetric.
+    linewidth (float): Plot linewidth.
+    annotate (bool): Annotate each heatmap entry with numerical value. True by default.
+    square (bool): Make heatmap square. False by default.
+
+    Returns:
+    ax (matplotlib.axes.Axes): The axes with the plotted heatmap.
+    data_clean (pandas.DataFrame): Extracted protein abundance data, along with matched search features and the respective genes they were matched to.
+    """
+    valid_search_terms = ['gene', 'protein', 'description', 'pathway', 'all']
+    if search not in valid_search_terms:
+        raise ValueError(f'Invalid search term. Please use one of the following: {valid_search_terms}')
+
+    data = data.copy()
+
+    for case in cases:
+        vars = ['Abundance: '] + case
         append_string = '_'.join(vars[1:])
         cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-
-        # average abundance of proteins across these columns, ignoring NaN values
         data['Average: '+append_string] = data[cols].mean(axis=1, skipna=True)
         data['Stdev: '+append_string] = data[cols].std(axis=1, skipna=True)
 
-        print(append_string)
+    case_col = [data.columns.get_loc('Average: '+'_'.join(case)) for case in cases]
 
-    # find the number for the average column  of all cases
-    case_col=[]
-    for i in range(len(cases)):
-        case_col.append(data.columns.get_loc('Average: '+'_'.join(cases[i][:])))
+    search_to_column = {
+        'gene': 'Gene Symbol',
+        'protein': 'Accession',
+        'description': 'Description',
+        'pathway': 'WikiPathways',
+        'all': ['Gene Symbol', 'Accession', 'Description', 'WikiPathways']
+    }
 
-    data = data.copy()
-    if search == 'gene':
-        data = data[data['Gene Symbol'].isin(genes)]
-        data.set_index('Gene Symbol', inplace=True)
-    elif search == 'protein':
-        data = data[data['Accession'].isin(genes)]
-        data.set_index('Accession', inplace=True)
-    elif search == 'description':
-        data = data[data['Description'].isin(genes)]
-        data.set_index('Gene Symbol', inplace=True)
-    elif search == 'pathway':
-        data = data[data['WikiPathway'].isin(genes)]
-        data.set_index('Gene Symbol', inplace=True)
-    elif search == 'all':
-        data = data[data['Gene Symbol'].isin(genes) | data['Accession'].isin(genes) | data['Description'].isin(genes) | data['WikiPathway'].isin(genes)]
-        data.set_index('Gene Symbol', inplace=True)
+    columns = search_to_column[search] if search != 'all' else search_to_column['all']
+    if not isinstance(columns, list):
+        columns = [columns]
 
-    print(len(data))
-    data = data.iloc[:,case_col]
-    data = data.dropna(how='all')
-    
-    # log10 data
-    data_log10 = np.log10(data)
+    for column in columns:
+        data[f'Matched in {column}'] = data[column].apply(lambda x: [])
+
+        for gene in genes:
+            regex = rf"\b{re.escape(gene)}\b"
+            data[f'Matched in {column}'] = data.apply(lambda row: row[f'Matched in {column}'] + [gene] if isinstance(row[column], str) and re.search(regex, row[column], re.IGNORECASE) else row[f'Matched in {column}'], axis=1)
+
+    data = data[data.filter(regex='Matched').apply(any, axis=1)]
+    data.set_index('Gene Symbol', inplace=True)
+
+    if data.shape[0] == 0:
+        raise ValueError('No data to plot. Please check the gene list and the search parameters.')
+
+    num_new_cols = 4 if search == 'all' else 1
+    case_col.extend(range(len(data.columns) - (num_new_cols-1), len(data.columns) + 1))
+    heatmap_data = data.iloc[:,[i-1 for i in case_col]]
+    heatmap_data = heatmap_data.dropna(how='all')
+
+    abundance_data = heatmap_data.iloc[:, :-num_new_cols]
+    abundance_data_log10 = np.log10(abundance_data)
 
     mid_norm = mcolors.TwoSlopeNorm(vmin=norm_values[0], vcenter=norm_values[1], vmax=norm_values[2])
+    ax = sns.heatmap(abundance_data_log10, yticklabels=True, square=square, annot=annotate, linewidth=linewidth, cmap=cmap, norm=mid_norm, cbar_kws={'label': 'Abundance (AU)'})
 
-    ax = sns.heatmap(data_log10, yticklabels=True, square=square, annot=annotate, linewidth=linewidth, cmap=cmap, norm=mid_norm, cbar_kws={'label': 'Abundance (AU)'})
-    # ax = sns.heatmap(data, yticklabels=True, square=square, annot=annotate, linewidth=linewidth, cmap=cmap, norm=LogNorm(10**3.5), cbar_kws={'label': 'Abundance (AU)'})
-
-    return ax
+    return ax, heatmap_data
 
 def plot_abundance(ax,data,cases,cmap=['Blues'],color=['blue'],s=20,alpha=0.2,calpha=1):
     # extract columns that contain the abundance data for the specified method and amount
