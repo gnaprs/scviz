@@ -21,6 +21,10 @@ Todo:
 import pandas as pd
 import numpy as np
 import re
+
+from scipy.stats import ttest_ind
+from decimal import Decimal
+
     
 def protein_summary(data, variables = ['region','amt']):
     """
@@ -236,3 +240,60 @@ def get_cv(data, cases, variables=['region', 'amt'], sharedPeptides = False):
         cv_df = pd.concat([cv_df, cur_df], ignore_index=True)
 
     return cv_df
+
+def return_abundance(data,cases,names=None, abun_type='average', num_cat=2):
+    if abun_type=='average':
+        # create empty list to store abundance values
+        abun_dict = {}
+        data = data.copy()
+        # extract columns that contain the abundance data for the specified method and amount
+        for j in range(len(cases)):
+            vars = ['Abundance: '] + cases[j]
+
+            if names is not None:
+                # extract out rows where Accession is in names
+                data = data[data['Accession'].isin(names)]
+
+            cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
+            # concat elements 1 till end of vars into one string
+            append_string = '_'.join(vars[1:])
+            
+            # average abundance of proteins across these columns, ignoring NaN values
+            data['Average: '+append_string] = data[cols].mean(axis=1, skipna=True)
+            data['Stdev: '+append_string] = data[cols].std(axis=1, skipna=True)
+
+            # sort by average abundance
+            data.sort_values(by=['Average: '+append_string], ascending=False, inplace=True)
+            abundance=data['Average: '+append_string]
+            accession=data['Accession']
+
+            # add rank number
+            rank=data['Rank: '+append_string] = np.arange(1, len(data)+1)
+
+            # make dictionary for abundance and rank
+            abun_dict[append_string] = [abundance, rank, accession]
+        return abun_dict
+
+    if abun_type == 'raw':
+        # create empty list to store abundance values
+        abun_dict = {}
+        data = data.copy()
+        # extract columns that contain the abundance data for the specified method and amount
+        for j in range(len(cases)):
+            vars = ['Abundance: '] + cases[j]
+
+            if names is not None:
+                # extract out rows where Accession is in names
+                data = data[data['Accession'].isin(names)]
+
+            cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
+            # concat elements 1 till end of vars into one string
+            append_string = '_'.join(vars[1:])
+            
+            abundance = data[cols]
+            accession=data['Accession']
+
+            # make dictionary for abundance and rank
+            abun_dict[append_string] = [abundance, accession]
+
+        return abun_dict
