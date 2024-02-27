@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import re
-import utils
+from scviz import utils
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
