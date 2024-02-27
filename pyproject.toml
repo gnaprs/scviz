@@ -34,3 +34,6 @@ Issues = "https://github.com/gnaprs/scviz/issues"
 pythonpath = [
   "."
 ]
+
+[project.optional-dependencies]
+pytest = ["openpyxl"]
