@@ -1,8 +1,6 @@
 # ignore all .txt files
 # *.txt
 
-# ignore all files in the log directory
+# ignore all files in these directories
 dist/
-
-# ignore specific file
-specific_file_to_ignore.py
+src/scviz/__pycache__/
