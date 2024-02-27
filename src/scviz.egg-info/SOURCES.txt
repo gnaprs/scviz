@@ -2,10 +2,12 @@ LICENSE
 README.md
 pyproject.toml
 src/scviz/__init__.py
-src/scviz/data_utils.py
 src/scviz/plotting.py
 src/scviz/setup.py
+src/scviz/utils.py
 src/scviz.egg-info/PKG-INFO
 src/scviz.egg-info/SOURCES.txt
 src/scviz.egg-info/dependency_links.txt
+src/scviz.egg-info/requires.txt
 src/scviz.egg-info/top_level.txt
+tests/test_scviz_utils.py

@@ -4,3 +4,4 @@
 # ignore all files in these directories
 dist/
 src/scviz/__pycache__/
+tests/__pycache__/

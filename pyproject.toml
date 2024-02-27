@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scviz"
-version = "0.0.3"
+version = "0.0.4"
 authors = [
   { name="Marion Pang", email="sr_pang@hotmail.com" },
 ]
@@ -22,11 +22,15 @@ dependencies = [
   "matplotlib",
   "seaborn",
   "upsetplot",
-  "sklearn",
-  "scipy",
-  "decimal"
+  "scikit-learn",
+  "scipy"
 ]
 
 [project.urls]
 Homepage = "https://github.com/gnaprs/scviz"
 Issues = "https://github.com/gnaprs/scviz/issues"
+
+[tool.pytest.ini_options]
+pythonpath = [
+  "."
+]

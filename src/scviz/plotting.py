@@ -1,3 +1,21 @@
+"""
+This module contains functions for plotting protein data.
+
+Functions:
+    plot_significance: Plot significance bars on a given axis.
+    plot_cv: Generate a box and whisker plot for the coefficient of variation (CV) of different cases.
+    plot_pca: Plot a PCA of the protein data.
+    plot_pca_scree: Plot a scree plot of the PCA.
+    plot_heatmap_annotated: Plot an annotated heatmap of the protein data.
+    plot_abundance: Plot the abundance of proteins across different cases.
+    plot_abundance_2D: Plot the abundance of proteins across two cases in a 2D scatter plot.
+    mark_abundance_protein: Mark the abundance of proteins on a plot_abundance plot.
+    ... more to come
+
+Todo:
+    * For future implementation.
+"""
+
 import numpy as np
 import pandas as pd
 import re
@@ -12,12 +30,40 @@ from upsetplot import plot, generate_counts, from_contents, query, UpSet
 import seaborn as sns
 sns.set_theme(context='paper', style='ticks')
 
-# --- for marion
+# --- for consideration
 # Create a list of colors
-colors = ['#FC6908', '#00AEE8', '#9D9D9D', '#6EDC00', '#F4D03F', 'red', '#A454C7']
+colors = ['#FC9744', '#00AEE8', '#9D9D9D', '#6EDC00', '#F4D03F', '#FF0000', '#A454C7']
 cmap = mcolors.LinearSegmentedColormap.from_list('my_cmap', colors)
 palette = sns.color_palette(colors)
 # ---
+
+def get_color(resource_type, n=None):
+    """
+    Generate a list of colors, a colormap, or a palette from package defaults.
+
+    Parameters:
+    - resource_type (str): The type of resource to generate. Options are 'colors', 'cmap', and 'palette'.
+    - n (int, optional): The number of colors to generate. Only used if resource_type is 'colors'.
+
+    Returns:
+    - list of str or matplotlib.colors.Colormap or seaborn.color_palette: A list of colors, a colormap, or a palette.
+
+    Example:
+    >>> colors = get_color_resources('colors', 5)
+    >>> cmap = get_color('cmap')
+    >>> palette = get_color('palette')
+    """
+
+    if resource_type == 'colors':
+        if n is None:
+            raise ValueError("Parameter 'n' must be specified when resource_type is 'colors'")
+        return colors[:n]
+    elif resource_type == 'cmap':
+        return cmap
+    elif resource_type == 'palette':
+        return palette
+    else:
+        raise ValueError("Invalid resource_type. Options are 'colors', 'cmap', and 'palette'")
 
 def plot_significance(ax, x1, x2, y, h, col, pval):
     """
@@ -93,10 +139,9 @@ def plot_cv(ax,data,cases,color=['blue']):
                     capprops=dict(color=color[j], linewidth=0.5))
     return ax
 
-def plot_pca(ax, data, cases, cmap=cmap, s=20, alpha=0.2, plot_pc=[0,1]):
-
+def plot_pca(ax, data, cases, cmap=plt.cm.get_cmap('viridis'), s=20, alpha=.8, plot_pc=[0,1]):
     from sklearn.decomposition import PCA
-    dict_data = utils.return_abundance(data, cases, abun_type='raw')
+    dict_data = utils.get_abundance(data, cases, abun_type='raw')
 
     pc_x=plot_pc[0]
     pc_y=plot_pc[1]
@@ -136,8 +181,47 @@ def plot_pca_scree(ax, pca):
     
     return ax
 
-def plot_heatmap_annotated(ax,data,cases,genes, cmap=plt.cm.seismic,norm_values=[4,5.5,7],linewidth=.5,annotate=True, square=False,xticklabels=True):
-        # extract columns that contain the abundance data for the specified method and amount
+def plot_pca_3d(ax, data, cases, cmap=plt.cm.get_cmap('viridis'), s=20, alpha=.8, plot_pc=[0,1,2]):
+       
+    from sklearn.decomposition import PCA
+    dict_data = utils.get_abundance(data, cases, abun_type='raw')
+
+    pc_x=plot_pc[0]
+    pc_y=plot_pc[1]
+    pc_z=plot_pc[2]
+
+    # make stack of all abundance data
+    X = np.hstack([np.array(dict_data[list(dict_data.keys())[i]][0]) for i in range(len(dict_data))])
+    X = X.T
+
+    # make sample array
+    y = np.hstack([np.repeat(i, dict_data[list(dict_data.keys())[i]][0].shape[1]) for i in range(len(dict_data))])
+
+    # number of samples by different proteins
+    print(X.shape, y.shape)
+
+    # remove columns that contain nan in X
+    X = X[:, ~np.isnan(X).any(axis=0)]
+    print(X.shape, y.shape)
+    X = np.log2(X+1)
+
+    Xnorm = (X - X.mean(axis=0)) / X.std(axis=0)
+
+    pca = PCA()
+    Xt = pca.fit_transform(Xnorm)
+  
+    ax.scatter(Xt[:,pc_x], Xt[:,pc_y], Xt[:, pc_z], c=y, cmap=cmap, s=s, alpha=alpha)
+    ax.set_xlabel('PC'+str(pc_x+1)+' ('+str(round(pca.explained_variance_ratio_[pc_x]*100,2))+'%)')
+    ax.set_ylabel('PC'+str(pc_y+1)+' ('+str(round(pca.explained_variance_ratio_[pc_y]*100,2))+'%)')
+    ax.set_zlabel('PC'+str(pc_z+1)+' ('+str(round(pca.explained_variance_ratio_[pc_z]*100,2))+'%)')
+
+    return ax, pca
+
+def plot_heatmap_annotated(ax,data,cases,genes, cmap=plt.cm.seismic,norm_values=[4,5.5,7],linewidth=.5,annotate=True, square=False, search='gene'):
+    # search can also be 'protein' for UNIPROT protein accession number, or 'gene' for gene symbol, 
+    # or 'description' for protein description, or 'pathway' for pathway name, or 'GO' for gene ontology term, or 'all' for all columns
+
+    # extract columns that contain the abundance data for the specified method and amount
     for j in range(len(cases)):
         vars = ['Abundance: '] + cases[j]
         append_string = '_'.join(vars[1:])
@@ -155,14 +239,24 @@ def plot_heatmap_annotated(ax,data,cases,genes, cmap=plt.cm.seismic,norm_values=
         case_col.append(data.columns.get_loc('Average: '+'_'.join(cases[i][:])))
 
     data = data.copy()
-    # only keep rows where genes is in "Gene Symbol"
-    data = data[data['Gene Symbol'].isin(genes)]
-    # set gene symbol as index
-    data.set_index('Gene Symbol', inplace=True)
+    if search == 'gene':
+        data = data[data['Gene Symbol'].isin(genes)]
+        data.set_index('Gene Symbol', inplace=True)
+    elif search == 'protein':
+        data = data[data['Accession'].isin(genes)]
+        data.set_index('Accession', inplace=True)
+    elif search == 'description':
+        data = data[data['Description'].isin(genes)]
+        data.set_index('Gene Symbol', inplace=True)
+    elif search == 'pathway':
+        data = data[data['WikiPathway'].isin(genes)]
+        data.set_index('Gene Symbol', inplace=True)
+    elif search == 'all':
+        data = data[data['Gene Symbol'].isin(genes) | data['Accession'].isin(genes) | data['Description'].isin(genes) | data['WikiPathway'].isin(genes)]
+        data.set_index('Gene Symbol', inplace=True)
+
     print(len(data))
-    # only keep columns that are in case_col
     data = data.iloc[:,case_col]
-    # drop rows where all values are NaN
     data = data.dropna(how='all')
     
     # log10 data

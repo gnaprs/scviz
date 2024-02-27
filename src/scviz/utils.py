@@ -1,30 +1,33 @@
 """
-This module contains functions for importing and manipulating data.
+This module contains functions for processing protein data and performing statistical tests.
 
 Functions:
-    function1: This function is responsible for...
-    function2: This function is responsible for...
-    ...
-
-Note:
-    Replace 'function1', 'function2', etc. with your actual function names and provide a brief description of what each function does.
+    protein_summary: Import protein data from an Excel file and summarize characteristics about each sample and sample groups.
+    append_norm: Append normalized protein data to the original protein data.
+    get_cv: Calculate the coefficient of variation (CV) for each case in the given data.
+    get_abundance: Calculate the abundance of proteins across different groups.
+    filter_group: Filter a DataFrame based on specified groups. Helper function for run_ttest.
+    run_ttest: Run t-tests on specified groups in a DataFrame.
+    ... more to come
 
 Example:
     To use this module, import it and call functions from your code as follows:
 
-    import data_processing
-    processed_data = data_processing.function1(raw_data)
+    from scviz import utils
+    data = pd.read_csv('data.csv')
+    summarized_data = utils.protein_summary(data, variables=['region', 'amt'])
+    
 
 Todo:
     * For future implementation.
 """
+
 import pandas as pd
 import numpy as np
 import re
-
 from scipy.stats import ttest_ind
 from decimal import Decimal
-
+from upsetplot import from_contents
     
 def protein_summary(data, variables = ['region','amt']):
     """
@@ -133,8 +136,7 @@ def append_norm(data, norm_data_fp, norm_list_fp, norm_type = 'auto', export=Fal
         print("Normalization type not specified, "+norm_type+" type normalization data found in "+norm_data_fp)
     else:
         if not(any(norm_type in col for col in norm_data.columns)):
-            print("Norm type "+norm_type+" not found in "+norm_data_fp)
-            return
+            raise ValueError(f"Norm type {norm_type} not found in {norm_data_fp}")
 
     print("Processing "+norm_type+" type normalization data found in "+norm_data_fp)
 
@@ -189,8 +191,13 @@ def get_cv(data, cases, variables=['region', 'amt'], sharedPeptides = False):
     Returns:
     - cv_df: pandas DataFrame
         The DataFrame containing the CV values for each case, along with the corresponding variable values.
-    """
-    
+
+    Example:
+    >>> import scviz
+    >>> sample_types = [[i,j] for i in ['a','b','c'] for j in [1,2,3]]
+    >>> cv_df = scutils.get_cv(data, sample_types, variables=['letters','numbers'])
+        
+    """   
     # check if the len of each element in cases have the same length as len(variables), else throw error message
     if not all(len(cases[i]) == len(variables) for i in range(len(cases))):
         print("Error: length of each element in cases must be equal to length of variables")
@@ -241,7 +248,7 @@ def get_cv(data, cases, variables=['region', 'amt'], sharedPeptides = False):
 
     return cv_df
 
-def return_abundance(data,cases,names=None, abun_type='average', num_cat=2):
+def get_abundance(data,cases,names=None, abun_type='average'):
     if abun_type=='average':
         # create empty list to store abundance values
         abun_dict = {}
@@ -297,3 +304,89 @@ def return_abundance(data,cases,names=None, abun_type='average', num_cat=2):
             abun_dict[append_string] = [abundance, accession]
 
         return abun_dict
+    
+def filter_group(df, variables, values):
+    """
+    Filter a DataFrame based on specified groups. Helper function for run_ttest.
+
+    Args:
+        df (pandas.DataFrame): The DataFrame to filter.
+        variables (list): The variables to use for grouping.
+        values (list): The values to use for filtering.
+
+    Returns:
+        pandas.DataFrame: The filtered DataFrame.
+    """
+    return df[np.all([df[variables[i]] == values[i] for i in range(len(variables))], axis=0)]
+
+def run_ttest(df_files, test_variables, test_pairs, print_results=False):
+    """
+    Run t-tests on specified groups in a DataFrame.
+
+    Args:
+        df_files (DataFrame): The DataFrame containing the data.
+        test_variables (list): The variables to use for grouping.
+        test_pairs (list): The pairs of groups to compare.
+        print_results (bool, optional): Whether to print the t-test results. Defaults to False.
+
+    Returns:
+        list: A list of t-test parameters for each pair of groups.
+
+    Example usage:
+    >>> test_variables = ['region','amt']
+    >>> test_pairs = [[['cortex','sc'], ['cortex','20000']], 
+                      [['cortex','20000'], ['snpc','10000']], 
+                      [['mp_cellbody','6000'], ['mp_axon','6000']]]
+    >>> ttestparams = run_ttest(df_files, test_variables, test_pairs)
+    """
+    # check if every element in test_pairs has the same length as test_variables, else throw error message
+    if not all(len(test_pairs[i]) == len(test_variables) for i in range(len(test_pairs))):
+        print("Error: length of each element in test_pairs must be equal to length of test_variables")
+        return
+
+    ttest_params = []
+    for pair in test_pairs:
+        group1 = filter_group(df_files, test_variables, pair[0])
+        group2 = filter_group(df_files, test_variables, pair[1])
+
+        t_stat, p_val = ttest_ind(group1['total_count'], group2['total_count'])
+        if print_results:
+            print(f"For pair {pair[0]} and {pair[1]}:")
+            print(f"N1: {len(group1)}, N2: {len(group2)}")
+            print(f"t-statistic: {t_stat}, p-value: {p_val}") 
+        ttest_params.append([pair[0], pair[1], t_stat, p_val, len(group1), len(group2)])
+
+    ttest_df = pd.DataFrame(ttest_params, columns=['Group1', 'Group2', 'T-statistic', 'P-value', 'N1', 'N2'])
+    return ttest_df
+
+# NEED TO SOFTCODE THIS...
+def generate_upset_contents(type):
+    # SPECIFY AMOUNTS
+    if type == 'amt':
+        # SPECIFY ENZYMES
+        amt_contents = {}
+        amts = ['sc', '4sc', '10c', '25c','50c']
+
+        # for same enzyme, compare amounts
+        for grad_time in grad_times:
+            amt_contents[grad_time] = {}
+            for region in regions:
+                amt_contents[grad_time][region] = {}
+                for phenotype in phenotypes:
+                    df_occ = pd.DataFrame(columns=['Protein', 'sc', '4sc', '10c', '25c', '50c', 'Total'])
+                    for amt in amts:
+                        cols = [col for col in data.columns if amt in col and phenotype in col and grad_time in col and region in col and 'Abundance: F' in col]
+                        df_occ[amt] = data[cols].notnull().sum(axis=1)
+                    df_occ['Protein'] = data['Accession']
+                    df_occ['Total'] = df_occ[amts].sum(axis=1)
+                    df_occ[amts] = df_occ[amts].astype(bool)
+                    content = {amt: df_occ['Protein'][df_occ[amt]].values for amt in amts}
+                    amt_contents[grad_time][region][phenotype] = from_contents(content)
+        
+        return_contents = amt_contents
+
+    else:
+        print('Please specify either "amt" or "enzyme"')
+        return_contents = None
+
+    return return_contents
