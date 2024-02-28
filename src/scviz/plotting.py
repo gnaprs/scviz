@@ -217,7 +217,26 @@ def plot_pca_3d(ax, data, cases, cmap=plt.cm.get_cmap('viridis'), s=20, alpha=.8
 
     return ax, pca
 
-def plot_heatmap_annotated(ax, data, cases, genes, search='gene', cmap=plt.cm.seismic, norm_values=[4,5.5,7], linewidth=.5, annotate=True, square=False):
+def plot_heatmap(heatmap_data, cmap=plt.cm.seismic, norm_values=[4,5.5,7], linewidth=.5, annotate=True, square=False):
+    """
+    Plot annotated heatmap of protein abundance data.
+
+    Parameters:
+    heatmap_data (pandas.DataFrame): The data to plot.
+
+    Returns:
+    ax (matplotlib.axes.Axes): The axes with the plotted heatmap.
+    """
+    # if there are any columns that start with 'Matched in', remove them
+    heatmap_data = heatmap_data.loc[:,~heatmap_data.columns.str.contains('Matched in')]
+    abundance_data_log10 = np.log10(heatmap_data)
+
+    mid_norm = mcolors.TwoSlopeNorm(vmin=norm_values[0], vcenter=norm_values[1], vmax=norm_values[2])
+    ax = sns.heatmap(abundance_data_log10, yticklabels=True, square=square, annot=annotate, linewidth=linewidth, cmap=cmap, norm=mid_norm, cbar_kws={'label': 'Abundance (AU)'})
+
+    return ax
+
+def filter_and_plot_heatmap(ax, data, cases, genes, search='gene', cmap=plt.cm.seismic, norm_values=[4,5.5,7], linewidth=.5, annotate=True, square=False):
     """Plot an annotated heatmap of protein abundance data, searching from a specific gene list.
 
     Parameters:
@@ -237,11 +256,11 @@ def plot_heatmap_annotated(ax, data, cases, genes, search='gene', cmap=plt.cm.se
     data_clean (pandas.DataFrame): Extracted protein abundance data, along with matched search features and the respective genes they were matched to.
     
     Example:
-    >>> from scviz import utils as scutils
+    >>> from scviz import plotting as scplt
     >>> import pandas as pd
     >>> cases = [['head'],['heart'],['tail']]
     >>> fig, ax = plt.subplots(1,1)
-    >>> ax, heatmap_data = plot_heatmap_annotated(ax,data,cases,gene_list.Gene,search=["gene","pathway","description"],annotate=True,square=True,cmap='coolwarm', norm_values=[4,5,7])
+    >>> ax, heatmap_data = scplt.filter_and_plot_heatmap(ax,data,cases,gene_list.Gene,search=["gene","pathway","description"],annotate=True,square=True,cmap='coolwarm', norm_values=[4,5,7])
     """
 
     valid_search_terms = ['gene', 'protein', 'description', 'pathway', 'all']
@@ -307,7 +326,7 @@ def plot_heatmap_annotated(ax, data, cases, genes, search='gene', cmap=plt.cm.se
     mid_norm = mcolors.TwoSlopeNorm(vmin=norm_values[0], vcenter=norm_values[1], vmax=norm_values[2])
     ax = sns.heatmap(abundance_data_log10, yticklabels=True, square=square, annot=annotate, linewidth=linewidth, cmap=cmap, norm=mid_norm, cbar_kws={'label': 'Abundance (AU)'})
 
-    return ax, heatmap_data
+    return ax
 
 def plot_abundance(ax,data,cases,cmap=['Blues'],color=['blue'],s=20,alpha=0.2,calpha=1):
     # extract columns that contain the abundance data for the specified method and amount

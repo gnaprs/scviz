@@ -7,7 +7,7 @@ Use the package manager [pip](https://pip.pypa.io/en/stable/) to install scviz. 
 
 
 ## To-Do List
-1. Add more visualization features for volcano plots.
+1. Add more visualization features (volcano plot, umap)
 2. Extend support for GSEA and GO analysis
 3. Add more comprehensive documentation.
 4. Implement unit tests for better code reliability.

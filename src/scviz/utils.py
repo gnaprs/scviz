@@ -305,7 +305,7 @@ def get_abundance(data,cases,names=None, abun_type='average'):
 
         return abun_dict
     
-def filter_group(df, variables, values):
+def filter_by_group(df, variables, values):
     """
     Filter a DataFrame based on specified groups. Helper function for run_ttest.
 
@@ -346,8 +346,8 @@ def run_ttest(df_files, test_variables, test_pairs, print_results=False):
 
     ttest_params = []
     for pair in test_pairs:
-        group1 = filter_group(df_files, test_variables, pair[0])
-        group2 = filter_group(df_files, test_variables, pair[1])
+        group1 = filter_by_group(df_files, test_variables, pair[0])
+        group2 = filter_by_group(df_files, test_variables, pair[1])
 
         t_stat, p_val = ttest_ind(group1['total_count'], group2['total_count'])
         if print_results:
@@ -359,34 +359,116 @@ def run_ttest(df_files, test_variables, test_pairs, print_results=False):
     ttest_df = pd.DataFrame(ttest_params, columns=['Group1', 'Group2', 'T-statistic', 'P-value', 'N1', 'N2'])
     return ttest_df
 
+def filter_by_genelist(data, cases, genelist, search='gene'):
+    """Search and extract protein abundance data based on a specific gene list.
+
+    Parameters:
+    data (pandas.DataFrame): The protein abundance data.
+    cases (list): The cases to include in the search.
+    genelist (list): The genes to include in the search. Can also be accession numbers, descriptions, or pathways.
+    search (str): The search term to use. Can be 'gene', 'protein', 'description', 'pathway', or 'all'. Also accepts list of terms.
+
+    Returns:
+    heatmap_data (pandas.DataFrame): Extracted protein abundance data, along with matched search features and the respective genes they were matched to.
+    abundance_data_log10 (pandas.DataFrame): Log10 transformed abundance data.
+
+    Example:
+    >>> from scviz import utils as scutils
+    >>> import pandas as pd
+    >>> cases = [['head'],['heart'],['tail']]
+    >>> heatmap_data, abundance_data_log10 = scutils.search_data(data, cases, gene_list.Gene, search=["gene","pathway","description"])
+    """
+
+    valid_search_terms = ['gene', 'protein', 'description', 'pathway', 'all']
+
+    # If search is a list, remove duplicates and check if it includes all terms
+    if isinstance(search, list):
+        search = list(set(search))  # Remove duplicates
+        if set(valid_search_terms[:-1]).issubset(set(search)):  # Check if it includes all terms
+            print('All search terms included. Using search term \'all\'.')
+            search = 'all'
+        elif not all(term in valid_search_terms for term in search):  # Check if all terms are valid
+            raise ValueError(f'Invalid search term. Please use one of the following: {valid_search_terms}')
+    # If search is a single term, check if it's valid
+    elif search not in valid_search_terms:
+        raise ValueError(f'Invalid search term. Please use one of the following: {valid_search_terms}')
+
+    # ------------------------------------------------------------------------------------------------
+    data = data.copy()
+
+    for case in cases:
+        vars = ['Abundance: '] + case
+        append_string = '_'.join(vars[1:])
+        cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
+        data['Average: '+append_string] = data[cols].mean(axis=1, skipna=True)
+        data['Stdev: '+append_string] = data[cols].std(axis=1, skipna=True)
+
+    case_col = [data.columns.get_loc('Average: '+'_'.join(case)) for case in cases]
+
+    search_to_column = {
+        'gene': 'Gene Symbol',
+        'protein': 'Accession',
+        'description': 'Description',
+        'pathway': 'WikiPathways',
+        'all': ['Gene Symbol', 'Accession', 'Description', 'WikiPathways']
+    }
+
+    # search can be a single term or a list of terms
+    columns = [search_to_column[term] for term in (search if isinstance(search, list) else [search]) if term != 'all']
+    if 'all' in (search if isinstance(search, list) else [search]):
+        columns.extend(search_to_column['all'])
+
+    for column in columns:
+        data[f'Matched in {column}'] = data[column].apply(lambda x: [])
+
+        for gene in genelist:
+            regex = rf"\b{re.escape(gene)}\b"
+            data[f'Matched in {column}'] = data.apply(lambda row: row[f'Matched in {column}'] + [gene] if isinstance(row[column], str) and re.search(regex, row[column], re.IGNORECASE) else row[f'Matched in {column}'], axis=1)
+
+    data = data[data.filter(regex='Matched').apply(any, axis=1)]
+    data.set_index('Gene Symbol', inplace=True)
+
+    if data.shape[0] == 0:
+        raise ValueError('No data to plot. Please check the gene list and the search parameters.')
+
+    num_new_cols = len(search) if isinstance(search, list) else (4 if search == 'all' else 1)
+    case_col.extend(range(len(data.columns) - (num_new_cols-1), len(data.columns) + 1))
+    heatmap_data = data.iloc[:,[i-1 for i in case_col]]
+    heatmap_data = heatmap_data.dropna(how='all')
+
+    abundance_data = heatmap_data.iloc[:, :-num_new_cols]
+    abundance_data_log10 = np.log10(abundance_data)
+
+    return heatmap_data, abundance_data_log10
+
 # NEED TO SOFTCODE THIS...
-# def generate_upset_contents(type):
-#     # SPECIFY AMOUNTS
-#     if type == 'amt':
-#         # SPECIFY ENZYMES
-#         amt_contents = {}
-#         amts = ['sc', '4sc', '10c', '25c','50c']
+def get_upset_contents(type):
+    # SPECIFY AMOUNTS
+    if type == 'amt':
+        # SPECIFY ENZYMES
+        amt_contents = {}
+        amts = ['sc', '4sc', '10c', '25c','50c']
 
-#         # for same enzyme, compare amounts
-#         for grad_time in grad_times:
-#             amt_contents[grad_time] = {}
-#             for region in regions:
-#                 amt_contents[grad_time][region] = {}
-#                 for phenotype in phenotypes:
-#                     df_occ = pd.DataFrame(columns=['Protein', 'sc', '4sc', '10c', '25c', '50c', 'Total'])
-#                     for amt in amts:
-#                         cols = [col for col in data.columns if amt in col and phenotype in col and grad_time in col and region in col and 'Abundance: F' in col]
-#                         df_occ[amt] = data[cols].notnull().sum(axis=1)
-#                     df_occ['Protein'] = data['Accession']
-#                     df_occ['Total'] = df_occ[amts].sum(axis=1)
-#                     df_occ[amts] = df_occ[amts].astype(bool)
-#                     content = {amt: df_occ['Protein'][df_occ[amt]].values for amt in amts}
-#                     amt_contents[grad_time][region][phenotype] = from_contents(content)
+        # for same enzyme, compare amounts
+        for grad_time in grad_times:
+            amt_contents[grad_time] = {}
+            for region in regions:
+                amt_contents[grad_time][region] = {}
+                for phenotype in phenotypes:
+                    df_occ = pd.DataFrame(columns=['Protein', 'sc', '4sc', '10c', '25c', '50c', 'Total'])
+                    for amt in amts:
+                        cols = [col for col in data.columns if amt in col and phenotype in col and grad_time in col and region in col and 'Abundance: F' in col]
+                        df_occ[amt] = data[cols].notnull().sum(axis=1)
+                    df_occ['Protein'] = data['Accession']
+                    df_occ['Total'] = df_occ[amts].sum(axis=1)
+                    df_occ[amts] = df_occ[amts].astype(bool)
+                    content = {amt: df_occ['Protein'][df_occ[amt]].values for amt in amts}
+                    amt_contents[grad_time][region][phenotype] = from_contents(content)
         
-#         return_contents = amt_contents
+        return_contents = amt_contents
 
-#     else:
-#         print('Please specify either "amt" or "enzyme"')
-#         return_contents = None
+    else:
+        print('Please specify either "amt" or "enzyme"')
+        return_contents = None
 
-#     return return_contents
+    return return_contents
