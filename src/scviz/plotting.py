@@ -225,7 +225,7 @@ def plot_heatmap_annotated(ax, data, cases, genes, search='gene', cmap=plt.cm.se
     data (pandas.DataFrame): The protein abundance data.
     cases (list): The cases to include in the heatmap.
     genes (list): The genes to include in the heatmap. Can also be accession numbers, descriptions, or pathways.
-    search (str): The search term to use. Can be 'gene', 'protein', 'description', 'pathway', or 'all'.
+    search (str): The search term to use. Can be 'gene', 'protein', 'description', 'pathway', or 'all'. Also accepts list of terms.
     cmap (matplotlib.colors.Colormap): The colormap to use for the heatmap.
     norm_values (list): The low, mid, and high values used to set colorbar scale. Can be assymetric.
     linewidth (float): Plot linewidth.
@@ -235,11 +235,30 @@ def plot_heatmap_annotated(ax, data, cases, genes, search='gene', cmap=plt.cm.se
     Returns:
     ax (matplotlib.axes.Axes): The axes with the plotted heatmap.
     data_clean (pandas.DataFrame): Extracted protein abundance data, along with matched search features and the respective genes they were matched to.
+    
+    Example:
+    >>> from scviz import utils as scutils
+    >>> import pandas as pd
+    >>> cases = [['head'],['heart'],['tail']]
+    >>> fig, ax = plt.subplots(1,1)
+    >>> ax, heatmap_data = plot_heatmap_annotated(ax,data,cases,gene_list.Gene,search=["gene","pathway","description"],annotate=True,square=True,cmap='coolwarm', norm_values=[4,5,7])
     """
+
     valid_search_terms = ['gene', 'protein', 'description', 'pathway', 'all']
-    if search not in valid_search_terms:
+
+    # If search is a list, remove duplicates and check if it includes all terms
+    if isinstance(search, list):
+        search = list(set(search))  # Remove duplicates
+        if set(valid_search_terms[:-1]).issubset(set(search)):  # Check if it includes all terms
+            print('All search terms included. Using search term \'all\'.')
+            search = 'all'
+        elif not all(term in valid_search_terms for term in search):  # Check if all terms are valid
+            raise ValueError(f'Invalid search term. Please use one of the following: {valid_search_terms}')
+    # If search is a single term, check if it's valid
+    elif search not in valid_search_terms:
         raise ValueError(f'Invalid search term. Please use one of the following: {valid_search_terms}')
 
+    # ------------------------------------------------------------------------------------------------
     data = data.copy()
 
     for case in cases:
@@ -259,9 +278,10 @@ def plot_heatmap_annotated(ax, data, cases, genes, search='gene', cmap=plt.cm.se
         'all': ['Gene Symbol', 'Accession', 'Description', 'WikiPathways']
     }
 
-    columns = search_to_column[search] if search != 'all' else search_to_column['all']
-    if not isinstance(columns, list):
-        columns = [columns]
+    # search can be a single term or a list of terms
+    columns = [search_to_column[term] for term in (search if isinstance(search, list) else [search]) if term != 'all']
+    if 'all' in (search if isinstance(search, list) else [search]):
+        columns.extend(search_to_column['all'])
 
     for column in columns:
         data[f'Matched in {column}'] = data[column].apply(lambda x: [])
@@ -276,7 +296,7 @@ def plot_heatmap_annotated(ax, data, cases, genes, search='gene', cmap=plt.cm.se
     if data.shape[0] == 0:
         raise ValueError('No data to plot. Please check the gene list and the search parameters.')
 
-    num_new_cols = 4 if search == 'all' else 1
+    num_new_cols = len(search) if isinstance(search, list) else (4 if search == 'all' else 1)
     case_col.extend(range(len(data.columns) - (num_new_cols-1), len(data.columns) + 1))
     heatmap_data = data.iloc[:,[i-1 for i in case_col]]
     heatmap_data = heatmap_data.dropna(how='all')
