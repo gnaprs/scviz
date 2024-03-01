@@ -5,3 +5,6 @@ seaborn
 upsetplot
 scikit-learn
 scipy
+
+[pytest]
+openpyxl

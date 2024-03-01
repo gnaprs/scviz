@@ -22,3 +22,5 @@ def test_append_norm_fail():
     data = pd.read_excel('tests/data.xlsx', sheet_name='Proteins')
     with pytest.raises(ValueError):
         scutils.append_norm(data,'tests/data_norm.csv','tests/data_fn.csv',norm_type='linear')
+
+# add test for filter_by_genelist

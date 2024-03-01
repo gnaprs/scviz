@@ -8,6 +8,8 @@ Functions:
     get_abundance: Calculate the abundance of proteins across different groups.
     filter_group: Filter a DataFrame based on specified groups. Helper function for run_ttest.
     run_ttest: Run t-tests on specified groups in a DataFrame.
+    filter_by_genelist: Search and extract protein abundance data based on a specific gene list.
+    get_upset_contents: Get the contents for an UpSet plot based on the specified case list.
     ... more to come
 
 Example:
@@ -29,7 +31,7 @@ from scipy.stats import ttest_ind
 from decimal import Decimal
 from upsetplot import from_contents
     
-def protein_summary(data, variables = ['region','amt']):
+def get_protein_summary(data, variables = ['region','amt']):
     """
     Import protein data from an Excel file and summarize characteristics about each sample and sample groups.
 
@@ -41,22 +43,23 @@ def protein_summary(data, variables = ['region','amt']):
         variables (list): List of variables to extract from the column names. Default is ['region', 'amt'].
 
     Returns:
-        pandas.DataFrame: A new DataFrame with the extracted data.
+        df_files (pandas.DataFrame): A new DataFrame with the extracted data.
+        protein_properties (pandas.DataFrame): A DataFrame containing the properties of each protein.
+
 
     Raises:
         None
 
     Example:
         >>> import scviz
-        >>> summarized_data = scviz.data_utils.protein_summary(df, variables=['region', 'amt'])
+        >>> summarized_data = scviz.data_utils.get_protein_summary(df, variables=['region', 'amt'])
     """
 
     df_prot_data = data.loc[~data['Description'].str.contains('CRAP')].copy()
 
     abundance_cols = [col for col in df_prot_data.columns if 'Abundance: ' in col]
     properties_endcol = df_prot_data.columns.get_loc("# Razor Peptides")
-    protein_properties = df_prot_data.iloc[:, 1:properties_endcol]
-    # note that accession properties (biological processes, cellular components, molecular function) are columns ?-? respectively
+    protein_properties = df_prot_data.iloc[:, 1:properties_endcol] 
 
     # Extract the file name, and relevant sample typing from each column name
     file_names = [col.split(':')[1].strip() for col in abundance_cols]
@@ -99,9 +102,9 @@ def protein_summary(data, variables = ['region','amt']):
 
     df_files = df_files[['file_name'] + variables + ['replicate', 'df_quant', 'high_count', 'mbr_count', 'total_count', 'pep1_count', 'pep2_count', 'pep_count']]
 
-    return df_files
+    return df_files, protein_properties
 
-def append_norm(data, norm_data_fp, norm_list_fp, norm_type = 'auto', export=False):
+def get_protein_norm(data, norm_data_fp, norm_list_fp, norm_type = 'auto', export=False):
     """
     Append normalized protein data to the original protein data.
 
@@ -122,7 +125,7 @@ def append_norm(data, norm_data_fp, norm_list_fp, norm_type = 'auto', export=Fal
 
     Example:
         >>> import scviz
-        >>> data_norm = scviz.utils.append_norm(data, norm_data_fp, norm_list_fp, norm_type='linear', export=True)
+        >>> data_norm = scviz.utils.get_protein_norm(data, norm_data_fp, norm_list_fp, norm_type='linear', export=True)
     """
     
     norm_list = pd.read_csv(norm_list_fp)
@@ -178,26 +181,25 @@ def get_cv(data, cases, variables=['region', 'amt'], sharedPeptides = False):
     """
     Calculate the coefficient of variation (CV) for each case in the given data.
 
-    Parameters:
-    - data: pandas DataFrame
-        The input data containing the CV values.
-    - cases: list of lists
-        The cases to calculate CV for. Each case is a list of values corresponding to the variables.
-    - variables: list, optional
-        The variables to consider when calculating CV. Default is ['region', 'amt'].
-    - sharedPeptides: bool, optional
-        Whether to calculate CV for only shared peptides identified across all cases. Default is False.
+    This function calculates the CV for each case in the given data. The cases and variables to consider when calculating CV can be specified. There is also an option to calculate CV for only shared peptides identified across all cases.
+
+    Args:
+        data (pandas.DataFrame): The input data containing the CV values.
+        cases (list of lists): The cases to calculate CV for. Each case is a list of values corresponding to the variables.
+        variables (list, optional): The variables to consider when calculating CV. Default is ['region', 'amt'].
+        sharedPeptides (bool, optional): Whether to calculate CV for only shared peptides identified across all cases. Default is False.
 
     Returns:
-    - cv_df: pandas DataFrame
-        The DataFrame containing the CV values for each case, along with the corresponding variable values.
+        cv_df (pandas.DataFrame): The DataFrame containing the CV values for each case, along with the corresponding variable values.
+
+    Raises:
+        None
 
     Example:
-    >>> import scviz
-    >>> sample_types = [[i,j] for i in ['a','b','c'] for j in [1,2,3]]
-    >>> cv_df = scutils.get_cv(data, sample_types, variables=['letters','numbers'])
-        
-    """   
+        >>> import scviz
+        >>> sample_types = [[i,j] for i in ['a','b','c'] for j in [1,2,3]]
+        >>> cv_df = scviz.utils.get_cv(data, sample_types, variables=['letters','numbers'])
+    """
     # check if the len of each element in cases have the same length as len(variables), else throw error message
     if not all(len(cases[i]) == len(variables) for i in range(len(cases))):
         print("Error: length of each element in cases must be equal to length of variables")
@@ -207,7 +209,9 @@ def get_cv(data, cases, variables=['region', 'amt'], sharedPeptides = False):
     cv_df = pd.DataFrame()
     data = data.copy()
 
+    #! TODO: consider calculating CVs from scratch instead of using the CV values in the data
     if sharedPeptides:
+        # NEED TO IMPLEMENT THIS
         all_cvs = []
         for j in range(len(cases)):
             vars = ['CV'] + cases[j]
@@ -225,9 +229,6 @@ def get_cv(data, cases, variables=['region', 'amt'], sharedPeptides = False):
         cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
         nsample = len(cols)
 
-        print(vars)
-        print(cols)
-
         # merge all CV columns into one column
         X = np.zeros((nsample*len(data)))
         for i in range(nsample):
@@ -240,20 +241,35 @@ def get_cv(data, cases, variables=['region', 'amt'], sharedPeptides = False):
         cur_df['cv'] = X
         for i in range(len(variables)):
             cur_df[variables[i]] = cases[j][i]
-        
-        print(cur_df)
 
         # append cur_df to cv_df
         cv_df = pd.concat([cv_df, cur_df], ignore_index=True)
 
     return cv_df
 
-def get_abundance(data,cases,names=None, abun_type='average'):
+def get_abundance(data, cases, names=None, abun_type='average'):
+    """
+    Returns the abundance of proteins in the given data.
+
+    This function calculates the abundance of proteins for specified cases in the given data. The abundance can be calculated as 'average' or 'raw'. Optionally, the data can be filtered by protein names.
+
+    Args:
+        data (pandas.DataFrame): The protein data.
+        cases (list of lists): The cases to return abundances for.
+        names (list, optional): List of protein names to filter the data. Default is None.
+        abun_type (str, optional): Type of abundance calculation to perform ('average' or 'raw'). Default is 'average'.
+
+    Returns:
+        abun_dict (dict): Dictionary containing the abundance values and ranks for each case.
+
+    Raises:
+        None
+    """
     if abun_type=='average':
         # create empty list to store abundance values
         abun_dict = {}
         data = data.copy()
-        # extract columns that contain the abundance data for the specified method and amount
+        # extract columns that contain the abundance data for the specified case
         for j in range(len(cases)):
             vars = ['Abundance: '] + cases[j]
 
@@ -360,23 +376,29 @@ def run_ttest(df_files, test_variables, test_pairs, print_results=False):
     return ttest_df
 
 def filter_by_genelist(data, cases, genelist, search='gene'):
-    """Search and extract protein abundance data based on a specific gene list.
+    """
+    Search and extract protein abundance data based on a specific gene list.
 
-    Parameters:
-    data (pandas.DataFrame): The protein abundance data.
-    cases (list): The cases to include in the search.
-    genelist (list): The genes to include in the search. Can also be accession numbers, descriptions, or pathways.
-    search (str): The search term to use. Can be 'gene', 'protein', 'description', 'pathway', or 'all'. Also accepts list of terms.
+    This function searches and extracts protein abundance data for specified cases based on a specific gene list. The search can be performed on 'gene', 'protein', 'description', 'pathway', or 'all'. It also accepts a list of terms.
+
+    Args:
+        data (pandas.DataFrame): The protein abundance data.
+        cases (list): The cases to include in the search.
+        genelist (list): The genes to include in the search. Can also be accession numbers, descriptions, or pathways.
+        search (str): The search term to use. Can be 'gene', 'protein', 'description', 'pathway', or 'all'. Also accepts list of terms.
 
     Returns:
-    heatmap_data (pandas.DataFrame): Extracted protein abundance data, along with matched search features and the respective genes they were matched to.
-    abundance_data_log10 (pandas.DataFrame): Log10 transformed abundance data.
+        heatmap_data (pandas.DataFrame): Extracted protein abundance data, along with matched search features and the respective genes they were matched to.
+        combined_abundance_data (pandas.DataFrame): Protein abundance data per sample for matching genes.
+
+    Raises:
+        ValueError: If the search term is not valid. Valid search terms are 'gene', 'protein', 'description', 'pathway', 'all', or a list of these.
 
     Example:
-    >>> from scviz import utils as scutils
-    >>> import pandas as pd
-    >>> cases = [['head'],['heart'],['tail']]
-    >>> heatmap_data, abundance_data_log10 = scutils.search_data(data, cases, gene_list.Gene, search=["gene","pathway","description"])
+        >>> from scviz import utils as scutils
+        >>> import pandas as pd
+        >>> cases = [['head'],['heart'],['tail']]
+        >>> heatmap_data, combined_abundance_data = scutils.filter_by_genelist(data, cases, gene_list.Gene, search=["gene","pathway","description"])
     """
 
     valid_search_terms = ['gene', 'protein', 'description', 'pathway', 'all']
@@ -394,6 +416,7 @@ def filter_by_genelist(data, cases, genelist, search='gene'):
         raise ValueError(f'Invalid search term. Please use one of the following: {valid_search_terms}')
 
     # ------------------------------------------------------------------------------------------------
+    data_abundance = data.copy()
     data = data.copy()
 
     for case in cases:
@@ -436,13 +459,23 @@ def filter_by_genelist(data, cases, genelist, search='gene'):
     heatmap_data = data.iloc[:,[i-1 for i in case_col]]
     heatmap_data = heatmap_data.dropna(how='all')
 
-    abundance_data = heatmap_data.iloc[:, :-num_new_cols]
-    abundance_data_log10 = np.log10(abundance_data)
+    data_abundance.set_index('Gene Symbol', inplace=True)
+    data_abundance = data_abundance.loc[data.index]
+    combined_abundance_data = pd.DataFrame()
 
-    return heatmap_data, abundance_data_log10
+    for case in cases:
+        vars = ['Abundance: '] + case
+        cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
+        combined_abundance_data = pd.concat([combined_abundance_data, data_abundance[cols]], axis=1)
+
+    return heatmap_data, combined_abundance_data
 
 # NEED TO SOFTCODE THIS...
 def get_upset_contents(type):
+    ## start by making user specify the fixed variables and dependent variables (e.g. with assign values for fixed)
+    ## make use dictionary? e.g. fixed = {'grad_time': ['0', '1', '2'], 'region': ['cortex', 'snpc'], 'phenotype': ['sc', '4sc', '10c', '25c', '50c']}
+    ## if we can extract out all data for each fixed variable, then we can use the from_contents function to make the upset plot
+
     # SPECIFY AMOUNTS
     if type == 'amt':
         # SPECIFY ENZYMES
@@ -472,3 +505,5 @@ def get_upset_contents(type):
         return_contents = None
 
     return return_contents
+
+# TODO: add function to quickly drop/subset from data?
