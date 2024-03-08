@@ -8,7 +8,7 @@ Functions:
     get_abundance: Calculate the abundance of proteins across different groups.
     filter_group: Filter a DataFrame based on specified groups. Helper function for run_ttest.
     run_ttest: Run t-tests on specified groups in a DataFrame.
-    filter_by_genelist: Search and extract protein abundance data based on a specific gene list.
+    get_abundance_query: Search and extract protein abundance data based on a specific list searching for accession, protein, description, pathway, or all.
     get_upset_contents: Get the contents for an UpSet plot based on the specified case list.
     ... more to come
 
@@ -21,9 +21,14 @@ Example:
     
 
 Todo:
-    * For future implementation.
+    * Add corrections for differential expression.
+    * Add more examples for each function.
+    * Add functions to get GO enrichment and GSEA analysis (see GOATOOLS or STAGES).
 """
 
+from operator import index
+from os import access
+from nbformat import convert
 import pandas as pd
 import numpy as np
 import re
@@ -210,20 +215,6 @@ def get_cv(data, cases, variables=['region', 'amt'], sharedPeptides = False):
     data = data.copy()
 
     #! TODO: consider calculating CVs from scratch instead of using the CV values in the data
-    if sharedPeptides:
-        # NEED TO IMPLEMENT THIS
-        all_cvs = []
-        for j in range(len(cases)):
-            vars = ['CV'] + cases[j]
-            cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-            for i in range(len(cols)):
-                all_cvs.append(data[cols[i]].values)
-
-        # find the rows that contain one or more NaNs
-        nan_rows = data[data.isnull().any(axis=1)]
-        # remove the rows that contain one or more NaNs
-        data = data.drop(nan_rows.index)
-
     for j in range(len(cases)):
         vars = ['CV'] + cases[j]
         cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
@@ -231,23 +222,30 @@ def get_cv(data, cases, variables=['region', 'amt'], sharedPeptides = False):
 
         # merge all CV columns into one column
         X = np.zeros((nsample*len(data)))
+        accessions = []
         for i in range(nsample):
             X[i*len(data):(i+1)*len(data)] = data[cols[i]].values
+            accessions=accessions+data['Accession'].values.tolist()
         # remove nans
+        accessions = [accessions[i] for i in range(len(accessions)) if not np.isnan(X[i])]
         X = X[~np.isnan(X)]/100
 
         # add X to cur_df, and append case info of enzyme, method and amt to each row
         cur_df = pd.DataFrame()
         cur_df['cv'] = X
+        cur_df['accession'] = accessions
         for i in range(len(variables)):
             cur_df[variables[i]] = cases[j][i]
 
         # append cur_df to cv_df
         cv_df = pd.concat([cv_df, cur_df], ignore_index=True)
 
+        if sharedPeptides:
+            cv_df = cv_df[cv_df.duplicated(subset='accession', keep=False)]
+
     return cv_df
 
-def get_abundance(data, cases, names=None, abun_type='average'):
+def get_abundance(data, cases, prot_list=None, list_type='accession',abun_type='average'):
     """
     Returns the abundance of proteins in the given data.
 
@@ -256,8 +254,8 @@ def get_abundance(data, cases, names=None, abun_type='average'):
     Args:
         data (pandas.DataFrame): The protein data.
         cases (list of lists): The cases to return abundances for.
-        names (list, optional): List of protein names to filter the data. Default is None.
-        abun_type (str, optional): Type of abundance calculation to perform ('average' or 'raw'). Default is 'average'.
+        prot_list (list, optional): List of accession names to filter the data to just specified proteins. Default is None.
+        abun_type (str, optional): Type of abundance calculation to perform ('average' or 'raw'). Default is 'average'. When raw, function returns list of [abundance, accession].
 
     Returns:
         abun_dict (dict): Dictionary containing the abundance values and ranks for each case.
@@ -265,6 +263,13 @@ def get_abundance(data, cases, names=None, abun_type='average'):
     Raises:
         None
     """
+    if list_type == 'accession':
+        index = 'Accession'
+    elif list_type == 'gene':
+        index = 'Gene Symbol'
+    else:
+        raise ValueError('Invalid list type. Please use either "accession" or "gene".')
+
     if abun_type=='average':
         # create empty list to store abundance values
         abun_dict = {}
@@ -273,28 +278,27 @@ def get_abundance(data, cases, names=None, abun_type='average'):
         for j in range(len(cases)):
             vars = ['Abundance: '] + cases[j]
 
-            if names is not None:
-                # extract out rows where Accession is in names
-                data = data[data['Accession'].isin(names)]
+            if prot_list is not None:
+                # extract out rows where list is in prot_list
+                data = data[data[index].isin(prot_list)]
 
             cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
             # concat elements 1 till end of vars into one string
             append_string = '_'.join(vars[1:])
-            
+
             # average abundance of proteins across these columns, ignoring NaN values
             data['Average: '+append_string] = data[cols].mean(axis=1, skipna=True)
             data['Stdev: '+append_string] = data[cols].std(axis=1, skipna=True)
 
             # sort by average abundance
             data.sort_values(by=['Average: '+append_string], ascending=False, inplace=True)
-            abundance=data['Average: '+append_string]
-            accession=data['Accession']
-
-            # add rank number
-            rank=data['Rank: '+append_string] = np.arange(1, len(data)+1)
-
-            # make dictionary for abundance and rank
-            abun_dict[append_string] = [abundance, rank, accession]
+            abundance = (data['Average: '+append_string]
+                        .rename('Average')
+                        .to_frame()
+                        .assign(Rank=np.arange(1, len(data)+1)))
+            
+            abundance.set_index(data['Accession'], inplace=True)
+            abun_dict[append_string] = abundance
         return abun_dict
 
     if abun_type == 'raw':
@@ -305,19 +309,19 @@ def get_abundance(data, cases, names=None, abun_type='average'):
         for j in range(len(cases)):
             vars = ['Abundance: '] + cases[j]
 
-            if names is not None:
-                # extract out rows where Accession is in names
-                data = data[data['Accession'].isin(names)]
+            if prot_list is not None:
+                # extract out rows where Accession is in list
+                data = data[data[index].isin(prot_list)]
 
             cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
             # concat elements 1 till end of vars into one string
             append_string = '_'.join(vars[1:])
             
             abundance = data[cols]
-            accession=data['Accession']
+            abundance.index = data['Accession']
 
             # make dictionary for abundance and rank
-            abun_dict[append_string] = [abundance, accession]
+            abun_dict[append_string] = abundance
 
         return abun_dict
     
@@ -335,25 +339,26 @@ def filter_by_group(df, variables, values):
     """
     return df[np.all([df[variables[i]] == values[i] for i in range(len(variables))], axis=0)]
 
-def run_ttest(df_files, test_variables, test_pairs, print_results=False):
+def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_results=False, test_variable='total_count'):
     """
-    Run t-tests on specified groups in a DataFrame.
+    Run t-tests on specified groups in a DataFrame returned from get_protein_summary.
 
     Args:
-        df_files (DataFrame): The DataFrame containing the data.
+        protein_summary_df (pd.DataFrame): The DataFrame returned from get_protein_summary.
         test_variables (list): The variables to use for grouping.
         test_pairs (list): The pairs of groups to compare.
         print_results (bool, optional): Whether to print the t-test results. Defaults to False.
+        test_variable (str, optional): The variable to test for in the t-test. Acceptable variables are any of the columns in df_files. Defaults to 'total_count'.
 
     Returns:
-        list: A list of t-test parameters for each pair of groups.
+        list: A list of t-test results for each pair of groups. Each result is a tuple containing the t-statistic and the p-value.
 
     Example usage:
-    >>> test_variables = ['region','amt']
-    >>> test_pairs = [[['cortex','sc'], ['cortex','20000']], 
-                      [['cortex','20000'], ['snpc','10000']], 
-                      [['mp_cellbody','6000'], ['mp_axon','6000']]]
-    >>> ttestparams = run_ttest(df_files, test_variables, test_pairs)
+        >>> test_variables = ['region','amt']
+        >>> test_pairs = [[['cortex','sc'], ['cortex','20000']], 
+                        [['cortex','20000'], ['snpc','10000']], 
+                        [['mp_cellbody','6000'], ['mp_axon','6000']]]
+        >>> ttestparams = run_summary_ttest(protein_summary_df, test_variables, test_pairs, test_variable='total_count')
     """
     # check if every element in test_pairs has the same length as test_variables, else throw error message
     if not all(len(test_pairs[i]) == len(test_variables) for i in range(len(test_pairs))):
@@ -362,12 +367,12 @@ def run_ttest(df_files, test_variables, test_pairs, print_results=False):
 
     ttest_params = []
     for pair in test_pairs:
-        group1 = filter_by_group(df_files, test_variables, pair[0])
-        group2 = filter_by_group(df_files, test_variables, pair[1])
+        group1 = filter_by_group(protein_summary_df, test_variables, pair[0])
+        group2 = filter_by_group(protein_summary_df, test_variables, pair[1])
 
-        t_stat, p_val = ttest_ind(group1['total_count'], group2['total_count'])
+        t_stat, p_val = ttest_ind(group1[test_variable], group2[test_variable])
         if print_results:
-            print(f"For pair {pair[0]} and {pair[1]}:")
+            print(f"Testing for {test_variable} between pair {pair[0]} and {pair[1]}:")
             print(f"N1: {len(group1)}, N2: {len(group2)}")
             print(f"t-statistic: {t_stat}, p-value: {p_val}") 
         ttest_params.append([pair[0], pair[1], t_stat, p_val, len(group1), len(group2)])
@@ -375,7 +380,7 @@ def run_ttest(df_files, test_variables, test_pairs, print_results=False):
     ttest_df = pd.DataFrame(ttest_params, columns=['Group1', 'Group2', 'T-statistic', 'P-value', 'N1', 'N2'])
     return ttest_df
 
-def filter_by_genelist(data, cases, genelist, search='gene'):
+def get_abundance_query(data, cases, genelist, search='gene'):
     """
     Search and extract protein abundance data based on a specific gene list.
 
@@ -388,7 +393,7 @@ def filter_by_genelist(data, cases, genelist, search='gene'):
         search (str): The search term to use. Can be 'gene', 'protein', 'description', 'pathway', or 'all'. Also accepts list of terms.
 
     Returns:
-        heatmap_data (pandas.DataFrame): Extracted protein abundance data, along with matched search features and the respective genes they were matched to.
+        matched_features_data (pandas.DataFrame): Extracted protein abundance data, along with matched search features and the respective genes they were matched to.
         combined_abundance_data (pandas.DataFrame): Protein abundance data per sample for matching genes.
 
     Raises:
@@ -398,7 +403,7 @@ def filter_by_genelist(data, cases, genelist, search='gene'):
         >>> from scviz import utils as scutils
         >>> import pandas as pd
         >>> cases = [['head'],['heart'],['tail']]
-        >>> heatmap_data, combined_abundance_data = scutils.filter_by_genelist(data, cases, gene_list.Gene, search=["gene","pathway","description"])
+        >>> matched_features, combined_abundance = scutils.get_abundance_query(data, cases, gene_list.Gene, search=["gene","pathway","description"])
     """
 
     valid_search_terms = ['gene', 'protein', 'description', 'pathway', 'all']
@@ -456,8 +461,8 @@ def filter_by_genelist(data, cases, genelist, search='gene'):
 
     num_new_cols = len(search) if isinstance(search, list) else (4 if search == 'all' else 1)
     case_col.extend(range(len(data.columns) - (num_new_cols-1), len(data.columns) + 1))
-    heatmap_data = data.iloc[:,[i-1 for i in case_col]]
-    heatmap_data = heatmap_data.dropna(how='all')
+    matched_features_data = data.iloc[:,[i-1 for i in case_col]]
+    matched_features_data = matched_features_data.dropna(how='all')
 
     data_abundance.set_index('Gene Symbol', inplace=True)
     data_abundance = data_abundance.loc[data.index]
@@ -468,7 +473,87 @@ def filter_by_genelist(data, cases, genelist, search='gene'):
         cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
         combined_abundance_data = pd.concat([combined_abundance_data, data_abundance[cols]], axis=1)
 
-    return heatmap_data, combined_abundance_data
+    return matched_features_data, combined_abundance_data
+
+def get_protein_DE(data, cases, method='ttest'):
+    """
+    Calculate differential expression (DE) of proteins across different groups.
+
+    This function calculates the DE of proteins across different groups. The cases to compare can be specified, and the method to use for DE can be specified as well.
+
+    Args:
+        data (pandas.DataFrame): The protein data.
+        cases (list): The cases to compare.
+        method (str, optional): The method to use for DE. Default is 'ttest'. Other methods will be added in the future.
+
+    Returns:
+        df_stats (pandas.DataFrame): A DataFrame containing the DE statistics for each protein.
+
+    Raises:
+        ValueError: If the number of cases is not exactly two.
+
+    Example:
+        >>> from scviz import utils as scutils
+        >>> stats_sc_20000 = scutils.get_protein_DE(data, [['cortex','sc'], ['cortex','20000']])
+    """
+
+    # this is for case 1/case 2 comparison!
+    # make sure only two cases are given
+    if len(cases) != 2:
+        raise ValueError('Please provide exactly two cases to compare.')
+
+    dict_cases_raw = get_abundance(data, cases, abun_type='raw')
+
+    n1 = dict_cases_raw[list(dict_cases_raw.keys())[0]].shape[1]
+    n2 = dict_cases_raw[list(dict_cases_raw.keys())[1]].shape[1]
+
+    aligned_case1, aligned_case2 = dict_cases_raw[list(dict_cases_raw.keys())[0]].align(dict_cases_raw[list(dict_cases_raw.keys())[1]])
+
+    group1_string = '_'.join(cases[0])
+    group2_string = '_'.join(cases[1])
+
+    # create a dataframe for stats
+    df_stats = pd.DataFrame(index=aligned_case1.index, columns=[group1_string,group2_string,'log2fc', 'p_value', 't_statistic'])
+    df_stats[group1_string] = aligned_case1.mean(axis=1)
+    df_stats[group2_string] = aligned_case2.mean(axis=1)
+    df_stats['log2fc'] = np.log2(np.divide(aligned_case1.mean(axis=1), aligned_case2.mean(axis=1)))
+
+    # do t-test for each protein
+    for row in range(0, len(aligned_case1)):
+        t_test = ttest_ind(aligned_case1.iloc[row,0:n1-1].dropna().values, aligned_case2.iloc[row,0:n2-1].dropna().values)
+        df_stats['p_value'].iloc[row] = t_test.pvalue
+        df_stats['t_statistic'].iloc[row] = t_test.statistic
+
+    return df_stats
+
+def convert_identifiers(input_list, input_type, output_type, df):
+    """
+    Convert a list of gene information of a certain type to another type.
+
+    Args:
+        input_list (list): The list of gene information to convert.
+        input_type (str): The type of the input gene information. Must be one of 'gene_symbol', 'accession', or 'gene_id'.
+        output_type (str): The type of the output gene information. Must be one of 'gene_symbol', 'accession', or 'gene_id'.
+        df (pd.DataFrame): The DataFrame containing the gene information.
+
+    Returns:
+        output_list (list): The converted list of gene information.
+    """
+    if input_type not in ['gene_symbol', 'accession', 'gene_id'] or output_type not in ['gene_symbol', 'accession', 'gene_id']:
+        raise ValueError("input_type and output_type must be one of 'gene_symbol', 'accession', or 'gene_id'")
+
+    convert_dict = {
+        'gene_symbol': 'Gene Symbol',
+        'accession': 'Accession',
+        'gene_id': 'Gene ID'
+    }
+
+    input_type = convert_dict[input_type]
+    output_type = convert_dict[output_type]
+        
+    output_list = df.loc[df[input_type].isin(input_list), output_type].tolist()
+
+    return output_list
 
 # NEED TO SOFTCODE THIS...
 def get_upset_contents(type):
