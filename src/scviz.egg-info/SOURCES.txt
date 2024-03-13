@@ -10,4 +10,5 @@ src/scviz.egg-info/SOURCES.txt
 src/scviz.egg-info/dependency_links.txt
 src/scviz.egg-info/requires.txt
 src/scviz.egg-info/top_level.txt
-tests/test_scviz_utils.py
+tests/test_plotting.py
+tests/test_utils.py

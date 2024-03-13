@@ -5,3 +5,6 @@
 dist/
 src/scviz/__pycache__/
 tests/__pycache__/
+docs/
+CHANGELOG.md
+.vscode/
