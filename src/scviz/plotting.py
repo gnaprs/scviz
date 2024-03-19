@@ -150,51 +150,6 @@ def plot_cv(ax,data,cases,color=['blue']):
                     capprops=dict(color=color[j], linewidth=0.5))
     return ax
 
-# TODO: make function work from get_abundance or get_abundance_query
-def plot_abundance(ax, prot_data, cases, cmap='Blues', color=['blue'], s=20, alpha=0.2, calpha=1):
-    """
-    Plot the abundance of proteins across different cases.
-
-    Parameters:
-    ax (matplotlib.axes.Axes): The axis on which to plot.
-    prot_data (pandas.DataFrame): The protein data to plot.
-    cases (list of list of str): A list of cases to plot. Each case is a list of strings that are used to select the columns from the data.
-    cmap (str, optional): The colormap to use for the scatter plot. Default is 'Blues'.
-    color (list of str, optional): A list of colors for the scatter plots of each case. If not provided, all plots will be blue.
-    s (float, optional): The marker size. Default is 20.
-    alpha (float, optional): The marker transparency. Default is 0.2.
-    calpha (float, optional): The marker transparency for the case average. Default is 1.
-
-    Returns:
-    matplotlib.axes.Axes: The axis with the plotted data.
-
-    Example:
-    >>> import matplotlib.pyplot as plt
-    >>> import pandas as pd
-    >>> cases = [['a','50g'],['b','50g'],['a','30g'],['b','30g']]
-    >>> fig, ax = plt.subplots()
-    >>> plot_abundance(ax, prot_data, cases, cmap='Blues', color = ['blue','red','green','orange'])
-    """
-
-    for j in range(len(cases)):
-        vars = ['Abundance: '] + cases[j]
-        append_string = '_'.join(vars[1:])
-
-        cols = [col for col in prot_data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-
-        # average abundance of proteins across these columns, ignoring NaN values
-        prot_data['Average: '+append_string] = prot_data[cols].mean(axis=1, skipna=True)
-        prot_data['Stdev: '+append_string] = prot_data[cols].std(axis=1, skipna=True)
-
-        nsample = len(cols)
-
-        # merge all abundance columns into one column
-        X = np.zeros((nsample*len(prot_data)))
-        Y = np.zeros((nsample*len(prot_data)))
-        Z = np.zeros((nsample*len(prot_data))) # pdf value based on average abundance
-        for i in range(nsample):
-            X[i*len(prot_data):(i+1)*len(prot_data)] = prot_data[cols[i]].values
-
 def plot_pca(ax, data, cases, cmap=cm.get_cmap('viridis'), s=20, alpha=.8, plot_pc=[1,2]):
     """
     Plot PCA scatter plot.
@@ -387,7 +342,7 @@ def plot_heatmap(ax, heatmap_data, cmap=cm.get_cmap('seismic'), norm_values=[4,5
 
     return ax
 
-def plot_volcano(ax, data, cases, gene_list=5, color=None, alpha=0.5, pval=0.05, log2fc=1, linewidth=0.5, fontsize = 8):
+def plot_volcano(ax, data, cases, label=5, color=None, alpha=0.5, pval=0.05, log2fc=1, linewidth=0.5, fontsize = 8):
     """
     Plot a volcano plot on the given axes.
 
@@ -395,7 +350,7 @@ def plot_volcano(ax, data, cases, gene_list=5, color=None, alpha=0.5, pval=0.05,
     ax (matplotlib.axes.Axes): The axes on which to plot.
     data (pandas.DataFrame): The data to plot.
     cases (list): The cases to consider.
-    gene_list (int or list): The genes to highlight. If an int, the top and bottom n genes are shown. If a list, only those genes are shown. Can also accept list with 2 numbers to show top and bottom n genes [top, bottom].
+    label (int or list): The genes to highlight. If an int, the top and bottom n genes are shown. If a list, only those genes are shown. Can also accept list with 2 numbers to show top and bottom n genes [top, bottom]. If none, no labels will be plotted.
     color (dict, optional): A dictionary mapping significance to colors. Defaults to {'not significant': 'grey', 'upregulated': 'red', 'downregulated': 'blue'}.
     alpha (float, optional): The alpha value for the scatter plot. Defaults to 0.5.
     pval (float, optional): The p-value threshold for significance. Defaults to 0.05.
@@ -417,7 +372,7 @@ def plot_volcano(ax, data, cases, gene_list=5, color=None, alpha=0.5, pval=0.05,
     >>> cases = [['head'],['heart'],['tail']]
     >>> fig, ax = plt.subplots(1,1)
     >>> name_list = ['P11247','O35639','F6ZDS4']
-    >>> ax, volcano_df = plot_volcano(ax, data, cases, log2fc=0.5, pval=0.05, alpha=0.5, fontsize=6, gene_list=name_list);
+    >>> ax, volcano_df = plot_volcano(ax, data, cases, log2fc=0.5, pval=0.05, alpha=0.5, fontsize=6, label=name_list);
     
     >>> # Create custom artists
     >>> upregulated = Line2D([0], [0], marker='o', color='w', label='Upregulated', markerfacecolor='red', markersize=6)
@@ -452,43 +407,160 @@ def plot_volcano(ax, data, cases, gene_list=5, color=None, alpha=0.5, pval=0.05,
     max_abs_log2fc = np.max(np.abs(volcano_df['log2fc'])) + 0.5
     ax.set_xlim(-max_abs_log2fc, max_abs_log2fc)
 
-    if isinstance(gene_list, int):
-        upregulated = volcano_df[volcano_df['significance'] == 'upregulated'].sort_values('significance_score', ascending=False)
-        downregulated = volcano_df[volcano_df['significance'] == 'downregulated'].sort_values('significance_score', ascending=True)
-        
-        n_upregulated = min(gene_list, len(upregulated))
-        n_downregulated = min(gene_list, len(downregulated))
-    
-        label_df = pd.concat((upregulated.head(n_upregulated), downregulated.head(n_downregulated)))
-    elif isinstance(gene_list, list):
-        if len(gene_list) == 2 and all(isinstance(i, int) for i in gene_list):
+    if label is None or label == 0 or label == [0,0]:
+        pass
+    else:
+        if isinstance(label, int):
             upregulated = volcano_df[volcano_df['significance'] == 'upregulated'].sort_values('significance_score', ascending=False)
             downregulated = volcano_df[volcano_df['significance'] == 'downregulated'].sort_values('significance_score', ascending=True)
-
-            n_upregulated = min(gene_list[0], len(upregulated))
-            n_downregulated = min(gene_list[1], len(downregulated))
+            
+            n_upregulated = min(label, len(upregulated))
+            n_downregulated = min(label, len(downregulated))
         
             label_df = pd.concat((upregulated.head(n_upregulated), downregulated.head(n_downregulated)))
-        else:
-            label_df = volcano_df.loc[volcano_df.index.isin(gene_list)]
-    else:
-        raise ValueError('label_list must be an int or a list')
+        elif isinstance(label, list):
+            if len(label) == 2 and all(isinstance(i, int) for i in label):
+                upregulated = volcano_df[volcano_df['significance'] == 'upregulated'].sort_values('significance_score', ascending=False)
+                downregulated = volcano_df[volcano_df['significance'] == 'downregulated'].sort_values('significance_score', ascending=True)
 
-    texts = []
-    for i in range(len(label_df)):
-        txt = plt.text(x = label_df.iloc[i]['log2fc'],
-                            y = label_df.iloc[i]['-log10(p_value)'],
-                            s = label_df.index[i],
-                            fontsize = fontsize,
-                            weight = 'bold')
-        
-        txt.set_path_effects([PathEffects.withStroke(linewidth=3, foreground='w')])
-        texts.append(txt)
-    adjust_text(texts, arrowprops = dict(arrowstyle = '->', color = 'k', zorder = 5))
+                n_upregulated = min(label[0], len(upregulated))
+                n_downregulated = min(label[1], len(downregulated))
+            
+                label_df = pd.concat((upregulated.head(n_upregulated), downregulated.head(n_downregulated)))
+            else:
+                label_df = volcano_df.loc[volcano_df.index.isin(label)]
+        else:
+            raise ValueError('label_list must be an int or a list')
+
+        texts = []
+        for i in range(len(label_df)):
+            txt = plt.text(x = label_df.iloc[i]['log2fc'],
+                                y = label_df.iloc[i]['-log10(p_value)'],
+                                s = label_df.index[i],
+                                fontsize = fontsize,
+                                weight = 'bold', bbox=dict(facecolor='white', edgecolor='black', boxstyle='round'))
+            
+            txt.set_path_effects([PathEffects.withStroke(linewidth=3, foreground='w')])
+            texts.append(txt)
+        adjust_text(texts, expand=(2, 2), arrowprops = dict(arrowstyle = '->', color = 'k', zorder = 5))
 
     return ax, volcano_df
 
+def mark_volcano(ax, volcano_df, label, label_color="black", s=10, alpha=1, show_names=True, fontsize=8):
+    """
+    Mark the volcano plot with specific proteins.
+
+    Parameters:
+    ax (matplotlib.axes.Axes): The axes on which to plot.
+    volcano_df (pandas.DataFrame): volcano_df data returned from get_protein_DE() or plot_volcano().
+    label (list): The genes to highlight. Can be list of list of genes to highlight for each case.
+    color (str, optional): The color of the markers. Defaults to 'black'. Can be list of colors for each case.
+    s (float, optional): The size of the markers. Defaults to 10.
+    alpha (float, optional): The transparency of the markers. Defaults to 1.
+    show_names (bool, optional): Whether to show the gene names. Defaults to True.
+
+    Returns:
+    ax (matplotlib.axes.Axes): The axes with the plot.
+
+    Example:
+    >>> import matplotlib.pyplot as plt
+    >>> from scviz import plotting as scplt
+    >>> import pandas as pd
+    >>> data = pd.read_excel('tests/data.xlsx', sheet_name='Proteins')
+    >>> cases = [['head'],['heart'],['tail']]
+    >>> fig, ax = plt.subplots(1,1)
+    >>> ax, volcano_df = scplt.plot_volcano(ax, data, cases, log2fc=0.5, pval=0.05, alpha=0.5, fontsize=6, label=[1,2,3]);
+    >>> ax = scplt.mark_volcano(ax, data, cases, label=['P11247','O35639','F6ZDS4'], color='red', s=10, alpha=1, show_names=True)
+    """
+
+    # if label is a list of list, then we need to plot each list of genes with a different color
+    # else if label is a list of genes, then we need to plot all genes with the same color
+
+    # check if label is a list of list or a list of strings
+    if isinstance(label[0], list):
+        for i in range(len(label)):
+            label_df = volcano_df.loc[volcano_df.index.isin(label[i])]
+            ax.scatter(label_df['log2fc'], label_df['-log10(p_value)'], c=label_color[i], alpha=alpha)
+
+            if show_names:
+                texts = []
+                for j in range(len(label_df)):
+                    txt = plt.text(x = label_df.iloc[j]['log2fc']+1,
+                                        y = label_df.iloc[j]['-log10(p_value)']+1,
+                                        s = label_df.index[j],
+                                        fontsize = fontsize,
+                                        color = label_color[i],
+                                        weight = 'bold', bbox=dict(facecolor='white', edgecolor=label_color[i], boxstyle='round'))
+                    
+                    txt.set_path_effects([PathEffects.withStroke(linewidth=3, foreground='w')])
+                    texts.append(txt)
+                adjust_text(texts, expand=(2, 2), arrowprops = dict(arrowstyle = '->', color = 'k', zorder = 5))
+    elif isinstance(label, list):
+        label_df = volcano_df.loc[volcano_df.index.isin(label)]
+        ax.scatter(label_df['log2fc'], label_df['-log10(p_value)'], c=label_color, alpha=alpha)
+
+        if show_names:
+            texts = []
+            for i in range(len(label_df)):
+                txt = plt.text(x = label_df.iloc[i]['log2fc']+1,
+                                    y = label_df.iloc[i]['-log10(p_value)']+1,
+                                    s = label_df.index[i],
+                                    fontsize = fontsize,
+                                    color = label_color,
+                                    weight = 'bold', bbox=dict(facecolor='white', edgecolor=label_color, boxstyle='round'))
+                
+                txt.set_path_effects([PathEffects.withStroke(linewidth=3, foreground='w')])
+                texts.append(txt)
+            adjust_text(texts, expand=(2, 2), arrowprops = dict(arrowstyle = '->', color = label_color, zorder = 5))
+
+    return ax
+
 # VERIFY FUNCTIONS BELOW
+# TODO: make function work from get_abundance or get_abundance_query, actually plot the protein abundances - refer to graph from tingyu
+def plot_abundance(ax, prot_data, cases, genelist, cmap='Blues', color=['blue'], s=20, alpha=0.2, calpha=1):
+    """
+    Plot the abundance of proteins across different cases.
+
+    Parameters:
+    ax (matplotlib.axes.Axes): The axis on which to plot.
+    prot_data (pandas.DataFrame): The protein data to plot.
+    cases (list of list of str): A list of cases to plot. Each case is a list of strings that are used to select the columns from the data.
+    cmap (str, optional): The colormap to use for the scatter plot. Default is 'Blues'.
+    color (list of str, optional): A list of colors for the scatter plots of each case. If not provided, all plots will be blue.
+    s (float, optional): The marker size. Default is 20.
+    alpha (float, optional): The marker transparency. Default is 0.2.
+    calpha (float, optional): The marker transparency for the case average. Default is 1.
+
+    Returns:
+    matplotlib.axes.Axes: The axis with the plotted data.
+
+    Example:
+    >>> import matplotlib.pyplot as plt
+    >>> import pandas as pd
+    >>> cases = [['a','50g'],['b','50g'],['a','30g'],['b','30g']]
+    >>> fig, ax = plt.subplots()
+    >>> plot_abundance(ax, prot_data, cases, cmap='Blues', color = ['blue','red','green','orange'])
+    """
+
+    for j in range(len(cases)):
+        vars = ['Abundance: '] + cases[j]
+        append_string = '_'.join(vars[1:])
+
+        cols = [col for col in prot_data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
+
+        # average abundance of proteins across these columns, ignoring NaN values
+        prot_data['Average: '+append_string] = prot_data[cols].mean(axis=1, skipna=True)
+        prot_data['Stdev: '+append_string] = prot_data[cols].std(axis=1, skipna=True)
+
+        nsample = len(cols)
+
+        # merge all abundance columns into one column
+        X = np.zeros((nsample*len(prot_data)))
+        Y = np.zeros((nsample*len(prot_data)))
+        Z = np.zeros((nsample*len(prot_data))) # pdf value based on average abundance
+        for i in range(nsample):
+            X[i*len(prot_data):(i+1)*len(prot_data)] = prot_data[cols[i]].values
+
 def plot_rankquant(ax,data,cases,cmap=['Blues'],color=['blue'],s=20,alpha=0.2,calpha=1):
     # extract columns that contain the abundance data for the specified method and amount
     for j in range(len(cases)):

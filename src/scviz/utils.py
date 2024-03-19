@@ -32,7 +32,7 @@ from nbformat import convert
 import pandas as pd
 import numpy as np
 import re
-from scipy.stats import ttest_ind
+from scipy.stats import ttest_ind, mannwhitneyu, wilcoxon, chi2_contingency, fisher_exact
 from decimal import Decimal
 from upsetplot import from_contents
     
@@ -283,6 +283,10 @@ def get_abundance(data, cases, prot_list=None, list_type='accession',abun_type='
                 data = data[data[index].isin(prot_list)]
 
             cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
+
+            if not cols:
+                raise ValueError("No columns found. Please verify that the input 'cases' matches the columns in the data.")
+
             # concat elements 1 till end of vars into one string
             append_string = '_'.join(vars[1:])
 
@@ -314,6 +318,10 @@ def get_abundance(data, cases, prot_list=None, list_type='accession',abun_type='
                 data = data[data[index].isin(prot_list)]
 
             cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
+            
+            if not cols:
+                raise ValueError("No columns found. Please verify that the input 'cases' matches the columns in the data.")
+
             # concat elements 1 till end of vars into one string
             append_string = '_'.join(vars[1:])
             
@@ -475,6 +483,7 @@ def get_abundance_query(data, cases, genelist, search='gene'):
 
     return matched_features_data, combined_abundance_data
 
+# !TODO: implement chi2 and fisher tests, consider also adding correlation tests
 def get_protein_DE(data, cases, method='ttest'):
     """
     Calculate differential expression (DE) of proteins across different groups.
@@ -484,7 +493,7 @@ def get_protein_DE(data, cases, method='ttest'):
     Args:
         data (pandas.DataFrame): The protein data.
         cases (list): The cases to compare.
-        method (str, optional): The method to use for DE. Default is 'ttest'. Other methods will be added in the future.
+        method (str, optional): The method to use for DE. Default is 'ttest'. Other methods include 'mannwhitneyu', 'wilcoxon', 'chi2', and 'fisher'.
 
     Returns:
         df_stats (pandas.DataFrame): A DataFrame containing the DE statistics for each protein.
@@ -513,16 +522,36 @@ def get_protein_DE(data, cases, method='ttest'):
     group2_string = '_'.join(cases[1])
 
     # create a dataframe for stats
-    df_stats = pd.DataFrame(index=aligned_case1.index, columns=[group1_string,group2_string,'log2fc', 'p_value', 't_statistic'])
+    df_stats = pd.DataFrame(index=aligned_case1.index, columns=[group1_string,group2_string,'log2fc', 'p_value', 'test_statistic'])
     df_stats[group1_string] = aligned_case1.mean(axis=1)
     df_stats[group2_string] = aligned_case2.mean(axis=1)
     df_stats['log2fc'] = np.log2(np.divide(aligned_case1.mean(axis=1), aligned_case2.mean(axis=1)))
 
-    # do t-test for each protein
-    for row in range(0, len(aligned_case1)):
-        t_test = ttest_ind(aligned_case1.iloc[row,0:n1-1].dropna().values, aligned_case2.iloc[row,0:n2-1].dropna().values)
-        df_stats['p_value'].iloc[row] = t_test.pvalue
-        df_stats['t_statistic'].iloc[row] = t_test.statistic
+    if method == 'ttest':
+        for row in range(0, len(aligned_case1)):
+            t_test = ttest_ind(aligned_case1.iloc[row,0:n1-1].dropna().values, aligned_case2.iloc[row,0:n2-1].dropna().values)
+            df_stats['p_value'].iloc[row] = t_test.pvalue
+            df_stats['test_statistic'].iloc[row] = t_test.statistic
+    elif method == 'mannwhitneyu':
+        for row in range(0, len(aligned_case1)):
+            mwu = mannwhitneyu(aligned_case1.iloc[row,0:n1-1].dropna().values, aligned_case2.iloc[row,0:n2-1].dropna().values)
+            df_stats['p_value'].iloc[row] = mwu.pvalue
+            df_stats['test_statistic'].iloc[row] = mwu.statistic
+    elif method == 'wilcoxon':
+        for row in range(0, len(aligned_case1)):
+            w, p = wilcoxon(aligned_case1.iloc[row,0:n1-1].dropna().values, aligned_case2.iloc[row,0:n2-1].dropna().values)
+            df_stats['p_value'].iloc[row] = p
+            df_stats['test_statistic'].iloc[row] = w
+    # elif method == 'chi2':
+    #     for row in range(0, len(aligned_case1)):
+    #         chi2 = chi2_contingency([aligned_case1.iloc[row,0:n1-1].dropna().values, aligned_case2.iloc[row,0:n2-1].dropna().values])
+    #         df_stats['p_value'].iloc[row] = chi2.pvalue
+    #         df_stats['t_statistic'].iloc[row] = chi2.statistic
+    # elif method == 'fisher':
+    #     for row in range(0, len(aligned_case1)):
+    #         fisher = fisher_exact([aligned_case1.iloc[row,0:n1-1].dropna().values, aligned_case2.iloc[row,0:n2-1].dropna().values])
+    #         df_stats['p_value'].iloc[row] = fisher[1]
+    #         df_stats['t_statistic'].iloc[row] = fisher[0]
 
     return df_stats
 
@@ -592,3 +621,5 @@ def get_upset_contents(type):
     return return_contents
 
 # TODO: add function to quickly drop/subset from data?
+
+# TODO: add function to get GO enrichment, GSEA analysis (see GOATOOLS or STAGES or Enrichr?)

@@ -12,17 +12,7 @@ $ pip install -e \<insert folder path\>
 ```
 
 ## Usage
-
+Please refer to docs (link) example jupyter notebook: Chapter 1.
 
 ## License
 `scviz` was created by Marion Pang. It is licensed under the terms of the MIT license.
-
-## To-Do List
-1. Add more visualization features (correlation matrix)
-2. Extend support for GSEA and GO analysis
-3. Add more comprehensive documentation.
-4. Implement unit tests for better code reliability.
-
-# TODO For marion
-Add sharedPeptides function on get_CV()
-Implement DE utility + volcano plotting function

@@ -19,6 +19,7 @@ Requires-Dist: upsetplot
 Requires-Dist: scikit-learn
 Requires-Dist: scipy
 Requires-Dist: umap-learn
+Requires-Dist: adjustText
 Provides-Extra: pytest
 Requires-Dist: openpyxl; extra == "pytest"
 
@@ -42,7 +43,7 @@ $ pip install -e \<insert folder path\>
 `scviz` was created by Marion Pang. It is licensed under the terms of the MIT license.
 
 ## To-Do List
-1. Add more visualization features (volcano plot, umap)
+1. Add more visualization features (correlation matrix)
 2. Extend support for GSEA and GO analysis
 3. Add more comprehensive documentation.
 4. Implement unit tests for better code reliability.
@@ -50,3 +51,4 @@ $ pip install -e \<insert folder path\>
 # TODO For marion
 Add sharedPeptides function on get_CV()
 Implement DE utility + volcano plotting function
+Add venn diagram and upsetplot function
