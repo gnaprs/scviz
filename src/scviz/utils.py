@@ -26,6 +26,7 @@ Todo:
     * Add functions to get GO enrichment and GSEA analysis (see GOATOOLS or STAGES).
 """
 
+from typing import List, Optional, Dict, Any
 from operator import index
 from os import access
 from nbformat import convert
@@ -36,6 +37,11 @@ from scipy.stats import ttest_ind, mannwhitneyu, wilcoxon, chi2_contingency, fis
 from decimal import Decimal
 from upsetplot import from_contents
     
+# make class data with load function from various platforms
+# then protein summary uses data object
+
+# for diann loader, accept report.pg_matrix.tsv or report.tsv (.pg_matrix.tsv loader alr in get_protein_summary) 
+
 def get_protein_summary(data, variables = ['region','amt']):
     """
     Import protein data from an Excel file and summarize characteristics about each sample and sample groups.
@@ -182,6 +188,7 @@ def get_protein_norm(data, norm_data_fp, norm_list_fp, norm_type = 'auto', expor
 
     return append_data
 
+# !TODO: for peptide, use 'Annotated Sequence' instead of 'Accession' and shared search subset='Annotated Sequence'
 def get_cv(data, cases, variables=['region', 'amt'], sharedPeptides = False):
     """
     Calculate the coefficient of variation (CV) for each case in the given data.
@@ -241,11 +248,11 @@ def get_cv(data, cases, variables=['region', 'amt'], sharedPeptides = False):
         cv_df = pd.concat([cv_df, cur_df], ignore_index=True)
 
         if sharedPeptides:
-            cv_df = cv_df[cv_df.duplicated(subset='accession', keep=False)]
+            cv_df['shared'] = cv_df.duplicated(subset='accession', keep=False)
 
     return cv_df
 
-def get_abundance(data, cases, prot_list=None, list_type='accession',abun_type='average'):
+def get_abundance(data: pd.DataFrame, cases: List[List[str]], prot_list: Optional[List[str]] = None, list_type: str = 'accession',abun_type: str = 'average') -> Dict[str, Any]:
     """
     Returns the abundance of proteins in the given data.
 
@@ -305,7 +312,7 @@ def get_abundance(data, cases, prot_list=None, list_type='accession',abun_type='
             abun_dict[append_string] = abundance
         return abun_dict
 
-    if abun_type == 'raw':
+    elif abun_type == 'raw':
         # create empty list to store abundance values
         abun_dict = {}
         data = data.copy()
@@ -332,6 +339,8 @@ def get_abundance(data, cases, prot_list=None, list_type='accession',abun_type='
             abun_dict[append_string] = abundance
 
         return abun_dict
+    else:
+        return {}
     
 def filter_by_group(df, variables, values):
     """
@@ -368,10 +377,13 @@ def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_resu
                         [['mp_cellbody','6000'], ['mp_axon','6000']]]
         >>> ttestparams = run_summary_ttest(protein_summary_df, test_variables, test_pairs, test_variable='total_count')
     """
-    # check if every element in test_pairs has the same length as test_variables, else throw error message
-    if not all(len(test_pairs[i]) == len(test_variables) for i in range(len(test_pairs))):
-        print("Error: length of each element in test_pairs must be equal to length of test_variables")
-        return
+    # check if every pair in test_pairs is a list of length 2, else throw error message
+    if not all(len(pair) == 2 for pair in test_pairs):
+        raise ValueError("Error: Each pair in test_pairs must contain two groups (e.g. compare [['circle','big'] and ['square','small']])")
+
+    # check if every element in test_pairs[i][0] and test_pairs[i][1] is the same length as test_variables, else throw error message
+    if not all(len(pair[0]) == len(test_variables) and len(pair[1]) == len(test_variables) for pair in test_pairs):
+        raise ValueError("Error: Each group in each pair in test_pairs must match the length of test_variables")
 
     ttest_params = []
     for pair in test_pairs:

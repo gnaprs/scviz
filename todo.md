@@ -6,6 +6,7 @@
 
 # TODO For marion
 Add sharedPeptides function on get_CV()
+Check out scprep repo for possible utility functions
 Implement DE utility + volcano plotting function
 Add venn diagram and upsetplot function
 Add Type hints to all functions, e.g. 
