@@ -265,9 +265,9 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
 
     # MISSING
     # prot_var: protein metadata
-    prot_var = prot_all.loc[:, 'Protein FDR Confidence: Combined':'# Razor Peptides']
+    prot_var = report_all.loc[:, 'Protein FDR Confidence: Combined':'# Razor Peptides']
     # prot_obs: sample typing from the column name
-    prot_obs = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
+    prot_obs = report_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
     prot_obs = pd.DataFrame(prot_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(str.strip).astype('category')
 
     # -----------------------------
@@ -283,9 +283,9 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
 
     # MISSING
     # pep_var_names: peptide sequence with modifications
-    pep_var_names = (pep_all['Annotated Sequence'] + np.where(pep_all['Modifications'].isna(), '', ' MOD:' + pep_all['Modifications'])).values
+    pep_var_names = (report_all['Annotated Sequence'] + np.where(pep_all['Modifications'].isna(), '', ' MOD:' + pep_all['Modifications'])).values
     # pep_obs_names: file names
-    pep_obs_names = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: (F\d+):')[0].values
+    pep_obs_names = report_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: (F\d+):')[0].values
 
     # -----------------------------
     # RS DATA
@@ -304,15 +304,15 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
         assert set(pep_obs_names) == set(prot_obs_names), "The files in peptide and protein data must be the same"
     # -----------------------------
     # check if mlb.classes_ has overlap with prot_var
-    if prot_file and pep_file:
-        mlb_classes_set = set(mlb.classes_)
-        prot_var_set = set(prot_var_names)
 
-        if mlb_classes_set != prot_var_set:
-            print("WARNING: Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.")
-            print(f"Overlap: {len(mlb_classes_set & prot_var_set)}")
-            print(f"Unique to peptide data: {mlb_classes_set - prot_var_set}")
-            print(f"Unique to protein data: {prot_var_set - mlb_classes_set}")
+    mlb_classes_set = set(mlb.classes_)
+    prot_var_set = set(prot_var_names)
+
+    if mlb_classes_set != prot_var_set:
+        print("WARNING: Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.")
+        print(f"Overlap: {len(mlb_classes_set & prot_var_set)}")
+        print(f"Unique to peptide data: {mlb_classes_set - prot_var_set}")
+        print(f"Unique to protein data: {prot_var_set - mlb_classes_set}")
 
     # pAnnData OBJECT - should be the same for all imports
     # -----------------------------
