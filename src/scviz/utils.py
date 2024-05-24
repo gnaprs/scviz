@@ -602,40 +602,40 @@ def convert_identifiers(input_list, input_type, output_type, df):
     return output_list
 
 # NEED TO SOFTCODE THIS...
-def get_upset_contents(type):
-    ## start by making user specify the fixed variables and dependent variables (e.g. with assign values for fixed)
-    ## make use dictionary? e.g. fixed = {'grad_time': ['0', '1', '2'], 'region': ['cortex', 'snpc'], 'phenotype': ['sc', '4sc', '10c', '25c', '50c']}
-    ## if we can extract out all data for each fixed variable, then we can use the from_contents function to make the upset plot
+# def get_upset_contents(type):
+#     ## start by making user specify the fixed variables and dependent variables (e.g. with assign values for fixed)
+#     ## make use dictionary? e.g. fixed = {'grad_time': ['0', '1', '2'], 'region': ['cortex', 'snpc'], 'phenotype': ['sc', '4sc', '10c', '25c', '50c']}
+#     ## if we can extract out all data for each fixed variable, then we can use the from_contents function to make the upset plot
 
-    # SPECIFY AMOUNTS
-    if type == 'amt':
-        # SPECIFY ENZYMES
-        amt_contents = {}
-        amts = ['sc', '4sc', '10c', '25c','50c']
+#     # SPECIFY AMOUNTS
+#     if type == 'amt':
+#         # SPECIFY ENZYMES
+#         amt_contents = {}
+#         amts = ['sc', '4sc', '10c', '25c','50c']
 
-        # for same enzyme, compare amounts
-        for grad_time in grad_times:
-            amt_contents[grad_time] = {}
-            for region in regions:
-                amt_contents[grad_time][region] = {}
-                for phenotype in phenotypes:
-                    df_occ = pd.DataFrame(columns=['Protein', 'sc', '4sc', '10c', '25c', '50c', 'Total'])
-                    for amt in amts:
-                        cols = [col for col in data.columns if amt in col and phenotype in col and grad_time in col and region in col and 'Abundance: F' in col]
-                        df_occ[amt] = data[cols].notnull().sum(axis=1)
-                    df_occ['Protein'] = data['Accession']
-                    df_occ['Total'] = df_occ[amts].sum(axis=1)
-                    df_occ[amts] = df_occ[amts].astype(bool)
-                    content = {amt: df_occ['Protein'][df_occ[amt]].values for amt in amts}
-                    amt_contents[grad_time][region][phenotype] = from_contents(content)
+#         # for same enzyme, compare amounts
+#         for grad_time in grad_times:
+#             amt_contents[grad_time] = {}
+#             for region in regions:
+#                 amt_contents[grad_time][region] = {}
+#                 for phenotype in phenotypes:
+#                     df_occ = pd.DataFrame(columns=['Protein', 'sc', '4sc', '10c', '25c', '50c', 'Total'])
+#                     for amt in amts:
+#                         cols = [col for col in data.columns if amt in col and phenotype in col and grad_time in col and region in col and 'Abundance: F' in col]
+#                         df_occ[amt] = data[cols].notnull().sum(axis=1)
+#                     df_occ['Protein'] = data['Accession']
+#                     df_occ['Total'] = df_occ[amts].sum(axis=1)
+#                     df_occ[amts] = df_occ[amts].astype(bool)
+#                     content = {amt: df_occ['Protein'][df_occ[amt]].values for amt in amts}
+#                     amt_contents[grad_time][region][phenotype] = from_contents(content)
         
-        return_contents = amt_contents
+#         return_contents = amt_contents
 
-    else:
-        print('Please specify either "amt" or "enzyme"')
-        return_contents = None
+#     else:
+#         print('Please specify either "amt" or "enzyme"')
+#         return_contents = None
 
-    return return_contents
+#     return return_contents
 
 # TODO: add function to quickly drop/subset from data?
 
