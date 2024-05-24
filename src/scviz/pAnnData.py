@@ -283,7 +283,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
 
     # MISSING
     # pep_var_names: peptide sequence with modifications
-    pep_var_names = (report_all['Annotated Sequence'] + np.where(pep_all['Modifications'].isna(), '', ' MOD:' + pep_all['Modifications'])).values
+    pep_var_names = (report_all['Annotated Sequence'] + np.where(report_all['Modifications'].isna(), '', ' MOD:' + report_all['Modifications'])).values
     # pep_obs_names: file names
     pep_obs_names = report_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: (F\d+):')[0].values
 
