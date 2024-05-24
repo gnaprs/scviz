@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scviz"
-version = "0.0.6"
+version = "0.1.0"
 authors = [
   { name="Marion Pang", email="sr_pang@hotmail.com" },
 ]
@@ -25,7 +25,8 @@ dependencies = [
   "scikit-learn",
   "scipy",
   "umap-learn",
-  "adjustText"
+  "adjustText",
+  "AnnData"
 ]
 
 [project.urls]

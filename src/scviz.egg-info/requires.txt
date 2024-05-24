@@ -6,6 +6,8 @@ upsetplot
 scikit-learn
 scipy
 umap-learn
+adjustText
+AnnData
 
 [pytest]
 openpyxl
