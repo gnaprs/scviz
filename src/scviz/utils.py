@@ -29,19 +29,20 @@ Todo:
 from typing import List, Optional, Dict, Any
 from operator import index
 from os import access
-from nbformat import convert
 import pandas as pd
 import numpy as np
 import re
 from scipy.stats import ttest_ind, mannwhitneyu, wilcoxon, chi2_contingency, fisher_exact
 from decimal import Decimal
 from upsetplot import from_contents
-    
-# make class data with load function from various platforms
-# then protein summary uses data object
 
-# for diann loader, accept report.pg_matrix.tsv or report.tsv (.pg_matrix.tsv loader alr in get_protein_summary) 
+from scipy.sparse import csr_matrix
+from sklearn.impute import SimpleImputer, KNNImputer
+from scviz import pAnnData
 
+# Thoughts: functions that act on panndata and return only panndata should be panndata methods, utility functions should be in utils
+
+# TODO: move to class function  
 def get_protein_summary(data, variables = ['region','amt']):
     """
     Import protein data from an Excel file and summarize characteristics about each sample and sample groups.
@@ -115,6 +116,7 @@ def get_protein_summary(data, variables = ['region','amt']):
 
     return df_files, protein_properties
 
+# TODO: move to class function | fix to do own normalization
 def get_protein_norm(data, norm_data_fp, norm_list_fp, norm_type = 'auto', export=False):
     """
     Append normalized protein data to the original protein data.
@@ -252,6 +254,7 @@ def get_cv(data, cases, variables=['region', 'amt'], sharedPeptides = False):
 
     return cv_df
 
+# TODO: move to class function | fix now w pAnnData    
 def get_abundance(data: pd.DataFrame, cases: List[List[str]], prot_list: Optional[List[str]] = None, list_type: str = 'accession',abun_type: str = 'average') -> Dict[str, Any]:
     """
     Returns the abundance of proteins in the given data.
@@ -342,6 +345,7 @@ def get_abundance(data: pd.DataFrame, cases: List[List[str]], prot_list: Optiona
     else:
         return {}
     
+# TODO: move to class function | just use anndata splicing?
 def filter_by_group(df, variables, values):
     """
     Filter a DataFrame based on specified groups. Helper function for run_ttest.
@@ -356,6 +360,7 @@ def filter_by_group(df, variables, values):
     """
     return df[np.all([df[variables[i]] == values[i] for i in range(len(variables))], axis=0)]
 
+# TODO: maybe call stats_ttest instead
 def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_results=False, test_variable='total_count'):
     """
     Run t-tests on specified groups in a DataFrame returned from get_protein_summary.
