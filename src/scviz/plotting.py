@@ -76,6 +76,30 @@ def get_color(resource_type, n=None):
     else:
         raise ValueError("Invalid resource_type. Options are 'colors', 'cmap', and 'palette'")
 
+def get_samples(adata,class_type):
+    """
+    Get the sample names for the given class(es) type.
+
+    Parameters:
+    - adata (anndata.AnnData): The AnnData object containing the sample names.
+    - class_type (str or list of str): The classes to use for selecting samples. E.g. 'cell_type' or ['cell_type', 'treatment'].
+
+    Returns:
+    - list of str: The sample names.
+
+    Example:
+    >>> samples = get_samples(adata, 'cell_type')
+    """
+
+    if class_type is None:
+        return None
+    elif isinstance(class_type, str):
+        return adata.obs[class_type].values.tolist()
+    elif isinstance(class_type, list):
+        return adata.obs[class_type].apply(lambda row: ', '.join(row.values.astype(str)), axis=1).values.tolist()
+    else:
+        raise ValueError("Invalid input for 'class_type'. It should be None, a string, or a list of strings.")
+
 def plot_significance(ax, x1, x2, y, h, col, pval):
     """
     Plot significance bars on a given axis.
@@ -150,15 +174,15 @@ def plot_cv(ax,data,cases,color=['blue']):
                     capprops=dict(color=color[j], linewidth=0.5))
     return ax
 
-def plot_pca(ax, data, cases, cmap=cm.get_cmap('viridis'), s=20, alpha=.8, plot_pc=[1,2]):
+def plot_pca(ax, pdata, color = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, plot_pc=[1,2]):
     """
     Plot PCA scatter plot.
 
     Parameters:
     - ax (matplotlib.axes.Axes): The axes on which to plot the scatter plot.
-    - data (numpy.ndarray): The input data array.
-    - cases (list): The list of case names.
-    - cmap (matplotlib.colors.Colormap, optional): The colormap to use for coloring the scatter plot. Default is 'viridis'.
+    - pdata (scviz.pAnnData): The input pdata object.
+    - color (list): List of classes to color by, can be single string or a list of strings.
+    - cmap (matplotlib.colors.Colormap, optional): The colormap to use for coloring the scatter plot. Default is 'default', using the scviz plotting default color scheme get_color().
     - s (float, optional): The marker size. Default is 20.
     - alpha (float, optional): The marker transparency. Default is 0.8.
     - plot_pc (list, optional): The principal components to plot. Default is PC1 and PC2, as in [1, 2]. Can also include 3 components to plot in 3D, as in [1,2,3]
@@ -180,7 +204,6 @@ def plot_pca(ax, data, cases, cmap=cm.get_cmap('viridis'), s=20, alpha=.8, plot_
     >>> fig, ax = plt.subplots(1,1)
     >>> ax, pca = scplt.plot_pca(ax, data, cases, cmap='viridis', s=20, alpha=.8, plot_pc=[1,2])
     """
-    dict_data = utils.get_abundance(data, cases, abun_type='raw')
 
     if len(plot_pc) == 3:
         assert ax.name == '3d', "The ax must be a 3D projection, please define projection='3d'"
@@ -190,34 +213,62 @@ def plot_pca(ax, data, cases, cmap=cm.get_cmap('viridis'), s=20, alpha=.8, plot_
     if len(plot_pc) == 3:
         pc_z=plot_pc[2]-1
 
-    # make stack of all abundance data
-    X = np.hstack([np.array(dict_data[list(dict_data.keys())[i]]) for i in range(len(dict_data))])
-    X = X.T
+    if on == 'protein':
+        adata = pdata.prot
+    elif on == 'peptide':
+        adata = pdata.pep
+    else:
+        raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
-    # make sample array
-    y = np.hstack([np.repeat(i, dict_data[list(dict_data.keys())[i]].shape[1]) for i in range(len(dict_data))])
-    print(f'BEFORE: Number of samples|Number of proteins: {X.shape}')
+    # check if X_pca already exists in adata
+    if 'X_pca' in adata.layers.keys():
+        print(f'PCA already exists in {on} data, using existing PCA')
+        Xt = adata.layers['X_pca']
+        pca = adata.uns['pca']
+    
+    else:
+        # make sample array
+        if layer == "X":
+            X = adata.X.toarray()
+        elif layer in adata.obsm.keys():
+            X = adata.layers[layer].toarray()
+        
+        
+        print(f'BEFORE: Number of samples|Number of proteins: {X.shape}')
+        X = np.log2(X + 1)
+        Xnorm = (X - X.mean(axis=0)) / X.std(axis=0)
+        Xnorm = Xnorm[:, ~np.isnan(Xnorm).any(axis=0)]
+        print(f'AFTER: Number of samples|Number of proteins: {Xnorm.shape}')
 
-    # remove columns that contain nan in X
-    X = X[:, ~np.isnan(X).any(axis=0)]
-    print(f'AFTER: Number of samples|Number of proteins: {X.shape}')
-    X = np.log2(X+1)
+        pca = PCA()
+        Xt = pca.fit_transform(Xnorm)
 
-    Xnorm = (X - X.mean(axis=0)) / X.std(axis=0)
+        adata.layers['X_pca'] = Xt
+        adata.uns['pca'] = pca
+        pdata.append_history(f'{on}: PCA fitted, stored in {on}.layers["X_pca"] and {on}.uns["pca"]')
 
-    pca = PCA()
-    Xt = pca.fit_transform(Xnorm)
-  
+        print(f'PCA fitted and stored in {on}.layers["X_pca"] and {on}.uns["pca"]')
+
+    y = get_samples(adata, color)
+    color_dict = {class_type: i for i, class_type in enumerate(set(y))}
+    color_mapped = [color_dict[val] for val in y]
+    cmap = get_color('cmap')
+    norm = mcolors.Normalize(vmin=min(color_mapped), vmax=max(color_mapped))
+
     if len(plot_pc) == 2:
-        ax.scatter(Xt[:,pc_x], Xt[:,pc_y], c=y, cmap=cmap, s=s, alpha=alpha)
+        ax.scatter(Xt[:,pc_x], Xt[:,pc_y], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
         ax.set_xlabel('PC'+str(pc_x+1)+' ('+str(round(pca.explained_variance_ratio_[pc_x]*100,2))+'%)')
         ax.set_ylabel('PC'+str(pc_y+1)+' ('+str(round(pca.explained_variance_ratio_[pc_y]*100,2))+'%)')
 
     elif len(plot_pc) == 3:
-        ax.scatter(Xt[:,pc_x], Xt[:,pc_y], Xt[:, pc_z], c=y, cmap=cmap, s=s, alpha=alpha)
+        ax.scatter(Xt[:,pc_x], Xt[:,pc_y], Xt[:, pc_z], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
         ax.set_xlabel('PC'+str(pc_x+1)+' ('+str(round(pca.explained_variance_ratio_[pc_x]*100,2))+'%)')
         ax.set_ylabel('PC'+str(pc_y+1)+' ('+str(round(pca.explained_variance_ratio_[pc_y]*100,2))+'%)')
         ax.set_zlabel('PC'+str(pc_z+1)+' ('+str(round(pca.explained_variance_ratio_[pc_z]*100,2))+'%)')
+
+    # legend
+    legend_elements = [mpatches.Patch(color=cmap(norm(color_dict[key])), label=key) for key in color_dict]
+    ax.legend(handles=legend_elements, title = color, loc='upper right', bbox_to_anchor=(1.3, 1))
 
     return ax, pca
 

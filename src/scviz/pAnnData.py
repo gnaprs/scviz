@@ -1,6 +1,7 @@
 import pandas as pd
 import anndata as ad
 import numpy as np
+import scanpy as sc
 
 from scipy import sparse
 from sklearn.preprocessing import MultiLabelBinarizer
@@ -35,7 +36,7 @@ class pAnnData:
         if rs is not None:
             self._set_RS(rs)
 
-        self.history=[]
+        self.history = []
     
     # GETTERS
     @property
@@ -50,6 +51,10 @@ class pAnnData:
     def rs(self):
         return self._rs
 
+    @property
+    def history(self):
+        return self._history
+
     # SETTERS
     @prot.setter
     def prot(self, value):
@@ -63,6 +68,11 @@ class pAnnData:
     def rs(self, value):
         self._set_RS(value)
 
+    @history.setter
+    def history(self, value):
+        self._history = value
+
+    # UTILITY FUNCTIONS 
     def _set_RS(self, rs):
         # print rs shape, as well as protein and peptide shape if available
         print(f"Setting rs matrix with dimensions {rs.shape}")
@@ -77,7 +87,6 @@ class pAnnData:
             rs = rs.T
         self._rs = sparse.csr_matrix(rs)
 
-    # UTILITY FUNCTIONS 
     def __repr__(self):
         if self.prot is not None:
             prot_shape = f"{self.prot.shape[0]} files by {self.prot.shape[1]} proteins"
@@ -107,16 +116,42 @@ class pAnnData:
                 f"{pep_info}\n\n"
                 f"{rs_info}\n")
     
-    def has_data(self):
+    def _has_data(self):
         return self.prot is not None or self.pep is not None
-    
+
+    def append_history(self, action):
+        self.history.append(action)
+
     def print_history(self):
-        for i, action in enumerate(self.history, 1):
-            print(f"{i}: {action}")
+        formatted_history = "\n".join(f"{i}: {action}" for i, action in enumerate(self._history, 1))
+        print("-------------------------------\nHistory:\n"+formatted_history)
+
+    def set_x(self, layer, on = 'protein'):
+    # defines which layer to set X to
+        if not(self._has_data()):
+            raise ValueError("No protein or peptide data found in AnnData object.")
+        
+        if on not in ['protein', 'peptide']:
+            raise ValueError("on must be either 'protein' or 'peptide'.")
+        
+        if on == 'protein':
+            if layer not in self.prot.layers:
+                raise ValueError(f"Layer {layer} not found in protein data.")
+            self.prot.X = self.prot.layers[layer]
+            print(f"Set {on} data to layer {layer}.")
+
+        else:
+            if layer not in self.pep.layers:
+                raise ValueError(f"Layer {layer} not found in peptide data.")
+            self.pep.X = self.pep.layers[layer]
+            print(f"Set {on} data to layer {layer}.")
+
+        self.history.append(f"{on}: Set X to layer {layer}.")
 
     # PROCESSING FUNCTIONS
-    def impute(self,  method = 'median', on = 'protein'):
-        if not(self.has_data()):
+    # TODO!: add ability to impute within class (provide variable(s) for grouping, etc.)
+    def impute(self, method = 'median', on = 'protein'):
+        if not(self._has_data()):
             raise ValueError("No protein or peptide data found in AnnData object.")
 
         if on not in ['protein', 'peptide']:
@@ -130,39 +165,78 @@ class pAnnData:
 
         if method in imputers:
             imputer = imputers[method]
+            layer = 'X_impute_' + method
 
             if on == 'protein':
-                self.prot.obsm['X_raw'] = self.prot.X
+                self.prot.layers['X_raw'] = self.prot.X
                 if method == 'knn':
-                    self.prot.X = sparse.csr_matrix(imputer.fit_transform(self.prot.X.toarray()))
+                    self.prot.layers[layer] = sparse.csr_matrix(imputer.fit_transform(self.prot.X.toarray()))
                 else:
-                    self.prot.X = imputer.fit_transform(self.prot.X)
-                print(f"Imputed {on} data using {method}. New data stored in `X` with shape {self.prot.X.shape}.")
+                    self.prot.layers[layer] = imputer.fit_transform(self.prot.X)
+                print(f"Imputed {on} data using {method}. New data stored in `{layer}` with shape {self.prot.X.shape}.")
             else:
-                self.pep.obsm['X_raw'] = self.pep.X
+                self.pep.layers['X_raw'] = self.pep.X
                 if method == 'knn':
-                    self.pep.X = sparse.csr_matrix(imputer.fit_transform(self.pep.X.toarray()))
+                    self.pep.layers[layer] = sparse.csr_matrix(imputer.fit_transform(self.pep.X.toarray()))
                 else:
-                    self.pep.X = imputer.fit_transform(self.pep.X)
-                print(f"Imputed {on} data using {method}. New data stored in `X` with shape {self.pep.X.shape}.")
+                    self.pep.layers[layer] = imputer.fit_transform(self.pep.X)
+                print(f"Imputed {on} data using {method}. New data stored in `{layer}` with shape {self.pep.X.shape}.")
         else:
             raise ValueError(f"Unknown method: {method}")
         
-        self.history.append(f"Imputed data using {method} on {on}")
+        self.history.append(f"{on}: Imputed data using {method}. Raw data stored in `X_raw`. Imputed data stored in `{layer}`.")
+
+    # TODO: doesn't match my code... fix
+    def pca(self, on = 'protein', **kwargs):
+        if not(self._has_data()):
+            raise ValueError("No protein or peptide data found in AnnData object.")
+        
+        if on not in ['protein', 'peptide']:
+            raise ValueError("on must be either 'protein' or 'peptide'.")
+        
+        if on == 'protein':
+            sc.pp.pca(self.prot, **kwargs)
+            print(f"Performed PCA on {on} data. New data stored in `X_pca` with shape {self.prot.layers['X_pca'].shape}.")
+        else:
+            sc.pp.pca(self.pep, **kwargs)
+            print(f"Performed PCA on {on} data. New data stored in `X_pca` with shape {self.pep.layers['X_pca'].shape}.")
+
+        self.history.append(f"{on}: Performed PCA.")
+
+    def normalize(self, method = 'normalize_total', on = 'protein', **kwargs):
+        if not(self._has_data()):
+            raise ValueError("No protein or peptide data found in AnnData object.")
+        
+        if on not in ['protein', 'peptide']:
+            raise ValueError("on must be either 'protein' or 'peptide'.")
+        
+        if method == 'normalize_total':
+            if on == 'protein':
+                sc.pp.normalize_total(self.prot, **kwargs)
+                print(f"Normalized {on} data using {method}. New data stored in `X`.")
+            else:
+                sc.pp.normalize_total(self.pep, **kwargs)
+                print(f"Normalized {on} data using {method}. New data stored in `X`.")
+        else:
+            raise ValueError(f"Unknown method: {method}")
+        
+        self.history.append(f"{on}: Normalized data using {method}.")
 
     
 def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = None):
     if not prot_file and not pep_file:
         raise ValueError("At least one of prot_file or pep_file must be provided")
-
+    print("--------------------------\nStarting import...\n-----------------------")
+    
     if prot_file:
         # -----------------------------
+        print(f"Importing from {prot_file}")
         # PROTEIN DATA
         prot_all = pd.read_csv(prot_file, sep='\t')
         # prot_X: sparse data matrix
         prot_X = sparse.csr_matrix(prot_all.filter(regex='Abundance: F', axis=1).values).transpose()
-        # prot_obsm['mbr']: protein MBR identification
-        prot_obsm_mbr = prot_all.filter(regex='Found in Sample', axis=1).values.transpose()
+        # prot_layers['mbr']: protein MBR identification
+        prot_layers_mbr = prot_all.filter(regex='Found in Sample', axis=1).values.transpose()
         # prot_var_names: protein names
         prot_var_names = prot_all['Accession'].values
         # prot_var: protein metadata
@@ -172,11 +246,15 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         # prot_obs: sample typing from the column name
         prot_obs = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
         prot_obs = pd.DataFrame(prot_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(str.strip).astype('category')
+
+        print(f"Number of files: {len(prot_obs_names)}")
+        print(f"Number of proteins: {len(prot_var)}")
     else:
-        prot_X = prot_obsm_mbr = prot_var_names = prot_var = prot_obs_names = prot_obs = None
+        prot_X = prot_layers_mbr = prot_var_names = prot_var = prot_obs_names = prot_obs = None
 
     if pep_file:
         # -----------------------------
+        print(f"Importing from {pep_file}")
         # PEPTIDE DATA
         pep_all = pd.read_csv(pep_file, sep='\t')
         # pep_X: sparse data matrix
@@ -190,6 +268,9 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         # prot_obs: sample typing from the column name
         pep_obs = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
         pep_obs = pd.DataFrame(pep_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(str.strip).astype('category')
+
+        print(f"Number of files: {len(pep_obs_names)}")
+        print(f"Number of peptides: {len(pep_var)}")
     else:
         pep_X = pep_var_names = pep_obs_names = pep_var = None
 
@@ -204,6 +285,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
             index_dict = {protein: index for index, protein in enumerate(mlb.classes_)}
             reorder_indices = [index_dict[protein] for protein in prot_var_names]
             rs = rs[:, reorder_indices]
+        print("RS matrix successfully computed")
     else:
         rs = None
 
@@ -226,16 +308,16 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
 
     # pAnnData OBJECT - should be the same for all imports
     # -----------------------------
-
     pdata = pAnnData(prot_X, pep_X, rs)
 
     if prot_file:
         pdata.prot.obs = pd.DataFrame(prot_obs)
-        pdata.prot.obsm['X_mbr'] = prot_obsm_mbr
+        pdata.prot.layers['X_mbr'] = prot_layers_mbr
         pdata.prot.var = pd.DataFrame(prot_var)
         pdata.prot.obs_names = list(prot_obs_names)
         pdata.prot.var_names = list(prot_var_names)
         pdata.prot.obs.columns = obs_columns if obs_columns else list(range(len(prot_obs.columns)))
+        pdata.append_history(f"Imported protein data from {prot_file}")
 
     if pep_file:
         pdata.pep.obs = pd.DataFrame(pep_obs)
@@ -243,7 +325,9 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         pdata.pep.obs_names = list(pep_obs_names)
         pdata.pep.var_names = list(pep_var_names)
         pdata.pep.obs.columns = obs_columns if obs_columns else list(range(len(pep_obs.columns)))
+        pdata.append_history(f"Imported peptide data from {pep_file}")
 
+    print("pAnnData object created. Use `print(pdata)` to view the object.")
     return pdata
 
 # TODO!: Need to fix
