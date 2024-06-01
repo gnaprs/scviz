@@ -36,11 +36,13 @@ import matplotlib.patheffects as PathEffects
 from upsetplot import plot, generate_counts, from_contents, query, UpSet
 from adjustText import adjust_text
 import umap.umap_ as umap
+import scanpy as sc
 
 from scviz import utils
 
 sns.set_theme(context='paper', style='ticks')
 
+# DONE
 def get_color(resource_type, n=None):
     """
     Generate a list of colors, a colormap, or a palette from package defaults.
@@ -76,30 +78,6 @@ def get_color(resource_type, n=None):
     else:
         raise ValueError("Invalid resource_type. Options are 'colors', 'cmap', and 'palette'")
 
-def get_samples(adata,class_type):
-    """
-    Get the sample names for the given class(es) type.
-
-    Parameters:
-    - adata (anndata.AnnData): The AnnData object containing the sample names.
-    - class_type (str or list of str): The classes to use for selecting samples. E.g. 'cell_type' or ['cell_type', 'treatment'].
-
-    Returns:
-    - list of str: The sample names.
-
-    Example:
-    >>> samples = get_samples(adata, 'cell_type')
-    """
-
-    if class_type is None:
-        return None
-    elif isinstance(class_type, str):
-        return adata.obs[class_type].values.tolist()
-    elif isinstance(class_type, list):
-        return adata.obs[class_type].apply(lambda row: ', '.join(row.values.astype(str)), axis=1).values.tolist()
-    else:
-        raise ValueError("Invalid input for 'class_type'. It should be None, a string, or a list of strings.")
-
 def plot_significance(ax, x1, x2, y, h, col, pval):
     """
     Plot significance bars on a given axis.
@@ -132,6 +110,7 @@ def plot_significance(ax, x1, x2, y, h, col, pval):
     ax.plot([x1, x1, x2, x2], [y, y+h, y+h, y], lw=1, c=col)
     ax.text((x1+x2)*.5, y+h, sig, ha='center', va='bottom', color=col)
 
+# TODO: fix
 def plot_cv(ax,data,cases,color=['blue']):
     """
     Generate a box and whisker plot for the coefficient of variation (CV) of different cases.
@@ -174,7 +153,27 @@ def plot_cv(ax,data,cases,color=['blue']):
                     capprops=dict(color=color[j], linewidth=0.5))
     return ax
 
-def plot_pca(ax, pdata, color = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, plot_pc=[1,2]):
+# TODO: FIX this easy plot counts function
+def plot_count(ax, pdata, color = None, on = 'protein', cmap='default', s=20, alpha=.8, plot_pc=[1,2], force=False):
+    amnt_order = ['VTA', 'snpc', 'striatum', 'cortex']
+    # use the colors as in color_list ['#fc9744', '#9d9d9d', '#f4d03f', '#a454c7']
+    color_list = ['#fc9744', '#9d9d9d', '#f4d03f', '#a454c7']
+    # Create a dictionary mapping each region to its color
+    color_dict = dict(zip(amnt_order, color_list))
+
+
+    # Plot total_count for each amt with color by amount using Seaborn
+    sns.barplot(x='region', y='total_count', hue='region', data=df_filtered, errorbar='sd', capsize=.1, saturation=1, palette = color_dict, order=amnt_order)
+    # plot swarm plot over barplot
+    sns.stripplot(x='region', y='total_count', data=df_filtered, color='black', alpha=0.5, order=amnt_order)
+
+    plt.ylabel('Number of proteins with high confidence')
+    plt.xlabel('Region')
+    plt.ylim(0, 2500)
+    plt.gcf().set_size_inches(4,3)
+
+# add function to label file name?
+def plot_pca(ax, pdata, color = None, layer = "X", on = 'protein', n_comps = 50, cmap='default', s=20, alpha=.8, plot_pc=[1,2], force=False):
     """
     Plot PCA scatter plot.
 
@@ -186,6 +185,7 @@ def plot_pca(ax, pdata, color = None, layer = "X", on = 'protein', cmap='default
     - s (float, optional): The marker size. Default is 20.
     - alpha (float, optional): The marker transparency. Default is 0.8.
     - plot_pc (list, optional): The principal components to plot. Default is PC1 and PC2, as in [1, 2]. Can also include 3 components to plot in 3D, as in [1,2,3]
+    - force (bool, optional): If True, force PCA calculation even if already exists in pdata.{on}. Default is False. Use to force re-calculation on a different layer.
 
     Returns:
     - ax (matplotlib.axes.Axes): The axes with the scatter plot.
@@ -195,15 +195,16 @@ def plot_pca(ax, pdata, color = None, layer = "X", on = 'protein', cmap='default
     - AssertionError: If the axes is not a 3D projection but plot_pc includes 3 components.
 
     Example:
-    >>> import matplotlib.pyplot as plt
-    >>> import pandas as pd
-    >>> import numpy as np
+    >>> from scviz import pAnnData as pAnnData
     >>> from scviz import plotting as scplt
-    >>> data = pd.read_excel('tests/data.xlsx', sheet_name='Proteins')
-    >>> cases = [['head'],['heart'],['tail']]
+    >>> import numpy as np
+    >>> import matplotlib.pyplot as plt
+    >>> pdata = pAnnData.import_proteomeDiscoverer(prot_file='prot.txt', pep_file='pep.txt')
+    >>> color = 'type'
     >>> fig, ax = plt.subplots(1,1)
-    >>> ax, pca = scplt.plot_pca(ax, data, cases, cmap='viridis', s=20, alpha=.8, plot_pc=[1,2])
+    >>> ax, pca = scplt.plot_pca(ax, pdata, on = 'protein', layer = 'X_impute_median', color = color, s=20, alpha=.8, plot_pc=[1,2])
     """
+
 
     if len(plot_pc) == 3:
         assert ax.name == '3d', "The ax must be a 3D projection, please define projection='3d'"
@@ -220,59 +221,46 @@ def plot_pca(ax, pdata, color = None, layer = "X", on = 'protein', cmap='default
     else:
         raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
-    # check if X_pca already exists in adata
-    if 'X_pca' in adata.layers.keys():
-        print(f'PCA already exists in {on} data, using existing PCA')
-        Xt = adata.layers['X_pca']
-        pca = adata.uns['pca']
-    
+    if force == False:
+        if 'X_pca' in adata.obsm.keys():
+            print(f'PCA already exists in {on} data, using existing PCA')
+        else:
+            pdata.pca(on=on, layer=layer, n_comps=n_comps)
     else:
-        # make sample array
-        if layer == "X":
-            X = adata.X.toarray()
-        elif layer in adata.obsm.keys():
-            X = adata.layers[layer].toarray()
-        
-        
-        print(f'BEFORE: Number of samples|Number of proteins: {X.shape}')
-        X = np.log2(X + 1)
-        Xnorm = (X - X.mean(axis=0)) / X.std(axis=0)
-        Xnorm = Xnorm[:, ~np.isnan(Xnorm).any(axis=0)]
-        print(f'AFTER: Number of samples|Number of proteins: {Xnorm.shape}')
+        print(f'PCA calculation forced, re-calculating PCA')
+        pdata.pca(on=on, layer=layer, n_comps=n_comps)
 
-        pca = PCA()
-        Xt = pca.fit_transform(Xnorm)
+    X_pca = adata.obsm['X_pca']
+    pca = adata.uns['pca']
 
-        adata.layers['X_pca'] = Xt
-        adata.uns['pca'] = pca
-        pdata.append_history(f'{on}: PCA fitted, stored in {on}.layers["X_pca"] and {on}.uns["pca"]')
-
-        print(f'PCA fitted and stored in {on}.layers["X_pca"] and {on}.uns["pca"]')
-
-    y = get_samples(adata, color)
+    y = utils.get_samples(adata, color)
     color_dict = {class_type: i for i, class_type in enumerate(set(y))}
     color_mapped = [color_dict[val] for val in y]
-    cmap = get_color('cmap')
+    if cmap == 'default':  
+        cmap = get_color('cmap')
+    else:
+        cmap = cm.get_cmap(cmap)
     norm = mcolors.Normalize(vmin=min(color_mapped), vmax=max(color_mapped))
 
     if len(plot_pc) == 2:
-        ax.scatter(Xt[:,pc_x], Xt[:,pc_y], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
-        ax.set_xlabel('PC'+str(pc_x+1)+' ('+str(round(pca.explained_variance_ratio_[pc_x]*100,2))+'%)')
-        ax.set_ylabel('PC'+str(pc_y+1)+' ('+str(round(pca.explained_variance_ratio_[pc_y]*100,2))+'%)')
+        ax.scatter(X_pca[:,pc_x], X_pca[:,pc_y], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
+        ax.set_xlabel('PC'+str(pc_x+1)+' ('+str(round(pca['variance_ratio'][pc_x]*100,2))+'%)')
+        ax.set_ylabel('PC'+str(pc_y+1)+' ('+str(round(pca['variance_ratio'][pc_y]*100,2))+'%)')
 
     elif len(plot_pc) == 3:
-        ax.scatter(Xt[:,pc_x], Xt[:,pc_y], Xt[:, pc_z], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
-        ax.set_xlabel('PC'+str(pc_x+1)+' ('+str(round(pca.explained_variance_ratio_[pc_x]*100,2))+'%)')
-        ax.set_ylabel('PC'+str(pc_y+1)+' ('+str(round(pca.explained_variance_ratio_[pc_y]*100,2))+'%)')
-        ax.set_zlabel('PC'+str(pc_z+1)+' ('+str(round(pca.explained_variance_ratio_[pc_z]*100,2))+'%)')
+        ax.scatter(X_pca[:,pc_x], X_pca[:,pc_y], X_pca[:, pc_z], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
+        ax.set_xlabel('PC'+str(pc_x+1)+' ('+str(round(pca['variance_ratio'][pc_x]*100,2))+'%)')
+        ax.set_ylabel('PC'+str(pc_y+1)+' ('+str(round(pca['variance_ratio'][pc_y]*100,2))+'%)')
+        ax.set_zlabel('PC'+str(pc_z+1)+' ('+str(round(pca['variance_ratio'][pc_z]*100,2))+'%)')
 
     # legend
     legend_elements = [mpatches.Patch(color=cmap(norm(color_dict[key])), label=key) for key in color_dict]
-    ax.legend(handles=legend_elements, title = color, loc='upper right', bbox_to_anchor=(1.3, 1))
+    ax.legend(handles=legend_elements, title = color, loc='upper right', bbox_to_anchor=(1.35, 1), frameon=False)
 
     return ax, pca
 
-def plot_umap(ax, data, cases, cmap=cm.get_cmap('viridis'), s=20, alpha=.8, umap_params={}):
+# TODO
+def plot_umap(ax, pdata, color = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, force = False):
     """
     This function plots the Uniform Manifold Approximation and Projection (UMAP) of the protein data.
 
@@ -300,41 +288,52 @@ def plot_umap(ax, data, cases, cmap=cm.get_cmap('viridis'), s=20, alpha=.8, umap
     if umap_param['n_components'] == 3:
         assert ax.name == '3d', "The ax must be a 3D projection, please define projection='3d'"
 
-    dict_data = utils.get_abundance(data, cases, abun_type='raw')
+    if on == 'protein':
+        adata = pdata.prot
+    elif on == 'peptide':
+        adata = pdata.pep
+    else:
+        raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
+ 
+    if force == False:
+        if 'X_umap' in adata.obsm.keys():
+            print(f'UMAP already exists in {on} data, using existing UMAP')
+        else:
+            pdata.umap(on=on, layer=layer, **umap_param)
+    else:
+        print(f'UMAP calculation forced, re-calculating UMAP')
+        pdata.umap(on=on, layer=layer, **umap_param)
 
-    # make stack of all abundance data
-    X = np.hstack([np.array(dict_data[list(dict_data.keys())[i]]) for i in range(len(dict_data))])
-    X = X.T
+    Xt = adata.obsm['X_umap']
+    umap = adata.uns['umap']
 
-    # make sample array
-    y = np.hstack([np.repeat(i, dict_data[list(dict_data.keys())[i]].shape[1]) for i in range(len(dict_data))])
-    print(f'BEFORE: Number of samples|Number of proteins: {X.shape}')
-
-    # remove columns that contain nan in X
-    X = X[:, ~np.isnan(X).any(axis=0)]
-    print(f'AFTER: Number of samples|Number of proteins: {X.shape}')
-    # X = np.log2(X+1)
-
-    Xnorm = (X - X.mean(axis=0)) / X.std(axis=0)
-
-    fit_umap = umap.UMAP(**umap_param)
-    Xt = fit_umap.fit_transform(Xnorm)
-    # Xt = pca.fit_transform(Xnorm)
+    y = utils.get_samples(adata, color)
+    color_dict = {class_type: i for i, class_type in enumerate(set(y))}
+    color_mapped = [color_dict[val] for val in y]
+    if cmap == 'default':  
+        cmap = get_color('cmap')
+    else:
+        cmap = cm.get_cmap(cmap)
+    norm = mcolors.Normalize(vmin=min(color_mapped), vmax=max(color_mapped))
 
     if umap_param['n_components'] == 1:
-        ax.scatter(Xt[:,0], range(len(Xt)), c=y, cmap=cmap)
+        ax.scatter(Xt[:,0], range(len(Xt)), c=color_mapped, cmap=cmap, s=s, alpha=alpha)
         ax.set_xlabel('UMAP 1')
     if umap_param['n_components'] == 2:
-        ax.scatter(Xt[:,0], Xt[:,1], c=y, cmap=cmap)
+        ax.scatter(Xt[:,0], Xt[:,1], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
         ax.set_xlabel('UMAP 1')
         ax.set_ylabel('UMAP 2')
     if umap_param['n_components'] == 3:
-        ax.scatter(Xt[:,0], Xt[:,1], Xt[:,2], c=y, cmap=cmap)
+        ax.scatter(Xt[:,0], Xt[:,1], Xt[:,2], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
         ax.set_xlabel('UMAP 1')
         ax.set_ylabel('UMAP 2')
         ax.set_zlabel('UMAP 3')
 
-    return ax, fit_umap
+    # legend
+    legend_elements = [mpatches.Patch(color=cmap(norm(color_dict[key])), label=key) for key in color_dict]
+    ax.legend(handles=legend_elements, title = color, loc='upper right', bbox_to_anchor=(1.3, 1))
+
+    return ax, umap
 
 def plot_pca_scree(ax, pca):
     """

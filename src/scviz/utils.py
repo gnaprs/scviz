@@ -2,6 +2,7 @@
 This module contains functions for processing protein data and performing statistical tests.
 
 Functions:
+    get_samples: Get the sample names for the given class(es) type.
     protein_summary: Import protein data from an Excel file and summarize characteristics about each sample and sample groups.
     append_norm: Append normalized protein data to the original protein data.
     get_cv: Calculate the coefficient of variation (CV) for each case in the given data.
@@ -41,6 +42,31 @@ from sklearn.impute import SimpleImputer, KNNImputer
 from scviz import pAnnData
 
 # Thoughts: functions that act on panndata and return only panndata should be panndata methods, utility functions should be in utils
+
+def get_samples(adata,class_type):
+    """
+    Get the sample names for the given class(es) type.
+
+    Parameters:
+    - adata (anndata.AnnData): The AnnData object containing the sample names.
+    - class_type (str or list of str): The classes to use for selecting samples. E.g. 'cell_type' or ['cell_type', 'treatment'].
+
+    Returns:
+    - list of str: The sample names.
+
+    Example:
+    >>> samples = get_samples(adata, 'cell_type')
+    """
+
+    if class_type is None:
+        return None
+    elif isinstance(class_type, str):
+        return adata.obs[class_type].values.tolist()
+    elif isinstance(class_type, list):
+        return adata.obs[class_type].apply(lambda row: ', '.join(row.values.astype(str)), axis=1).values.tolist()
+    else:
+        raise ValueError("Invalid input for 'class_type'. It should be None, a string, or a list of strings.")
+
 
 # TODO: move to class function  
 def get_protein_summary(data, variables = ['region','amt']):
@@ -600,6 +626,43 @@ def convert_identifiers(input_list, input_type, output_type, df):
     output_list = df.loc[df[input_type].isin(input_list), output_type].tolist()
 
     return output_list
+
+
+def get_pca_importance(model, initial_feature_names):
+    """
+    Get the most important feature for each principal component in a PCA model.
+
+    Args:
+        model (sklearn.decomposition.PCA): The PCA model.
+        initial_feature_names (list): The initial feature names. Typically adata.var_names.
+
+    Returns:
+        df (pd.DataFrame): A DataFrame containing the most important feature for each principal component.
+
+    Example:
+        >>> from scviz import utils as scutils
+        >>> pca = PCA(n_components=5)
+        >>> pca.fit(data)
+        >>> df = scutils.get_pca_importance(pca)
+    """
+
+    # number of components
+    n_pcs= model.components_.shape[0]
+
+    # get the index of the most important feature on EACH component
+    # LIST COMPREHENSION HERE
+    most_important = [np.abs(model.components_[i]).argmax() for i in range(n_pcs)]
+
+    # get the names
+    most_important_names = [initial_feature_names[most_important[i]] for i in range(n_pcs)]
+
+    # LIST COMPREHENSION HERE AGAIN
+    dic = {'PC{}'.format(i): most_important_names[i] for i in range(n_pcs)}
+
+    # build the dataframe
+    df = pd.DataFrame(dic.items())
+
+    return df
 
 # NEED TO SOFTCODE THIS...
 # def get_upset_contents(type):

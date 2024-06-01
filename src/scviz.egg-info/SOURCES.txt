@@ -1,7 +1,5 @@
 LICENSE
-README.md
 pyproject.toml
-src/scviz/__init__.py
 src/scviz/pAnnData.py
 src/scviz/plotting.py
 src/scviz/setup.py
