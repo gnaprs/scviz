@@ -240,7 +240,6 @@ def dotplot_ora(data,plotname):
     plt.savefig(plotname)
     plt.close()
 
-
 def get_string_id(gene,species = 9606):
     string_api_url = "https://version-11-5.string-db.org/api"
     output_format = "tsv-no-header"

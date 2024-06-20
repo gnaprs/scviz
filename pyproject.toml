@@ -26,7 +26,8 @@ dependencies = [
   "scipy",
   "umap-learn",
   "adjustText",
-  "AnnData"
+  "AnnData",
+  "goatools"
 ]
 
 [project.urls]

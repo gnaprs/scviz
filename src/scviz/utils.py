@@ -42,6 +42,8 @@ from scipy.sparse import csr_matrix
 from sklearn.impute import SimpleImputer, KNNImputer
 from scviz import pAnnData
 
+
+
 # Thoughts: functions that act on panndata and return only panndata should be panndata methods, utility functions should be in utils
 
 def get_samplenames(adata,class_type):
@@ -563,7 +565,6 @@ def convert_identifiers(input_list, input_type, output_type, df):
 
     return output_list
 
-
 def get_pca_importance(model, initial_feature_names):
     """
     Get the most important feature for each principal component in a PCA model.
@@ -599,6 +600,83 @@ def get_pca_importance(model, initial_feature_names):
     df = pd.DataFrame(dic.items())
 
     return df
+
+# TO INTEGRATE
+def get_string_id(gene,species = 9606):
+    string_api_url = "https://version-11-5.string-db.org/api"
+    output_format = "tsv-no-header"
+    method = "get_string_ids"
+    
+    params = {
+        "identifiers" : "\r".join(gene),
+        "species" : species, 
+        "limit" : 1, 
+        "echo_query" : 1,
+    }
+    
+    request_url = "/".join([string_api_url, output_format, method])
+    results = requests.post(request_url, data=params)
+    s_id = []
+    for line in results.text.strip().split("\n"):
+        l = line.split("\t")
+        try:
+            string_id = l[2]
+            s_id.append(string_id)
+        except:
+            continue
+    
+    return s_id
+
+# TO INTEGRATE
+def get_string_annotation(gene,universe,species = 9606):
+    string_api_url = "https://version-11-5.string-db.org/api"
+    output_format = "json"
+    method = "enrichment"
+
+    params = {
+        "identifiers" : "%0d".join(gene),
+        # "background_string_identifiers": "%0d".join(universe),
+        "species" : species
+    }
+    
+    request_url = "/".join([string_api_url, output_format, method])
+    results = requests.post(request_url, data=params)
+    print(results.text)
+    try:
+        annotation = pd.read_json(results.text)
+    except:
+        annotation = pd.DataFrame()
+    return annotation
+
+# TO INTEGRATE
+def get_string_network(gene,comparison,species = 9606):
+    string_api_url = "https://version-11-5.string-db.org/api"
+    output_format = "highres_image"
+    method = "network"
+    
+    if len(gene) <= 10:
+        hide_label = 0
+    else:
+        hide_label = 1
+    
+    params = {
+        "identifiers" : "%0d".join(get_string_id(gene)),
+        "species" : species,
+        "required_score" : 700,
+        "hide_disconnected_nodes" : hide_label,
+        "block_structure_pics_in_bubbles" : 1,
+        "flat_node_design" : 1,
+        "center_node_labels" : 1
+    }
+    
+    request_url = "/".join([string_api_url, output_format, method])
+    response = requests.post(request_url, data=params)
+    
+    with open(f'{comparison}.png','wb') as file:
+        file.write(response.content)
+    
+    return True
+
 
 # NEED TO SOFTCODE THIS...
 # def get_upset_contents(type):

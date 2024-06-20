@@ -68,11 +68,11 @@ class pAnnData:
 
     # SETTERS
     @prot.setter
-    def prot(self, value):
+    def prot(self, value: ad.AnnData):
         self._prot = value
 
     @pep.setter
-    def pep(self, value):
+    def pep(self, value: ad.AnnData):
         self._pep = value
 
     @rs.setter
@@ -550,7 +550,11 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
 
     # TO ADD: number of peptides detected?
     # prot_var: protein metadata
-    prot_var = report_all.loc[:, ['First.Protein.Description', 'Genes', 'Master.Protein']].drop_duplicates(subset='Master.Protein').drop(columns='Master.Protein')
+    prot_var_columns = ['Genes', 'Master.Protein']
+    if 'First.Protein.Description' in report_all.columns:
+        prot_var_columns.insert(0, 'First.Protein.Description')
+
+    prot_var = report_all.loc[:, prot_var_columns].drop_duplicates(subset='Master.Protein').drop(columns='Master.Protein')
     # prot_obs: sample typing from the column name
     prot_obs = pd.DataFrame(prot_X_pivot.columns.values, columns=['Run'])['Run'].str.split('_', expand=True).rename(columns=dict(enumerate(obs_columns)))
     
@@ -567,7 +571,8 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     # pep_obs_names: file names
     pep_obs_names = pep_X_pivot.columns.values
     # pep_var: peptide sequence with modifications
-    pep_var = report_all.loc[:, ['Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id']].drop_duplicates(subset='Precursor.Id').drop(columns='Precursor.Id')
+    pep_var_columns = ['Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id']
+    pep_var = report_all.loc[:, pep_var_columns].drop_duplicates(subset='Precursor.Id').drop(columns='Precursor.Id')
     # pep_obs: sample typing from the column name, same as prot_obs
     pep_obs = prot_obs
 
