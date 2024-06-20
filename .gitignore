@@ -11,3 +11,5 @@ CHANGELOG.md
 dev/report.tsv
 dev/report.pg_matrix.tsv
 dev/rs.csv
+dev/rs_diann.csv
+dev/report_all.tsv

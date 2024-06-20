@@ -6,7 +6,7 @@ import scanpy as sc
 import copy
 
 from scipy import sparse
-from sklearn.preprocessing import MultiLabelBinarizer
+from sklearn.preprocessing import MultiLabelBinarizer, normalize
 from sklearn.decomposition import PCA
 from sklearn.impute import SimpleImputer, KNNImputer
 
@@ -142,17 +142,17 @@ class pAnnData:
         else:
             return True
 
-    def _calculate_stats(self, on = 'protein'):
-        if on == 'protein':
-            self.prot.obs['protein_count'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1)
+    def _summary(self):
+        if self.prot is not None:
             self.prot.obs['quant'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1) / self.prot.X.shape[1]
+            self.prot.obs['protein_count'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1)
             if 'X_mbr' in self.prot.layers:
                 self.prot.obs['mbr_count'] = (self.prot.layers['X_mbr'] == 'Peak Found').sum(axis=1)
                 self.prot.obs['high_count'] = (self.prot.layers['X_mbr'] == 'High').sum(axis=1)
 
-        elif on == 'peptide':
-            self.pep.obs['peptide_count'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1)
+        if self.pep is not None:
             self.pep.obs['quant'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1) / self.pep.X.shape[1]
+            self.pep.obs['peptide_count'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1)
             if 'X_mbr' in self.pep.layers:
                 self.pep.obs['mbr_count'] = (self.pep.layers['X_mbr'] == 'Peak Found').sum(axis=1)
                 self.pep.obs['high_count'] = (self.pep.layers['X_mbr'] == 'High').sum(axis=1)
@@ -164,20 +164,15 @@ class pAnnData:
         formatted_history = "\n".join(f"{i}: {action}" for i, action in enumerate(self._history, 1))
         print("-------------------------------\nHistory:\n-------------------------------\n"+formatted_history)
 
+    # -----------------------------
     # EDITING FUNCTIONS
-    # TODO
-    def filter(self, obs = None, var = None, obsm = None, layers = None, on = 'protein'):
-        # function filters the data based on the provided criteria
-        if not self._check_data(on):
-            pass
-        
     def copy(self):
         """
         Returns a deep copy of the pAnnData object.
         """
         return copy.deepcopy(self)
 
-    def set_x(self, layer, on = 'protein'):
+    def set_X(self, layer, on = 'protein'):
         # defines which layer to set X to
             if not self._check_data(on):
                 pass
@@ -196,6 +191,7 @@ class pAnnData:
 
             self.history.append(f"{on}: Set X to layer {layer}.")
 
+    # -----------------------------
     # PROCESSING FUNCTIONS
     # TODO: add cv calculation, typically within class (provide variable(s) for grouping, etc.), default assumes all samples are in the same group
     # FIX CLASSES
@@ -212,7 +208,7 @@ class pAnnData:
             # do nothing
             pass
         elif layer in adata.layers.keys():
-            self.set_x(layer = layer, on = on)
+            self.set_X(layer = layer, on = on)
 
         if classes is None:
             means = np.mean(adata.X.toarray(), axis=0)
@@ -298,7 +294,7 @@ class pAnnData:
             # do nothing
             pass
         elif layer in adata.layers.keys():
-            self.set_x(layer = layer, on = on)
+            self.set_X(layer = layer, on = on)
 
         sc.pp.neighbors(adata, **kwargs)
 
@@ -323,7 +319,7 @@ class pAnnData:
             # do nothing
             pass
         elif layer in adata.layers.keys():
-            self.set_x(layer = layer, on = on)
+            self.set_X(layer = layer, on = on)
 
         sc.tl.umap(adata, **kwargs)
 
@@ -369,20 +365,29 @@ class pAnnData:
         print(f'{on}: PCA fitted on {layer} and and stored in layers["X_pca"] and uns["pca"]')
 
     # TODO: add ability to normalize within class (provide variable(s) for grouping, etc.), median normalization options
-    def normalize(self, method = 'scale', on = 'protein', set_x = True, **kwargs):  
+    def normalize(self, method = 'scale', on = 'protein', set_X = True, **kwargs):  
         if not self._check_data(on):
             pass
 
+        EPSILON = 1e-10  # small constant
+
         if method == 'scale':
             if on == 'protein':
-                row_sums = self.prot.X.toarray().sum(axis=1)
+                row_sums = np.nansum(self.prot.X.toarray(), axis=1)
                 max_row_sum = np.max(row_sums)
-                self.prot.layers['X_scale'] = self.prot.X.toarray() / row_sums[:, np.newaxis] * max_row_sum
+                self.prot.layers['X_scale'] = sparse.csr_matrix(self.prot.X.toarray() / (row_sums[:, np.newaxis] + EPSILON) * max_row_sum)
                 print(f"Normalized {on} data using {method}.")
             else:
-                row_sums = self.pep.X.toarray().sum(axis=1)
+                row_sums = np.nansum(self.pep.X.toarray(), axis=1)
                 max_row_sum = np.max(row_sums)
-                self.pep.layers['X_scale'] = self.pep.X.toarray() / row_sums[:, np.newaxis] * max_row_sum
+                self.pep.layers['X_scale'] = sparse.csr_matrix(self.pep.X.toarray() / (row_sums[:, np.newaxis] + EPSILON) * max_row_sum)
+                print(f"Normalized {on} data using {method}.")
+        elif method == "l2":
+            if on == 'protein':
+                self.prot.layers['X_l2'] = normalize(self.prot.X, norm='l2')
+                print(f"Normalized {on} data using {method}.")
+            else:
+                self.pep.layers['X_l2'] = normalize(self.pep.X, norm='l2')
                 print(f"Normalized {on} data using {method}.")
         elif method == 'log2':
             if on == 'protein':
@@ -395,8 +400,9 @@ class pAnnData:
             raise ValueError(f"Unknown method: {method}")
                   
         self.history.append(f"{on}: Normalized X_raw data using {method} and stored as layers[X_{method}].")
-        if set_x:
-            self.set_x(layer = 'X_log2', on = on)
+        if set_X:
+            layer_name = 'X_' + method
+            self.set_X(layer = layer_name, on = on)
 
         
 
@@ -507,7 +513,6 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         pdata.prot.var_names = list(prot_var_names)
         pdata.prot.obs.columns = obs_columns if obs_columns else list(range(len(prot_obs.columns)))
         pdata._append_history(f"Imported protein data from {prot_file}")
-        pdata._calculate_stats(on = 'protein')
 
     if pep_file:
         pdata.pep.obs = pd.DataFrame(pep_obs)
@@ -518,62 +523,69 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         pdata.pep.var_names = list(pep_var_names)
         pdata.pep.obs.columns = obs_columns if obs_columns else list(range(len(pep_obs.columns)))
         pdata._append_history(f"Imported peptide data from {pep_file}")
-        pdata._calculate_stats(on = 'peptide')
+
+    pdata._summary()
 
     print("pAnnData object created. Use `print(pdata)` to view the object.")
     return pdata
 
-# TODO: Need to fix
 def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None):
     if not report_file:
-        raise ValueError("DIA-NN report.tsv must be provided")
+        raise ValueError("Importing from DIA-NN: report.tsv must be provided")
+    print("--------------------------\nStarting import...\n--------------------------")
 
+    print(f"Importing from {report_file}")
     report_all = pd.read_csv(report_file, sep='\t')
+    report_all['Master.Protein'] = report_all['Protein.Group'].str.split(';')
+    report_all = report_all.explode('Master.Protein')
     # -----------------------------
     # PROTEIN DATA
     # prot_X: sparse data matrix
-    prot_X_pivot = report_all.pivot_table(index='Protein.Group', columns='Run', values='PG.MaxLFQ', aggfunc='first')
-    prot_X_pivot.fillna(0, inplace=True)
-    prot_X = sparse.csr_matrix(prot_X_pivot.values)
+    prot_X_pivot = report_all.pivot_table(index='Master.Protein', columns='Run', values='PG.MaxLFQ', aggfunc='first')
+    prot_X = sparse.csr_matrix(prot_X_pivot.values).T
     # prot_var_names: protein names
     prot_var_names = prot_X_pivot.index.values
     # prot_obs: file names
     prot_obs_names = prot_X_pivot.columns.values
 
-    # MISSING
+    # TO ADD: number of peptides detected?
     # prot_var: protein metadata
-    prot_var = report_all.loc[:, 'Protein FDR Confidence: Combined':'# Razor Peptides']
+    prot_var = report_all.loc[:, ['First.Protein.Description', 'Genes', 'Master.Protein']].drop_duplicates(subset='Master.Protein').drop(columns='Master.Protein')
     # prot_obs: sample typing from the column name
-    prot_obs = report_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
-    prot_obs = pd.DataFrame(prot_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(str.strip).astype('category')
+    prot_obs = pd.DataFrame(prot_X_pivot.columns.values, columns=['Run'])['Run'].str.split('_', expand=True).rename(columns=dict(enumerate(obs_columns)))
+    
+    print(f"Number of files: {len(prot_obs_names)}")
+    print(f"Number of proteins: {len(prot_var)}")
 
     # -----------------------------
     # PEPTIDE DATA
     # pep_X: sparse data matrix
     pep_X_pivot = report_all.pivot_table(index='Precursor.Id', columns='Run', values='Precursor.Translated', aggfunc='first')
-    pep_X_pivot.fillna(0, inplace=True)
-    pep_X = sparse.csr_matrix(pep_X_pivot.values)
-    # pep_var: peptide sequence
-    pep_var = pep_X_pivot.index.values
-    # pep_obs: file names
-    pep_obs = pep_X_pivot.columns.values
-
-    # MISSING
-    # pep_var_names: peptide sequence with modifications
-    pep_var_names = (report_all['Annotated Sequence'] + np.where(report_all['Modifications'].isna(), '', ' MOD:' + report_all['Modifications'])).values
+    pep_X = sparse.csr_matrix(pep_X_pivot.values).T
+    # pep_var_names: peptide sequence
+    pep_var_names = pep_X_pivot.index.values
     # pep_obs_names: file names
-    pep_obs_names = report_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: (F\d+):')[0].values
+    pep_obs_names = pep_X_pivot.columns.values
+    # pep_var: peptide sequence with modifications
+    pep_var = report_all.loc[:, ['Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id']].drop_duplicates(subset='Precursor.Id').drop(columns='Precursor.Id')
+    # pep_obs: sample typing from the column name, same as prot_obs
+    pep_obs = prot_obs
+
+    print(f"Number of files: {len(pep_obs_names)}")
+    print(f"Number of peptides: {len(pep_var)}")
 
     # -----------------------------
     # RS DATA
     # rs: protein x peptide relational data
-    pep_prot_list = report_all.drop_duplicates(subset=['Precursor.Id'])['Protein.Group'].str.split('; ')
+    pep_prot_list = report_all.drop_duplicates(subset=['Precursor.Id'])['Protein.Group'].str.split(';')
     mlb = MultiLabelBinarizer()
     rs = mlb.fit_transform(pep_prot_list)
     index_dict = {protein: index for index, protein in enumerate(mlb.classes_)}
-    reorder_indices = [index_dict[protein] for protein in prot_var]
+    reorder_indices = [index_dict[protein] for protein in prot_var_names]
     rs = rs[:, reorder_indices]
+    print("RS matrix successfully computed")
 
+    # -----------------------------
     # ASSERTIONS
     # -----------------------------
     # check that all files overlap, and that the order is the same
@@ -581,7 +593,6 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
         assert set(pep_obs_names) == set(prot_obs_names), "The files in peptide and protein data must be the same"
     # -----------------------------
     # check if mlb.classes_ has overlap with prot_var
-
     mlb_classes_set = set(mlb.classes_)
     prot_var_set = set(prot_var_names)
 
@@ -607,5 +618,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     pdata.pep.obs_names = list(pep_obs_names)
     pdata.pep.var_names = list(pep_var_names)
     pdata.pep.obs.columns = obs_columns if obs_columns else list(range(len(pep_obs.columns)))
+
+    print("pAnnData object created. Use `print(pdata)` to view the object.")
 
     return pdata
