@@ -15,6 +15,19 @@ from sklearn.preprocessing import StandardScaler
 
 warnings.filterwarnings('ignore')
 
+#genedown = df_de[df_de['hit'] == 'Downregulated'].index
+#geneup = df_de[df_de['hit'] == 'Upregulated'].index
+#genehit = df_de[df_de['hit'] != 'Insignificant'].index
+#Upregulated.append(set(geneup))
+#Downregulated.append(set(genedown))
+#print(geneup)
+#import_functions.get_string_network(geneup,f'ora\\Upregulated_{sample_name}_{cells}_interactome')
+#import_functions.get_string_network(genedown,f'ora\\Downregulated_{sample_name}_{cells}_interactome')
+#import_functions.get_string_network(genehit,f'ora\\Hit_{sample_name}_{cells}_interactome')
+#anno_up = import_functions.get_string_annotation(geneup,universe)
+#print(anno_up)
+#anno_up.to_csv(f'ora\\Upregulated_{sample_name}_{cells}_annotation.csv',index = False)
+
 def volcano_plot(data,figname,fc_column,p_column,
                  fc_cutoff = [-1,1],
                  p_cutoff = 0.05,
@@ -272,7 +285,27 @@ def get_string_annotation(gene,universe,species = 9606):
 
     params = {
         "identifiers" : "%0d".join(gene),
-        # "background_string_identifiers": "%0d".join(universe),
+        "background_string_identifiers": "%0d".join(universe),
+        "species" : species
+    }
+    
+    request_url = "/".join([string_api_url, output_format, method])
+    results = requests.post(request_url, data=params)
+    print(results.text)
+    try:
+        annotation = pd.read_json(results.text)
+    except:
+        annotation = pd.DataFrame()
+    return annotation
+
+def get_string_ppi(gene,universe,species = 9606):
+    string_api_url = "https://version-11-5.string-db.org/api"
+    output_format = "json"
+    method = "ppi_enrichment"
+
+    params = {
+        "identifiers" : "%0d".join(gene),
+        "background_string_identifiers": "%0d".join(universe),
         "species" : species
     }
     

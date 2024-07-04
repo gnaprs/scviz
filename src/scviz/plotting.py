@@ -111,7 +111,7 @@ def plot_significance(ax, x1, x2, y, h, col, pval):
     ax.text((x1+x2)*.5, y+h, sig, ha='center', va='bottom', color=col)
 
 # TODO: fix
-def plot_cv(ax,data,cases,color=['blue']):
+def plot_cv(ax,data,value='protein_count', classes=None, **kwargs):
     """
     Generate a box and whisker plot for the coefficient of variation (CV) of different cases.
 
@@ -153,38 +153,44 @@ def plot_cv(ax,data,cases,color=['blue']):
                     capprops=dict(color=color[j], linewidth=0.5))
     return ax
 
-# TODO: FIX this easy plot counts function
-def plot_count(ax, pdata, color = None, on = 'protein', cmap='default', s=20, alpha=.8, plot_pc=[1,2], plot_order = None):
-    
-    if on == 'protein':
-        adata = pdata.prot
-    elif on == 'peptide':
-        adata = pdata.pep
+def plot_summary(ax, pdata, value='protein_count', classes=None, **kwargs):
+    if pdata.summary is None:
+        pdata._summary()
+
+    plot_data = pdata.summary.copy()
+
+    if classes is None:
+        sns.barplot(x=plot_data.index, y=value, data=plot_data, ax=ax, **kwargs)
+    elif isinstance(classes, str):
+        sns.barplot(x=plot_data.index, y=value, hue=classes, data=plot_data, ax=ax, **kwargs)
+    elif isinstance(classes, list) and len(classes) > 0:
+        if len(classes) == 1:
+            sns.catplot(x=plot_data.index, y=value, hue=classes[0], data=plot_data, kind='bar', ax=ax, **kwargs)
+        elif len(classes) >= 2:
+            plot_data['combined_classes'] = plot_data[classes[1:]].astype(str).agg('-'.join, axis=1)
+            # Create a subplot for each unique value in classes[0]
+            unique_values = plot_data[classes[0]].unique()
+            num_unique_values = len(unique_values)
+            
+            fig, ax = plt.subplots(nrows=num_unique_values, figsize=(10, 5 * num_unique_values))
+            
+            if num_unique_values == 1:
+                ax = [ax]  # Ensure axes is iterable
+            
+            for ax_sub, unique_value in zip(ax, unique_values):
+                subset_data = plot_data[plot_data[classes[0]] == unique_value]
+                sns.barplot(x=subset_data.index, y=value, hue='combined_classes', data=subset_data, ax=ax_sub, **kwargs)
+                ax_sub.set_title(f"{classes[0]}: {unique_value}")
+                ax_sub.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+            
+            plt.tight_layout()            
     else:
-        raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
+        raise ValueError("Invalid 'classes' parameter. It should be None, a string, or a non-empty list.")
 
-    if color != None:
-        plot_labels = utils.get_samplenames(adata, color)
-    else:
-        plot_labels = adata.obs.index
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+    plt.tight_layout()
 
-    if plot_order == None:
-        plot_order = list(set(plot_labels))
-    color_list = get_color('colors', len(plot_order))
-    # Create a dictionary mapping each region to its color
-    color_dict = dict(zip(plot_order, color_list))
-
-
-
-    # Plot total_count for each amt with color by amount using Seaborn
-    sns.barplot(x='region', y='total_count', hue='region', data=df_filtered, errorbar='sd', capsize=.1, saturation=1, palette = color_dict, order=amnt_order)
-    # plot swarm plot over barplot
-    sns.stripplot(x='region', y='total_count', data=df_filtered, color='black', alpha=0.5, order=amnt_order)
-
-    plt.ylabel('Number of proteins with high confidence')
-    plt.xlabel('Region')
-    plt.ylim(0, 2500)
-    plt.gcf().set_size_inches(4,3)
+    return ax
 
 # add function to label file name?
 # TODO: implement like pl.umap (sc.pl.umap(pdata.prot, color = ['P62258-1','P12814-1','Q13509', 'type'])) to return list of ax?

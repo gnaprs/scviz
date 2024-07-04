@@ -131,6 +131,8 @@ def filter(pdata, class_type, values, exact_cases = False):
             adata = pdata.pep
             pdata.pep = adata[eval(query)]
         pdata._summary()
+ 
+    pdata._append_history(f"Filtered by class type: {class_type}, values: {values}, exact_cases: {exact_cases}. Copy of the filtered pAnnData object returned.")
 
     return pdata
 
@@ -198,7 +200,7 @@ def get_cv(data, cases, variables=['region', 'amt'], sharedPeptides = False):
 
     return cv_df
 
-# TODO: DEPRECATED, now as get_samples()
+# TODO: DEPRECATED, now as filter()
 def get_abundance(data: pd.DataFrame, cases: List[List[str]], prot_list: Optional[List[str]] = None, list_type: str = 'accession',abun_type: str = 'average') -> Dict[str, Any]:
     """
     Returns the abundance of proteins in the given data.
@@ -289,7 +291,7 @@ def get_abundance(data: pd.DataFrame, cases: List[List[str]], prot_list: Optiona
     else:
         return {}
 
-# TODO: maybe call stats_ttest instead
+# TODO: fix with pdata.summary maybe call stats_ttest instead
 def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_results=False, test_variable='total_count'):
     """
     Run t-tests on specified groups in a DataFrame returned from get_protein_summary.
@@ -459,8 +461,9 @@ def get_abundance_query(pdata, cases, genelist, search='gene', on = 'protein'):
 
     return matched_features_data, combined_abundance_data
 
-# !TODO: DONE W PANNDATA INTEGRATION | implement chi2 and fisher tests, consider also adding correlation tests
-def get_DE(pdata, class_type, values, on = 'protein', method='ttest'):
+# !TODO: implement chi2 and fisher tests, consider also adding correlation tests
+# FC method: specify mean, prot pairwise median, or pep pairwise median
+def stats_DE(pdata, class_type, values, on = 'protein', method='ttest'):
     """
     Calculate differential expression (DE) of proteins across different groups.
 
@@ -489,12 +492,15 @@ def get_DE(pdata, class_type, values, on = 'protein', method='ttest'):
     if len(values) != 2:
         raise ValueError('Please provide exactly two cases to compare.')
 
+    pdata_case1 = filter(pdata, class_type, values[0], exact_cases=True)
+    pdata_case2 = filter(pdata, class_type, values[1], exact_cases=True)
+
     if on == 'protein':
-        abundance_case1 = get_samples(pdata, class_type, values[0], exact_cases=True).prot
-        abundance_case2 = get_samples(pdata, class_type, values[1], exact_cases=True).prot
+        abundance_case1 = pdata_case1.prot
+        abundance_case2 = pdata_case2.prot
     elif on == 'peptide':
-        abundance_case1 = get_samples(pdata, class_type, values[0], exact_cases=True).pep
-        abundance_case2 = get_samples(pdata, class_type, values[1], exact_cases=True).pep
+        abundance_case1 = pdata_case1.pep
+        abundance_case2 = pdata_case2.pep
 
     n1 = abundance_case1.shape[0]
     n2 = abundance_case2.shape[0]

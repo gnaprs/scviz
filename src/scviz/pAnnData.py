@@ -12,6 +12,9 @@ from sklearn.impute import SimpleImputer, KNNImputer
 
 import umap.umap_ as umap
 
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 from typing import (  # Meta  # Generic ABCs  # Generic
     TYPE_CHECKING,
     Any,
@@ -48,6 +51,7 @@ class pAnnData:
             self._rs = None
 
         self.history = []
+        self.summary = pd.DataFrame()
     
     # GETTERS
     @property
@@ -144,18 +148,62 @@ class pAnnData:
 
     def _summary(self):
         if self.prot is not None:
-            self.prot.obs['quant'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1) / self.prot.X.shape[1]
+            self.prot.obs['protein_quant'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1) / self.prot.X.shape[1]
             self.prot.obs['protein_count'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1)
             if 'X_mbr' in self.prot.layers:
                 self.prot.obs['mbr_count'] = (self.prot.layers['X_mbr'] == 'Peak Found').sum(axis=1)
                 self.prot.obs['high_count'] = (self.prot.layers['X_mbr'] == 'High').sum(axis=1)
 
         if self.pep is not None:
-            self.pep.obs['quant'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1) / self.pep.X.shape[1]
+            self.pep.obs['peptide_quant'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1) / self.pep.X.shape[1]
             self.pep.obs['peptide_count'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1)
             if 'X_mbr' in self.pep.layers:
                 self.pep.obs['mbr_count'] = (self.pep.layers['X_mbr'] == 'Peak Found').sum(axis=1)
                 self.pep.obs['high_count'] = (self.pep.layers['X_mbr'] == 'High').sum(axis=1)
+        
+        if self.prot is not None:
+            self.summary = self.prot.obs.copy()
+            if self.pep is not None:
+                for col in self.pep.obs.columns:
+                    if col not in self.summary.columns:
+                        self.summary[col] = self.pep.obs[col]
+        else:
+            self.summary = self.pep.obs.copy()
+        
+    def _update_obs(self):
+        # function to update obs with summary data (if user edited summary data)
+        if not self._has_data():
+            return
+
+        def update_obs_with_summary(obs, summary, ignore_keyword):
+            ignored_columns = []
+            for col in summary.columns:
+                if ignore_keyword in col:
+                    ignored_columns.append(col)
+                    continue
+                obs[col] = summary[col]
+            return ignored_columns
+            
+
+        if self.prot is not None:
+            if not self.prot.obs.index.equals(self.summary.index):
+                raise ValueError("Index of summary does not match index of prot.obs")
+            ignored_columns_prot = update_obs_with_summary(self.prot.obs, self.summary, "pep")
+        else:
+            ignored_columns_prot = None
+        if self.pep is not None:
+            if not self.pep.obs.index.equals(self.summary.index):
+                raise ValueError("Index of summary does not match index of pep.obs")
+            ignored_columns_pep = update_obs_with_summary(self.pep.obs, self.summary, "prot")
+        else:
+            ignored_columns_pep = None
+
+        history_statement = "Updated obs with summary data. "
+        if ignored_columns_prot:
+            history_statement += f"Ignored columns in prot.obs: {', '.join(ignored_columns_prot)}. "
+        if ignored_columns_pep:
+            history_statement += f"Ignored columns in pep.obs: {', '.join(ignored_columns_pep)}. "
+        self.history.append(history_statement)
 
     def _append_history(self, action):
         self.history.append(action)
@@ -191,8 +239,114 @@ class pAnnData:
 
             self.history.append(f"{on}: Set X to layer {layer}.")
 
+    def filter(self, condition, return_copy = True):
+        # docstring
+        # example usage: pdata.filter("protein_count > 1000")
+        if not self._has_data():
+            pass
+
+        if self.summary is None:
+            self._summary()
+
+        if return_copy:
+            pdata = self.copy()
+
+            filtered_queries = pdata.summary.query(condition)
+
+            if pdata.prot is not None:
+                pdata.prot = pdata.prot[filtered_queries.index]
+            
+            if pdata.pep is not None:
+                pdata.pep = pdata.pep[filtered_queries.index]
+
+            print(f"Returning a copy of filtered data based on condition: {condition}. Number of samples dropped: {len(pdata.summary) - len(filtered_queries)}.")
+            pdata._append_history(f"Filtered data based on condition: {condition}")
+            pdata._summary()
+
+            return pdata
+        else:
+            filtered_queries = self.summary.query(condition)
+
+            if self.prot is not None:
+                self.prot = self.prot[filtered_queries.index]
+
+            if self.pep is not None:
+                self.pep = self.pep[filtered_queries.index]
+
+            print(f"Filtered and modified data based on condition: {condition}. Number of samples dropped: {len(self.summary) - len(filtered_queries)}.")
+            self._append_history(f"Filtered data based on condition: {condition}")
+            self._summary()
+
+    # -----------------------------
+    # VISUALIZATION FUNCTIONS
+    def summary_plot(self, value='protein_count', classes=None, plot_mean = True, **kwargs):
+        if self.summary is None:
+            self._summary()
+
+        summary_data = self.summary.copy()
+        if plot_mean:
+            if classes is None:
+                raise ValueError("Classes must be specified when plot_mean is True.")
+            if isinstance(classes, str):
+                sns.barplot(x=classes, y=value, hue=classes, data=summary_data, ci='sd', **kwargs)
+            if isinstance(classes, list) and len(classes) > 0:
+                if len(classes) == 1:
+                    sns.catplot(x=classes[0], y=value, data=summary_data, hue = classes[0], kind='bar', ci='sd', **kwargs)
+                elif len(classes) >= 2:
+                    summary_data['combined_classes'] = summary_data[classes[1:]].astype(str).agg('-'.join, axis=1)
+                    # Create a subplot for each unique value in classes[0]
+                    unique_values = summary_data[classes[0]].unique()
+                    num_unique_values = len(unique_values)
+                    
+                    fig, axes = plt.subplots(nrows=num_unique_values, figsize=(10, 5 * num_unique_values))
+                    
+                    if num_unique_values == 1:
+                        axes = [axes]  # Ensure axes is iterable
+                    
+                    for ax, unique_value in zip(axes, unique_values):
+                        subset_data = summary_data[summary_data[classes[0]] == unique_value]
+                        sns.barplot(x='combined_classes', y=value, hue='combined_classes', data=subset_data, ax=ax, **kwargs)
+                        ax.set_title(f"{classes[0]}: {unique_value}")
+                        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+                    
+                    plt.tight_layout()  
+            else:
+                raise ValueError("Invalid 'classes' parameter. It should be None, a string, or a non-empty")
+        else:
+            if classes is None:
+                sns.barplot(x=summary_data.index, y=value, data=summary_data, **kwargs)
+            elif isinstance(classes, str):
+                sns.barplot(x=summary_data.index, y=value, hue=classes, data=summary_data, **kwargs)
+            elif isinstance(classes, list) and len(classes) > 0:
+                if len(classes) == 1:
+                    sns.catplot(x=summary_data.index, y=value, hue=classes[0], data=summary_data, kind='bar', **kwargs)
+                elif len(classes) >= 2:
+                    summary_data['combined_classes'] = summary_data[classes[1:]].astype(str).agg('-'.join, axis=1)
+                    # Create a subplot for each unique value in classes[0]
+                    unique_values = summary_data[classes[0]].unique()
+                    num_unique_values = len(unique_values)
+                    
+                    fig, axes = plt.subplots(nrows=num_unique_values, figsize=(10, 5 * num_unique_values))
+                    
+                    if num_unique_values == 1:
+                        axes = [axes]  # Ensure axes is iterable
+                    
+                    for ax, unique_value in zip(axes, unique_values):
+                        subset_data = summary_data[summary_data[classes[0]] == unique_value]
+                        sns.barplot(x=subset_data.index, y=value, hue='combined_classes', data=subset_data, ax=ax, **kwargs)
+                        ax.set_title(f"{classes[0]}: {unique_value}")
+                        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+                    
+                    plt.tight_layout()            
+            else:
+                raise ValueError("Invalid 'classes' parameter. It should be None, a string, or a non-empty list.")
+
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+
     # -----------------------------
     # PROCESSING FUNCTIONS
+
     # TODO: add cv calculation, typically within class (provide variable(s) for grouping, etc.), default assumes all samples are in the same group
     # FIX CLASSES
     def cv(self, layer = "X_raw", classes = None, on = 'protein'):
@@ -624,6 +778,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     pdata.pep.var_names = list(pep_var_names)
     pdata.pep.obs.columns = obs_columns if obs_columns else list(range(len(pep_obs.columns)))
 
+    pdata._summary()
     print("pAnnData object created. Use `print(pdata)` to view the object.")
 
     return pdata
