@@ -692,7 +692,7 @@ def plot_abundance(ax, prot_data, classes, genelist, cmap='Blues', color=['blue'
         for i in range(nsample):
             X[i*len(prot_data):(i+1)*len(prot_data)] = prot_data[cols[i]].values
 
-def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=['Blues'], color=['blue'], order = None, s=20,alpha=0.2,calpha=1, append_var=True, alpha_dot = 70):
+def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=['Blues'], color=['blue'], order = None, s=20, alpha=0.2, calpha=1, append_var=True, exp_alpha = 70):
     """
     Plot rank abundance of proteins across different classes.
 
@@ -700,6 +700,23 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
     ax (matplotlib.axes.Axes): The axis on which to plot.
     pdata (scviz.pAnnData): The input pdata object.
     classes (list of str): A list of classes to plot. If None, all .obs are combined into identifier classes. Default is None.
+    layer (str, optional): The layer to use for the plot. Default is 'X'.
+    on (str, optional): The data to use for the plot. Default is 'protein'.
+    cmap (str, optional): The colormap to use for the scatter plot. Default is 'Blues'.
+    color (list of str, optional): A list of colors for the scatter plots of each class. If not provided, all plots will be blue.
+    order (list of str, optional): The order of the classes to plot. If not provided, the classes will be plotted in the order they appear in the data.
+    s (float, optional): The marker size. Default is 20.
+    alpha (float, optional): The marker transparency. Default is 0.2.
+    calpha (float, optional): The marker transparency for distribution dots. Default is 1.
+    append_var (bool, optional): If True, append the average and stdev values to the pdata.[on].var. Default is True. Needs to be True for mark_rankquant to work.
+    exp_alpha (float, optional): The exponent for the pdf value based on average abundance. Default is 70.
+    
+    Example:
+    >>> colors = sns.color_palette("Blues", 4)
+    >>> cmaps = ['Blues', 'Reds', 'Greens', 'Oranges']
+    >>> fig, ax = plt.subplots(figsize=(4,3))
+    >>> ax = scplt.plot_rankquant(ax, pdata_filter, classes = 'size', order = ['sc', '5k','10k', '20k'], cmap = cmaps, color=colors, calpha = 1, alpha = 0.005)
+    
     """
     
     if on == 'protein':
@@ -752,14 +769,14 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
     for j, class_value in enumerate(classes_list):
         if classes is None:
             values = class_value.split('_')
-            print(f'Values: {values}, Classes: {classes}')
+            print(f'Classes: {classes}, Values: {values}')
             rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
         elif isinstance(classes, str):
-            print(f'Values: {class_value}, Classes: {classes}')
+            print(f'Class: {classes}, Value: {class_value}')
             rank_data = utils.filter(adata, classes, class_value, suppress_warnings=True)
         elif isinstance(classes, list):
             values = class_value.split('_')
-            print(f'Values: {values}, Classes: {classes}')
+            print(f'Classes: {classes}, Values: {values}')
             rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
 
         plot_df = rank_data.to_df().transpose()
@@ -796,7 +813,7 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
             std = np.log10(stats_df['Stdev: '+class_value].values)
             z = (np.log10(X[i*nprot:(i+1)*nprot]) - mu)/std
             z = np.power(z,2)
-            Z[i*nprot:(i+1)*nprot] = np.exp(-z*alpha_dot)
+            Z[i*nprot:(i+1)*nprot] = np.exp(-z*exp_alpha)
 
         # remove NaN values
         Z = Z[~np.isnan(X)]

@@ -106,6 +106,7 @@ def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = F
         query = f"(adata.obs['{class_type}'] == '{values}')"
         print(query)
     elif isinstance(class_type, list):
+        values = [[val] for val in values]
         if exact_cases:
             query = " | ".join([" & ".join(["(adata.obs['{}'] == '{}')".format(cls, val) for cls, val in zip(class_type, vals)]) for vals in values])
             print(query)
