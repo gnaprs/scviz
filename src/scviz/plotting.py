@@ -153,41 +153,70 @@ def plot_cv(ax,data,value='protein_count', classes=None, **kwargs):
                     capprops=dict(color=color[j], linewidth=0.5))
     return ax
 
-def plot_summary(ax, pdata, value='protein_count', classes=None, **kwargs):
+def plot_summary(ax, pdata, value='protein_count', classes=None, plot_mean = True, **kwargs):
     if pdata.summary is None:
-        pdata._summary()
+        pdata._update_summary()
 
-    plot_data = pdata.summary.copy()
+    summary_data = pdata.summary.copy()
 
-    if classes is None:
-        sns.barplot(x=plot_data.index, y=value, data=plot_data, ax=ax, **kwargs)
-    elif isinstance(classes, str):
-        sns.barplot(x=plot_data.index, y=value, hue=classes, data=plot_data, ax=ax, **kwargs)
-    elif isinstance(classes, list) and len(classes) > 0:
-        if len(classes) == 1:
-            sns.catplot(x=plot_data.index, y=value, hue=classes[0], data=plot_data, kind='bar', ax=ax, **kwargs)
-        elif len(classes) >= 2:
-            plot_data['combined_classes'] = plot_data[classes[1:]].astype(str).agg('-'.join, axis=1)
-            # Create a subplot for each unique value in classes[0]
-            unique_values = plot_data[classes[0]].unique()
-            num_unique_values = len(unique_values)
-            
-            fig, ax = plt.subplots(nrows=num_unique_values, figsize=(10, 5 * num_unique_values))
-            
-            if num_unique_values == 1:
-                ax = [ax]  # Ensure axes is iterable
-            
-            for ax_sub, unique_value in zip(ax, unique_values):
-                subset_data = plot_data[plot_data[classes[0]] == unique_value]
-                sns.barplot(x=subset_data.index, y=value, hue='combined_classes', data=subset_data, ax=ax_sub, **kwargs)
-                ax_sub.set_title(f"{classes[0]}: {unique_value}")
-                ax_sub.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
-            
-            plt.tight_layout()            
+    if plot_mean:
+        if classes is None:
+            raise ValueError("Classes must be specified when plot_mean is True.")
+        elif isinstance(classes, str):
+            sns.barplot(x=classes, y=value, hue=classes, data=summary_data, ci='sd', ax=ax, **kwargs)
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+        elif isinstance(classes, list) and len(classes) > 0:
+            if len(classes) == 1:
+                sns.catplot(x=classes[0], y=value, data=summary_data, hue=classes[0], kind='bar', ax=ax, **kwargs)
+                ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+            elif len(classes) >= 2:
+                summary_data['combined_classes'] = summary_data[classes[1:]].astype(str).agg('-'.join, axis=1)
+
+                unique_values = summary_data[classes[0]].unique()
+                num_unique_values = len(unique_values)
+
+                fig, ax = plt.subplots(nrows=num_unique_values, figsize=(10, 5 * num_unique_values))
+
+                if num_unique_values == 1:
+                    ax = [ax]
+
+                for ax_sub, unique_value in zip(ax, unique_values):
+                    subset_data = summary_data[summary_data[classes[0]] == unique_value]
+                    sns.barplot(x='combined_classes', y=value, data=subset_data, hue='combined_classes', ax=ax_sub, **kwargs)
+                    ax_sub.set_title(f"{classes[0]}: {unique_value}")
+                    ax_sub.set_xticklabels(ax_sub.get_xticklabels(), rotation=45, ha='right')
     else:
-        raise ValueError("Invalid 'classes' parameter. It should be None, a string, or a non-empty list.")
+        if classes is None:
+            sns.barplot(x=summary_data.index, y=value, data=summary_data, ax=ax, **kwargs)
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+        elif isinstance(classes, str):
+            sns.barplot(x=summary_data.index, y=value, hue=classes, data=summary_data, ax=ax, **kwargs)
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+        elif isinstance(classes, list) and len(classes) > 0:
+            if len(classes) == 1:
+                sns.barplot(x=summary_data.index, y=value, hue=classes[0], data=summary_data, ax=ax, **kwargs)
+                ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+            elif len(classes) >= 2:
+                summary_data['combined_classes'] = summary_data[classes[1:]].astype(str).agg('-'.join, axis=1)
+                # Create a subplot for each unique value in classes[0]
+                unique_values = summary_data[classes[0]].unique()
+                num_unique_values = len(unique_values)
+                
+                fig, ax = plt.subplots(nrows=num_unique_values, figsize=(10, 5 * num_unique_values))
+                
+                if num_unique_values == 1:
+                    ax = [ax]  # Ensure axes is iterable
+                
+                for ax_sub, unique_value in zip(ax, unique_values):
+                    subset_data = summary_data[summary_data[classes[0]] == unique_value]
+                    sns.barplot(x=subset_data.index, y=value, hue='combined_classes', data=subset_data, ax=ax_sub, **kwargs)
+                    ax_sub.set_title(f"{classes[0]}: {unique_value}")
+                    ax_sub.set_xticklabels(ax_sub.get_xticklabels(), rotation=45, ha='right')
+                
+                plt.tight_layout()            
+        else:
+            raise ValueError("Invalid 'classes' parameter. It should be None, a string, or a non-empty list.")
 
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
     plt.tight_layout()
 
     return ax
@@ -227,9 +256,6 @@ def plot_pca(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='defa
     >>> ax, pca = scplt.plot_pca(ax, pdata, on = 'protein', layer = 'X_impute_median', color = color, s=20, alpha=.8, plot_pc=[1,2])
     """
 
-    default_pca_params = {'n_comps': 50, 'random_state': 42}
-    pca_param = {**default_pca_params, **(pca_params if pca_params else {})}
-
     if len(plot_pc) == 3:
         assert ax.name == '3d', "The ax must be a 3D projection, please define projection='3d'"
 
@@ -244,6 +270,9 @@ def plot_pca(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='defa
         adata = pdata.pep
     else:
         raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
+
+    default_pca_params = {'n_comps': min(len(adata.obs_names), len(adata.var_names))-1, 'random_state': 42}
+    pca_param = {**default_pca_params, **(pca_params if pca_params else {})}
 
     if 'X_pca' in adata.obsm.keys():
         if force == False:
@@ -283,6 +312,8 @@ def plot_pca(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='defa
             cmap = cm.get_cmap(cmap)
         norm = mcolors.Normalize(vmin=min(color_mapped), vmax=max(color_mapped))
         legend_elements = [mpatches.Patch(color=cmap(norm(color_dict[key])), label=key) for key in color_dict]
+
+    # FIX for list of strings (combined color_by)
 
     if len(plot_pc) == 2:
         ax.scatter(X_pca[:,pc_x], X_pca[:,pc_y], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
@@ -432,7 +463,6 @@ def plot_heatmap(ax, heatmap_data, cmap=cm.get_cmap('seismic'), norm_values=[4,5
     ax = sns.heatmap(abundance_data_log10, yticklabels=True, square=square, annot=annotate, linewidth=linewidth, cmap=cmap, norm=mid_norm, cbar_kws=cbar_kws)
 
     return ax
-
 
 def plot_volcano(ax, label=5, color=None, alpha=0.5, pval=0.05, log2fc=1, linewidth=0.5, fontsize = 8, de_data = None, pdata = None, class_type = None, values = None, on = 'protein', method='ttest',):
     """
@@ -618,7 +648,7 @@ def mark_volcano(ax, volcano_df, label, label_color="black", s=10, alpha=1, show
 
 # VERIFY FUNCTIONS BELOW
 # TODO: make function work from get_abundance or get_abundance_query, actually plot the protein abundances - refer to graph from tingyu
-def plot_abundance(ax, prot_data, cases, genelist, cmap='Blues', color=['blue'], s=20, alpha=0.2, calpha=1):
+def plot_abundance(ax, prot_data, classes, genelist, cmap='Blues', color=['blue'], s=20, alpha=0.2, calpha=1):
     """
     Plot the abundance of proteins across different cases.
 
@@ -662,49 +692,165 @@ def plot_abundance(ax, prot_data, cases, genelist, cmap='Blues', color=['blue'],
         for i in range(nsample):
             X[i*len(prot_data):(i+1)*len(prot_data)] = prot_data[cols[i]].values
 
-def plot_rankquant(ax,data,cases,cmap=['Blues'],color=['blue'],s=20,alpha=0.2,calpha=1):
-    # extract columns that contain the abundance data for the specified method and amount
-    for j in range(len(cases)):
-        vars = ['Abundance: '] + cases[j]
-        cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-        # concat elements 1 till end of vars into one string
-        append_string = '_'.join(vars[1:])
+def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=['Blues'], color=['blue'], order = None, s=20,alpha=0.2,calpha=1, append_var=True, alpha_dot = 70):
+    """
+    Plot rank abundance of proteins across different classes.
 
-        # average abundance of proteins across these columns, ignoring NaN values
-        data['Average: '+append_string] = data[cols].mean(axis=1, skipna=True)
-        data['Stdev: '+append_string] = data[cols].std(axis=1, skipna=True)
+    Parameters:
+    ax (matplotlib.axes.Axes): The axis on which to plot.
+    pdata (scviz.pAnnData): The input pdata object.
+    classes (list of str): A list of classes to plot. If None, all .obs are combined into identifier classes. Default is None.
+    """
+    
+    if on == 'protein':
+        adata = pdata.prot
+    elif on == 'peptide':
+        adata = pdata.pep
+    else:
+        raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
-        # sort by average abundance
-        data.sort_values(by=['Average: '+append_string], ascending=False, inplace=True)
+    if classes is None:
+        # combine all .obs columns per row into one string
+        quant_col_index = adata.obs.columns.get_loc(next(col for col in adata.obs.columns if "_quant" in col))
+        selected_columns = adata.obs.iloc[:, :quant_col_index]
+        classes_list = selected_columns.apply(lambda x: '_'.join(x), axis=1).unique()
 
-        # add rank number
-        data['Rank: '+append_string] = np.arange(1, len(data)+1)
+        classes = selected_columns.columns.tolist()
 
-        nsample = len(cols)
+    elif isinstance(classes, str):
+        # check if classes is one of the columns of adata.obs
+        if classes not in adata.obs.columns:
+            raise ValueError(f"Invalid value for 'classes'. '{classes}' is not a column in adata.obs.")
+        
+        classes_list = adata.obs[classes].unique()
+
+    elif isinstance(classes, list):
+        # check if all classes are columns of adata.obs
+        if not all([c in adata.obs.columns for c in classes]):
+            raise ValueError(f"Invalid value for 'classes'. Not all elements in '{classes}' are columns in adata.obs.")
+        
+        classes_list = adata.obs[classes].apply(lambda x: '_'.join(x), axis=1).unique()
+    else:
+        raise ValueError("Invalid value for 'classes'. Must be None, a string or a list of strings.")
+
+    if order is not None:
+        # check if order list matches classes_list
+        missing_elements = set(classes_list) - set(order)
+        extra_elements = set(order) - set(classes_list)
+        
+        # Print missing and extra elements if any
+        if missing_elements or extra_elements:
+            if missing_elements:
+                print(f"Missing elements in 'order': {missing_elements}")
+            if extra_elements:
+                print(f"Extra elements in 'order': {extra_elements}")
+            raise ValueError("The 'order' list does not match 'classes_list'.")
+        
+        # if they match, then reorder classes_list to match order
+        classes_list = order
+
+    for j, class_value in enumerate(classes_list):
+        if classes is None:
+            values = class_value.split('_')
+            print(f'Values: {values}, Classes: {classes}')
+            rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
+        elif isinstance(classes, str):
+            print(f'Values: {class_value}, Classes: {classes}')
+            rank_data = utils.filter(adata, classes, class_value, suppress_warnings=True)
+        elif isinstance(classes, list):
+            values = class_value.split('_')
+            print(f'Values: {values}, Classes: {classes}')
+            rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
+
+        plot_df = rank_data.to_df().transpose()
+        plot_df['Average: '+class_value] = np.nanmean(rank_data.X.toarray(), axis=0)
+        plot_df['Stdev: '+class_value] = np.nanstd(rank_data.X.toarray(), axis=0)
+        plot_df.sort_values(by=['Average: '+class_value], ascending=False, inplace=True)
+        plot_df['Rank: '+class_value] = np.where(plot_df['Average: '+class_value].isna(), np.nan, np.arange(1, len(plot_df) + 1))
+
+        sorted_indices = plot_df.index
+
+        if append_var:
+            plot_df = plot_df.loc[adata.var.index]
+            adata.var['Average: ' + class_value] = plot_df['Average: ' + class_value]
+            adata.var['Stdev: ' + class_value] = plot_df['Stdev: ' + class_value]
+            adata.var['Rank: ' + class_value] = plot_df['Rank: ' + class_value]
+            plot_df = plot_df.reindex(sorted_indices)
+
+        stats_df = plot_df.filter(regex = 'Average: |Stdev: |Rank: ', axis=1)
+        plot_df = plot_df.drop(stats_df.columns, axis=1)
+
+        nsample = plot_df.shape[1]
+        nprot = plot_df.shape[0]
+        
+        print(f'nsample: {nsample}, nprot: {nprot}')
 
         # merge all abundance columns into one column
-        X = np.zeros((nsample*len(data)))
-        Y = np.zeros((nsample*len(data)))
-        Z = np.zeros((nsample*len(data))) # pdf value based on average abundance
+        X = np.zeros((nsample*nprot))
+        Y = np.zeros((nsample*nprot))
+        Z = np.zeros((nsample*nprot)) # pdf value based on average abundance
         for i in range(nsample):
-            X[i*len(data):(i+1)*len(data)] = data[cols[i]].values
-            Y[i*len(data):(i+1)*len(data)] = data['Rank: '+append_string].values
-            mu = np.log10(data['Average: '+append_string].values)
-            std = np.log10(data['Stdev: '+append_string].values)
-            z = (np.log10(X[i*len(data):(i+1)*len(data)]) - mu)/std
+            X[i*nprot:(i+1)*nprot] = plot_df.iloc[:, i].values
+            Y[i*nprot:(i+1)*nprot] = stats_df['Rank: '+class_value].values
+            mu = np.log10(stats_df['Average: '+class_value].values)
+            std = np.log10(stats_df['Stdev: '+class_value].values)
+            z = (np.log10(X[i*nprot:(i+1)*nprot]) - mu)/std
             z = np.power(z,2)
-            Z[i*len(data):(i+1)*len(data)] = np.exp(-z*70)
+            Z[i*nprot:(i+1)*nprot] = np.exp(-z*alpha_dot)
 
         # remove NaN values
         Z = Z[~np.isnan(X)]
         Y = Y[~np.isnan(X)]
         X = X[~np.isnan(X)]
-        # plot
 
-        ax.scatter(data['Rank: '+append_string], data['Average: '+append_string], marker='.', color=color[j], alpha=calpha)
+        ax.scatter(stats_df['Rank: '+class_value], stats_df['Average: '+class_value], marker='.', color=color[j], alpha=calpha)
         ax.scatter(Y, X, c=Z, marker='.',cmap=cmap[j], s=s,alpha=alpha)
-        # set y axis to log
         ax.set_yscale('log')
+        ax.set_xlabel('Rank')
+        ax.set_ylabel('Abundance')
+
+    # # extract columns that contain the abundance data for the specified method and amount
+    # for j in range(len(cases)):
+    #     vars = ['Abundance: '] + cases[j]
+    #     cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
+    #     # concat elements 1 till end of vars into one string
+    #     append_string = '_'.join(vars[1:])
+
+    #     # average abundance of proteins across these columns, ignoring NaN values
+    #     data['Average: '+append_string] = data[cols].mean(axis=1, skipna=True)
+    #     data['Stdev: '+append_string] = data[cols].std(axis=1, skipna=True)
+
+    #     # sort by average abundance
+    #     data.sort_values(by=['Average: '+append_string], ascending=False, inplace=True)
+
+    #     # add rank number
+    #     data['Rank: '+append_string] = np.arange(1, len(data)+1)
+
+    #     nsample = len(cols)
+
+    #     # merge all abundance columns into one column
+    #     X = np.zeros((nsample*len(data)))
+    #     Y = np.zeros((nsample*len(data)))
+    #     Z = np.zeros((nsample*len(data))) # pdf value based on average abundance
+    #     for i in range(nsample):
+    #         X[i*len(data):(i+1)*len(data)] = data[cols[i]].values
+    #         Y[i*len(data):(i+1)*len(data)] = data['Rank: '+append_string].values
+    #         mu = np.log10(data['Average: '+append_string].values)
+    #         std = np.log10(data['Stdev: '+append_string].values)
+    #         z = (np.log10(X[i*len(data):(i+1)*len(data)]) - mu)/std
+    #         z = np.power(z,2)
+    #         Z[i*len(data):(i+1)*len(data)] = np.exp(-z*70)
+
+    #     # remove NaN values
+    #     Z = Z[~np.isnan(X)]
+    #     Y = Y[~np.isnan(X)]
+    #     X = X[~np.isnan(X)]
+    #     # plot
+
+    #     ax.scatter(data['Rank: '+append_string], data['Average: '+append_string], marker='.', color=color[j], alpha=calpha)
+    #     ax.scatter(Y, X, c=Z, marker='.',cmap=cmap[j], s=s,alpha=alpha)
+    #     # set y axis to log
+    #     ax.set_yscale('log')
 
     return ax
 
@@ -779,9 +925,9 @@ def plot_abundance_2D(ax,data,cases,genes='all', cmap='Blues',color=['blue'],s=2
 
     return ax
 
-def mark_rankquant(plot,data,names,cases,color='red',s=10,alpha=1,show_names=True):
-    for j in range(len(cases)):
-        vars = ['Abundance: '] + cases[j]
+def mark_rankquant(plot,pdata,names,class_values,color='red',s=10,alpha=1,show_names=True):
+    for j in range(len(class_values)):
+        vars = ['Abundance: '] + class_values[j]
 
         # concat elements 1 till end of vars into one string
         append_string = '_'.join(vars[1:])

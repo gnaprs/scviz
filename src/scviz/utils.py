@@ -42,11 +42,9 @@ from scipy.sparse import csr_matrix
 from sklearn.impute import SimpleImputer, KNNImputer
 from scviz import pAnnData
 
-
-
 # Thoughts: functions that act on panndata and return only panndata should be panndata methods, utility functions should be in utils
 
-def get_samplenames(adata,class_type):
+def get_samplenames(adata, class_type):
     """
     Get the sample names for the given class(es) type.
 
@@ -70,7 +68,7 @@ def get_samplenames(adata,class_type):
     else:
         raise ValueError("Invalid input for 'class_type'. It should be None, a string, or a list of strings.")
     
-def filter(pdata, class_type, values, exact_cases = False):
+def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = False):
     """
     Filters out for the given class(es) type. Returns a copy of the filtered pdata object, does not modify the original object.
 
@@ -94,7 +92,8 @@ def filter(pdata, class_type, values, exact_cases = False):
 
     is_anndata = False
     if isinstance(pdata, ad.AnnData):
-        print("Warning: The provided object is an AnnData object, not a pAnnData object. Proceeding with the filter.")
+        if not suppress_warnings:
+            print("Warning: The provided object is an AnnData object, not a pAnnData object. Proceeding with the filter.")
         is_anndata = True
     elif not isinstance(pdata, pAnnData.pAnnData):
         raise ValueError("Invalid input for 'pdata'. It should be a pAnnData object.")
@@ -104,12 +103,8 @@ def filter(pdata, class_type, values, exact_cases = False):
         return pdata
     
     if isinstance(class_type, str):
-        if exact_cases:
-            query = " | ".join([f"(adata.obs['{class_type}'] == '{val}')" for val in values])
-            print(query)
-        else:
-            query = " | ".join([f"(adata.obs['{class_type}'] == '{val}')" for val in values])
-            print(query)
+        query = f"(adata.obs['{class_type}'] == '{values}')"
+        print(query)
     elif isinstance(class_type, list):
         if exact_cases:
             query = " | ".join([" & ".join(["(adata.obs['{}'] == '{}')".format(cls, val) for cls, val in zip(class_type, vals)]) for vals in values])
@@ -131,8 +126,7 @@ def filter(pdata, class_type, values, exact_cases = False):
             adata = pdata.pep
             pdata.pep = adata[eval(query)]
         pdata._summary()
- 
-    pdata._append_history(f"Filtered by class type: {class_type}, values: {values}, exact_cases: {exact_cases}. Copy of the filtered pAnnData object returned.")
+        pdata._append_history(f"Filtered by class type: {class_type}, values: {values}, exact_cases: {exact_cases}. Copy of the filtered pAnnData object returned.")    
 
     return pdata
 
@@ -336,6 +330,7 @@ def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_resu
     ttest_df = pd.DataFrame(ttest_params, columns=['Group1', 'Group2', 'T-statistic', 'P-value', 'N1', 'N2'])
     return ttest_df
 
+# TODO: fix
 def get_query(pdata, search_term, search_on = 'gene', on = 'protein'):
     valid_search_terms = ['gene', 'protein', 'description', 'pathway', 'all']
 
@@ -365,7 +360,7 @@ def get_query(pdata, search_term, search_on = 'gene', on = 'protein'):
     elif search_on == 'pathway':
         return adata[adata.var['WikiPathways'] == search_term]
 
-# TODO: fix to work with panndata
+# TODO: fix to work with panndata, just need to search through .vars and identify whether keyword is in any column
 def get_abundance_query(pdata, cases, genelist, search='gene', on = 'protein'):
     """
     Search and extract protein abundance data based on a specific gene list.

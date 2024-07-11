@@ -10,15 +10,5 @@ Check out scprep repo for possible utility functions
 Implement DE utility + volcano plotting function
 Add venn diagram and upsetplot function
 Add Type hints to all functions, e.g. 
-```python
-from typing import Any, Dict, Optional
 
-def get_abundance(
-    data: Any,
-    cases: Any,
-    prot_list: Optional[Any] = None,
-    list_type: str = 'accession',
-    abun_type: str = 'average'
-) -> Optional[Dict[Any, Any]]:
-    # function body
-```
+# CHECK

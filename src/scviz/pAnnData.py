@@ -15,6 +15,8 @@ import umap.umap_ as umap
 import seaborn as sns
 import matplotlib.pyplot as plt
 
+from pandas.testing import assert_frame_equal
+
 from typing import (  # Meta  # Generic ABCs  # Generic
     TYPE_CHECKING,
     Any,
@@ -30,6 +32,19 @@ from typing import (  # Meta  # Generic ABCs  # Generic
 class pAnnData:
     """
     Class for storing protein and peptide data, with additional relational data between protein and peptide.
+    
+    Parameters
+    ----------
+    prot : np.ndarray | sparse.spmatrix
+        Protein data matrix.
+    pep : np.ndarray | sparse.spmatrix
+        Peptide data matrix.
+    rs : np.ndarray | sparse.spmatrix
+        Protein x peptide relational data. Only if both protein and peptide data are provided.
+    history : List[str]
+        List of actions taken on the data.
+    summary : pd.DataFrame
+        Summary of the data, typically used for filtering.
     """
 
     def __init__(self, 
@@ -50,8 +65,8 @@ class pAnnData:
         else:
             self._rs = None
 
-        self.history = []
-        self.summary = pd.DataFrame()
+        self._history = []
+        self._summary = pd.DataFrame()
     
     # GETTERS
     @property
@@ -70,6 +85,10 @@ class pAnnData:
     def history(self):
         return self._history
 
+    @property
+    def summary(self):
+        return self._summary
+
     # SETTERS
     @prot.setter
     def prot(self, value: ad.AnnData):
@@ -87,7 +106,12 @@ class pAnnData:
     def history(self, value):
         self._history = value
 
-    # UTILITY FUNCTIONS, TYPICALLY FOR INTERNAL USE
+    @summary.setter
+    def summary(self, value: pd.DataFrame):
+        self._summary = value
+        self._update_obs()
+
+    # UTILITY FUNCTIONS
     def _set_RS(self, rs):
         # print rs shape, as well as protein and peptide shape if available
         print(f"Setting rs matrix with dimensions {rs.shape}")
@@ -122,8 +146,8 @@ class pAnnData:
         else:
             pep_info = "Peptide: None"
 
-        if self.rs is not None:
-            rs_shape = f"{self.rs.shape[0]} proteins by {self.rs.shape[1]} peptides"
+        if self._rs is not None:
+            rs_shape = f"{self._rs.shape[0]} proteins by {self._rs.shape[1]} peptides"
             rs_info = f"RS (shape: {rs_shape})\n"
         else:
             rs_info = "RS: None"
@@ -146,7 +170,7 @@ class pAnnData:
         else:
             return True
 
-    def _summary(self):
+    def _update_summary(self):
         if self.prot is not None:
             self.prot.obs['protein_quant'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1) / self.prot.X.shape[1]
             self.prot.obs['protein_count'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1)
@@ -162,13 +186,15 @@ class pAnnData:
                 self.pep.obs['high_count'] = (self.pep.layers['X_mbr'] == 'High').sum(axis=1)
         
         if self.prot is not None:
-            self.summary = self.prot.obs.copy()
+            self._summary = self.prot.obs.copy()
             if self.pep is not None:
                 for col in self.pep.obs.columns:
-                    if col not in self.summary.columns:
-                        self.summary[col] = self.pep.obs[col]
+                    if col not in self._summary.columns:
+                        self._summary[col] = self.pep.obs[col]
         else:
-            self.summary = self.pep.obs.copy()
+            self._summary = self.pep.obs.copy()
+
+        self._previous_summary = self._summary.copy()
         
     def _update_obs(self):
         # function to update obs with summary data (if user edited summary data)
@@ -186,15 +212,15 @@ class pAnnData:
             
 
         if self.prot is not None:
-            if not self.prot.obs.index.equals(self.summary.index):
+            if not self.prot.obs.index.equals(self._summary.index):
                 raise ValueError("Index of summary does not match index of prot.obs")
-            ignored_columns_prot = update_obs_with_summary(self.prot.obs, self.summary, "pep")
+            ignored_columns_prot = update_obs_with_summary(self.prot.obs, self._summary, "pep")
         else:
             ignored_columns_prot = None
         if self.pep is not None:
-            if not self.pep.obs.index.equals(self.summary.index):
+            if not self.pep.obs.index.equals(self._summary.index):
                 raise ValueError("Index of summary does not match index of pep.obs")
-            ignored_columns_pep = update_obs_with_summary(self.pep.obs, self.summary, "prot")
+            ignored_columns_pep = update_obs_with_summary(self.pep.obs, self._summary, "prot")
         else:
             ignored_columns_pep = None
 
@@ -203,10 +229,10 @@ class pAnnData:
             history_statement += f"Ignored columns in prot.obs: {', '.join(ignored_columns_prot)}. "
         if ignored_columns_pep:
             history_statement += f"Ignored columns in pep.obs: {', '.join(ignored_columns_pep)}. "
-        self.history.append(history_statement)
+        self._history.append(history_statement)
 
     def _append_history(self, action):
-        self.history.append(action)
+        self._history.append(action)
 
     def print_history(self):
         formatted_history = "\n".join(f"{i}: {action}" for i, action in enumerate(self._history, 1))
@@ -237,112 +263,69 @@ class pAnnData:
                 self.pep.X = self.pep.layers[layer]
                 print(f"Set {on} data to layer {layer}.")
 
-            self.history.append(f"{on}: Set X to layer {layer}.")
+            self._history.append(f"{on}: Set X to layer {layer}.")
 
-    def filter(self, condition, return_copy = True):
+    def filter(self, condition = None, return_copy = True, file_list = None):
         # docstring
         # example usage: pdata.filter("protein_count > 1000")
         if not self._has_data():
             pass
 
-        if self.summary is None:
-            self._summary()
+        if self._summary is None:
+            self._update_summary()
 
         if return_copy:
             pdata = self.copy()
 
-            filtered_queries = pdata.summary.query(condition)
+            if condition is not None:
+                filtered_queries = pdata._summary.query(condition)
 
-            if pdata.prot is not None:
-                pdata.prot = pdata.prot[filtered_queries.index]
-            
-            if pdata.pep is not None:
-                pdata.pep = pdata.pep[filtered_queries.index]
+                if pdata.prot is not None:
+                    pdata.prot = pdata.prot[filtered_queries.index]
+                
+                if pdata.pep is not None:
+                    pdata.pep = pdata.pep[filtered_queries.index]
 
-            print(f"Returning a copy of filtered data based on condition: {condition}. Number of samples dropped: {len(pdata.summary) - len(filtered_queries)}.")
-            pdata._append_history(f"Filtered data based on condition: {condition}")
-            pdata._summary()
+                print(f"Returning a copy of filtered data based on condition: {condition}. Number of samples dropped: {len(pdata._summary) - len(filtered_queries)}.")
+                pdata._append_history(f"Filtered data based on condition: {condition}")
+                pdata._update_summary()
 
-            return pdata
+                return pdata
+            elif file_list is not None:
+                if pdata.prot is not None:
+                    pdata.prot = pdata.prot[pdata.prot.obs_names.isin(file_list)]
+                
+                if pdata.pep is not None:
+                    pdata.pep = pdata.pep[pdata.pep.obs_names.isin(file_list)]
+
+                print(f"Returning a copy of filtered data based on file list. Number of samples dropped: {len(pdata._summary) - len(file_list)}.")
+                pdata._append_history(f"Filtered data based on file list.")
+                pdata._update_summary()
+
+                return pdata
         else:
-            filtered_queries = self.summary.query(condition)
+            if condition is not None:
+                filtered_queries = self._summary.query(condition)
 
-            if self.prot is not None:
-                self.prot = self.prot[filtered_queries.index]
+                if self.prot is not None:
+                    self.prot = self.prot[filtered_queries.index]
 
-            if self.pep is not None:
-                self.pep = self.pep[filtered_queries.index]
+                if self.pep is not None:
+                    self.pep = self.pep[filtered_queries.index]
 
-            print(f"Filtered and modified data based on condition: {condition}. Number of samples dropped: {len(self.summary) - len(filtered_queries)}.")
-            self._append_history(f"Filtered data based on condition: {condition}")
-            self._summary()
+                print(f"Filtered and modified data based on condition: {condition}. Number of samples dropped: {len(self._summary) - len(filtered_queries)}.")
+                self._append_history(f"Filtered data based on condition: {condition}")
+                self._update_summary()
+            elif file_list is not None:
+                if self.prot is not None:
+                    self.prot = self.prot[self.prot.obs_names.isin(file_list)]
+                
+                if self.pep is not None:
+                    self.pep = self.pep[self.pep.obs_names.isin(file_list)]
 
-    # -----------------------------
-    # VISUALIZATION FUNCTIONS
-    def summary_plot(self, value='protein_count', classes=None, plot_mean = True, **kwargs):
-        if self.summary is None:
-            self._summary()
-
-        summary_data = self.summary.copy()
-        if plot_mean:
-            if classes is None:
-                raise ValueError("Classes must be specified when plot_mean is True.")
-            if isinstance(classes, str):
-                sns.barplot(x=classes, y=value, hue=classes, data=summary_data, ci='sd', **kwargs)
-            if isinstance(classes, list) and len(classes) > 0:
-                if len(classes) == 1:
-                    sns.catplot(x=classes[0], y=value, data=summary_data, hue = classes[0], kind='bar', ci='sd', **kwargs)
-                elif len(classes) >= 2:
-                    summary_data['combined_classes'] = summary_data[classes[1:]].astype(str).agg('-'.join, axis=1)
-                    # Create a subplot for each unique value in classes[0]
-                    unique_values = summary_data[classes[0]].unique()
-                    num_unique_values = len(unique_values)
-                    
-                    fig, axes = plt.subplots(nrows=num_unique_values, figsize=(10, 5 * num_unique_values))
-                    
-                    if num_unique_values == 1:
-                        axes = [axes]  # Ensure axes is iterable
-                    
-                    for ax, unique_value in zip(axes, unique_values):
-                        subset_data = summary_data[summary_data[classes[0]] == unique_value]
-                        sns.barplot(x='combined_classes', y=value, hue='combined_classes', data=subset_data, ax=ax, **kwargs)
-                        ax.set_title(f"{classes[0]}: {unique_value}")
-                        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
-                    
-                    plt.tight_layout()  
-            else:
-                raise ValueError("Invalid 'classes' parameter. It should be None, a string, or a non-empty")
-        else:
-            if classes is None:
-                sns.barplot(x=summary_data.index, y=value, data=summary_data, **kwargs)
-            elif isinstance(classes, str):
-                sns.barplot(x=summary_data.index, y=value, hue=classes, data=summary_data, **kwargs)
-            elif isinstance(classes, list) and len(classes) > 0:
-                if len(classes) == 1:
-                    sns.catplot(x=summary_data.index, y=value, hue=classes[0], data=summary_data, kind='bar', **kwargs)
-                elif len(classes) >= 2:
-                    summary_data['combined_classes'] = summary_data[classes[1:]].astype(str).agg('-'.join, axis=1)
-                    # Create a subplot for each unique value in classes[0]
-                    unique_values = summary_data[classes[0]].unique()
-                    num_unique_values = len(unique_values)
-                    
-                    fig, axes = plt.subplots(nrows=num_unique_values, figsize=(10, 5 * num_unique_values))
-                    
-                    if num_unique_values == 1:
-                        axes = [axes]  # Ensure axes is iterable
-                    
-                    for ax, unique_value in zip(axes, unique_values):
-                        subset_data = summary_data[summary_data[classes[0]] == unique_value]
-                        sns.barplot(x=subset_data.index, y=value, hue='combined_classes', data=subset_data, ax=ax, **kwargs)
-                        ax.set_title(f"{classes[0]}: {unique_value}")
-                        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
-                    
-                    plt.tight_layout()            
-            else:
-                raise ValueError("Invalid 'classes' parameter. It should be None, a string, or a non-empty list.")
-
-        plt.xticks(rotation=45, ha='right')
-        plt.tight_layout()
+                print(f"Filtered and modified data based on file list. Number of samples dropped: {len(self._summary) - len(file_list)}.")
+                self._append_history(f"Filtered data based on file list.")
+                self._update_summary()
 
     # -----------------------------
     # PROCESSING FUNCTIONS
@@ -380,7 +363,9 @@ class pAnnData:
 
     # TODO: add ability to impute within class (provide variable(s) for grouping, etc.) [See ColumnTransformer in sklearn]
     # TODO: add imputation for minimum [https://github.com/scikit-learn/scikit-learn/issues/19783]
+    # https://towardsdatascience.com/improve-your-data-preprocessing-with-columntransformer-and-pipelines-b6ff7edd2f77
     def impute(self, layer = "X_raw", method = 'median', on = 'protein', **kwargs):
+        # uses scikit-learn imputers
         if not self._check_data(on):
             pass
 
@@ -407,7 +392,7 @@ class pAnnData:
         else:
             raise ValueError(f"Unknown method: {method}")
         
-        self.history.append(f"{on}: Imputed {layer} data using {method}. Imputed data stored in `{layer_name}`.")
+        self._history.append(f"{on}: Imputed {layer} data using {method}. Imputed data stored in `{layer_name}`.")
 
     def _impute_helper(self, data, layer, method, layer_name, imputer):
         '''Helper function for impute, imputes data and stores it in the AnnData object.
@@ -436,6 +421,7 @@ class pAnnData:
         print(f"Imputed data using {method}. New data stored in `{layer_name}`.")
 
     def neighbor(self, on = 'protein', layer = "X", **kwargs):
+        # uses sc.pp.neighbors
         if not self._check_data(on):
             pass
         
@@ -456,6 +442,7 @@ class pAnnData:
         print(f'{on}: Neighbors fitted on {layer} and and stored in obs["distances"] and obs["connectivities"]')
 
     def umap(self, on = 'protein', layer = "X", **kwargs):
+        # uses sc.tl.umap
         if not self._check_data(on):
             pass
        
@@ -481,6 +468,7 @@ class pAnnData:
         print(f'{on}: UMAP fitted on {layer} and and stored in layers["X_umap"] and uns["umap"]')
 
     def pca(self, on = 'protein', layer = "X", **kwargs):
+        # uses sc.tl.pca
         if not self._check_data(on):
             pass
         
@@ -525,6 +513,9 @@ class pAnnData:
 
         EPSILON = 1e-10  # small constant
 
+        # median
+        # data = data divide by data_median * data.median.median 
+
         if method == 'scale':
             if on == 'protein':
                 row_sums = np.nansum(self.prot.X.toarray(), axis=1)
@@ -553,12 +544,11 @@ class pAnnData:
         else:
             raise ValueError(f"Unknown method: {method}")
                   
-        self.history.append(f"{on}: Normalized X_raw data using {method} and stored as layers[X_{method}].")
+        self._history.append(f"{on}: Normalized X_raw data using {method} and stored as layers[X_{method}].")
         if set_X:
             layer_name = 'X_' + method
             self.set_X(layer = layer_name, on = on)
 
-        
 
 def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = None):
     if not prot_file and not pep_file:
@@ -678,7 +668,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         pdata.pep.obs.columns = obs_columns if obs_columns else list(range(len(pep_obs.columns)))
         pdata._append_history(f"Imported peptide data from {pep_file}")
 
-    pdata._summary()
+    pdata._update_summary()
 
     print("pAnnData object created. Use `print(pdata)` to view the object.")
     return pdata
@@ -778,7 +768,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     pdata.pep.var_names = list(pep_var_names)
     pdata.pep.obs.columns = obs_columns if obs_columns else list(range(len(pep_obs.columns)))
 
-    pdata._summary()
+    pdata._update_summary()
     print("pAnnData object created. Use `print(pdata)` to view the object.")
 
     return pdata
