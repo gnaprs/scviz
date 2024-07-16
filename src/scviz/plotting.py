@@ -958,7 +958,7 @@ def mark_raincloud(plot,pdata,names,class_values,layer = "X", on = 'protein',low
 
     for j, class_value in enumerate(class_values):
         print('Class: ', class_value)
-                
+
         for i, txt in enumerate(names):
             try:
                 y = np.log10(adata.var['Average: '+class_value].loc[txt])

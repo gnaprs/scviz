@@ -28,18 +28,21 @@ Todo:
 """
 
 from typing import List, Optional, Dict, Any
+from decimal import Decimal
 from operator import index
 from os import access
+import re
+import io
+import requests
+
 import pandas as pd
 import numpy as np
-import re
 from scipy.stats import ttest_ind, mannwhitneyu, wilcoxon, chi2_contingency, fisher_exact
-from decimal import Decimal
-from upsetplot import from_contents
-
-import anndata as ad
 from scipy.sparse import csr_matrix
 from sklearn.impute import SimpleImputer, KNNImputer
+
+from upsetplot import from_contents
+import anndata as ad
 from scviz import pAnnData
 
 # Thoughts: functions that act on panndata and return only panndata should be panndata methods, utility functions should be in utils
@@ -191,160 +194,72 @@ def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = F
 
     return pdata
 
-# !TODO: move to class function | for peptide, use 'Annotated Sequence' instead of 'Accession' and shared search subset='Annotated Sequence'
-def get_cv(data, cases, variables=['region', 'amt'], sharedPeptides = False):
-    """
-    Calculate the coefficient of variation (CV) for each case in the given data.
-
-    This function calculates the CV for each case in the given data. The cases and variables to consider when calculating CV can be specified. There is also an option to calculate CV for only shared peptides identified across all cases.
+def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction']):
+    """ Get data from Uniprot for a list of proteins
 
     Args:
-        data (pandas.DataFrame): The input data containing the CV values.
-        cases (list of lists): The cases to calculate CV for. Each case is a list of values corresponding to the variables.
-        variables (list, optional): The variables to consider when calculating CV. Default is ['region', 'amt'].
-        sharedPeptides (bool, optional): Whether to calculate CV for only shared peptides identified across all cases. Default is False.
+        prot_list (list): list of protein IDs
+        search_fields (list): list of fields to search for.
+
+        For more information, see https://www.uniprot.org/help/return_fields for list of search_fields.
+        Current function accepts accession protein list. For more queries, see https://www.uniprot.org/help/query-fields for a list of query fields that can be searched for.
 
     Returns:
-        cv_df (pandas.DataFrame): The DataFrame containing the CV values for each case, along with the corresponding variable values.
-
-    Raises:
-        None
-
-    Example:
-        >>> import scviz
-        >>> sample_types = [[i,j] for i in ['a','b','c'] for j in [1,2,3]]
-        >>> cv_df = scviz.utils.get_cv(data, sample_types, variables=['letters','numbers'])
-    """
-    # check if the len of each element in cases have the same length as len(variables), else throw error message
-    if not all(len(cases[i]) == len(variables) for i in range(len(cases))):
-        print("Error: length of each element in cases must be equal to length of variables")
-        return
+        pandas.DataFrame: DataFrame with the results
     
-    # make dataframe for each case with all CV values
-    cv_df = pd.DataFrame()
-    data = data.copy()
-
-    #! TODO: consider calculating CVs from scratch instead of using the CV values in the data
-    for j in range(len(cases)):
-        vars = ['CV'] + cases[j]
-        cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-        nsample = len(cols)
-
-        # merge all CV columns into one column
-        X = np.zeros((nsample*len(data)))
-        accessions = []
-        for i in range(nsample):
-            X[i*len(data):(i+1)*len(data)] = data[cols[i]].values
-            accessions=accessions+data['Accession'].values.tolist()
-        # remove nans
-        accessions = [accessions[i] for i in range(len(accessions)) if not np.isnan(X[i])]
-        X = X[~np.isnan(X)]/100
-
-        # add X to cur_df, and append case info of enzyme, method and amt to each row
-        cur_df = pd.DataFrame()
-        cur_df['cv'] = X
-        cur_df['accession'] = accessions
-        for i in range(len(variables)):
-            cur_df[variables[i]] = cases[j][i]
-
-        # append cur_df to cv_df
-        cv_df = pd.concat([cv_df, cur_df], ignore_index=True)
-
-        if sharedPeptides:
-            cv_df['shared'] = cv_df.duplicated(subset='accession', keep=False)
-
-    return cv_df
-
-# TODO: DEPRECATED, now as filter()
-def get_abundance(data: pd.DataFrame, cases: List[List[str]], prot_list: Optional[List[str]] = None, list_type: str = 'accession',abun_type: str = 'average') -> Dict[str, Any]:
+    Example:
+        >>> uniprot_list = ["P40925", "P40926"]
+        >>> df = get_uniprot_fields(uniprot_list)
     """
-    Returns the abundance of proteins in the given data.
 
-    This function calculates the abundance of proteins for specified cases in the given data. The abundance can be calculated as 'average' or 'raw'. Optionally, the data can be filtered by protein names.
+    base_url = 'https://rest.uniprot.org/uniprotkb/stream'
+    fields = "%2C".join(search_fields)
+    query_parts = ["%28accession%3A" + id + "%29" for id in prot_list]
+    query = "+OR+".join(query_parts)
+    query = "%28" + query + "%29"
+    format_type = 'tsv'
+    
+    # full url
+    url = f'{base_url}?fields={fields}&format={format_type}&query={query}'
+    
+    results = requests.get(url)
+    results.raise_for_status()
+    
+    df = pd.read_csv(io.StringIO(results.text), sep='\t')
+    return df
 
-    Args:
-        data (pandas.DataFrame): The protein data.
-        cases (list of lists): The cases to return abundances for.
-        prot_list (list, optional): List of accession names to filter the data to just specified proteins. Default is None.
-        abun_type (str, optional): Type of abundance calculation to perform ('average' or 'raw'). Default is 'average'. When raw, function returns list of [abundance, accession].
-
-    Returns:
-        abun_dict (dict): Dictionary containing the abundance values and ranks for each case.
-
-    Raises:
-        None
-    """
-    if list_type == 'accession':
-        index = 'Accession'
-    elif list_type == 'gene':
-        index = 'Gene Symbol'
+def get_upset_contents(pdata, classes, on = 'protein'):
+    if on == 'protein':
+        adata = pdata.prot
+    elif on == 'peptide':
+        adata = pdata.pep
     else:
-        raise ValueError('Invalid list type. Please use either "accession" or "gene".')
+        raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
-    if abun_type=='average':
-        # create empty list to store abundance values
-        abun_dict = {}
-        data = data.copy()
-        # extract columns that contain the abundance data for the specified case
-        for j in range(len(cases)):
-            vars = ['Abundance: '] + cases[j]
+    classes_list = get_classlist(adata, classes)
+    upset_dict = {}
 
-            if prot_list is not None:
-                # extract out rows where list is in prot_list
-                data = data[data[index].isin(prot_list)]
+    for j, class_value in enumerate(classes_list):
+        if classes is None:
+            values = class_value.split('_')
+            # print(f'Classes: {classes}, Values: {values}') if debug else None
+            data_filter = filter(adata, classes, values, suppress_warnings=True)
+        elif isinstance(classes, str):
+            # print(f'Class: {classes}, Value: {class_value}') if debug else None
+            data_filter = filter(adata, classes, class_value, suppress_warnings=True)
+        elif isinstance(classes, list):
+            values = class_value.split('_')
+            # print(f'Classes: {classes}, Values: {values}') if debug else None
+            data_filter = filter(adata, classes, values, suppress_warnings=True)
 
-            cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
+        # get proteins that are present in the filtered data (at least one value is not NaN)
+        prot_present = data_filter.var_names[(~np.isnan(data_filter.X.toarray())).sum(axis=0) > 0]
+        upset_dict[class_value] = prot_present.tolist()
 
-            if not cols:
-                raise ValueError("No columns found. Please verify that the input 'cases' matches the columns in the data.")
+    upset_data = from_contents(upset_dict)
 
-            # concat elements 1 till end of vars into one string
-            append_string = '_'.join(vars[1:])
+    return upset_data
 
-            # average abundance of proteins across these columns, ignoring NaN values
-            data['Average: '+append_string] = data[cols].mean(axis=1, skipna=True)
-            data['Stdev: '+append_string] = data[cols].std(axis=1, skipna=True)
-
-            # sort by average abundance
-            data.sort_values(by=['Average: '+append_string], ascending=False, inplace=True)
-            abundance = (data['Average: '+append_string]
-                        .rename('Average')
-                        .to_frame()
-                        .assign(Rank=np.arange(1, len(data)+1)))
-            
-            abundance.set_index(data['Accession'], inplace=True)
-            abun_dict[append_string] = abundance
-        return abun_dict
-
-    elif abun_type == 'raw':
-        # create empty list to store abundance values
-        abun_dict = {}
-        data = data.copy()
-        # extract columns that contain the abundance data for the specified method and amount
-        for j in range(len(cases)):
-            vars = ['Abundance: '] + cases[j]
-
-            if prot_list is not None:
-                # extract out rows where Accession is in list
-                data = data[data[index].isin(prot_list)]
-
-            cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-            
-            if not cols:
-                raise ValueError("No columns found. Please verify that the input 'cases' matches the columns in the data.")
-
-            # concat elements 1 till end of vars into one string
-            append_string = '_'.join(vars[1:])
-            
-            abundance = data[cols]
-            abundance.index = data['Accession']
-
-            # make dictionary for abundance and rank
-            abun_dict[append_string] = abundance
-
-        return abun_dict
-    else:
-        return {}
 
 # TODO: fix with pdata.summary maybe call stats_ttest instead
 def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_results=False, test_variable='total_count'):
@@ -447,6 +362,8 @@ def get_abundance_query(pdata, cases, genelist, search='gene', on = 'protein'):
         >>> cases = [['head'],['heart'],['tail']]
         >>> matched_features, combined_abundance = scutils.get_abundance_query(data, cases, gene_list.Gene, search=["gene","pathway","description"])
     """
+
+    # TODO: WILL NEED TO USE get_uniprot_fields TO GET ANNOTATED DATA
 
     valid_search_terms = ['gene', 'protein', 'description', 'pathway', 'all']
 
@@ -598,6 +515,7 @@ def stats_DE(pdata, class_type, values, on = 'protein', method='ttest'):
 
     return df_stats
 
+# TODO: sync with get_uniprot_fields
 def convert_identifiers(input_list, input_type, output_type, df):
     """
     Convert a list of gene information of a certain type to another type.
@@ -646,11 +564,11 @@ def get_pca_importance(model, initial_feature_names):
     """
 
     # number of components
-    n_pcs= model.components_.shape[0]
+    n_pcs= model.PCs.shape[0]
 
     # get the index of the most important feature on EACH component
     # LIST COMPREHENSION HERE
-    most_important = [np.abs(model.components_[i]).argmax() for i in range(n_pcs)]
+    most_important = [np.abs(model.PCs[i]).argmax() for i in range(n_pcs)]
 
     # get the names
     most_important_names = [initial_feature_names[most_important[i]] for i in range(n_pcs)]
@@ -663,6 +581,7 @@ def get_pca_importance(model, initial_feature_names):
 
     return df
 
+# TODO: add function to get GO enrichment, GSEA analysis (see GOATOOLS or STAGES or Enrichr?)
 # TO INTEGRATE
 def get_string_id(gene,species = 9606):
     string_api_url = "https://version-11-5.string-db.org/api"
@@ -775,7 +694,3 @@ def get_string_network(gene,comparison,species = 9606):
 #         return_contents = None
 
 #     return return_contents
-
-# TODO: add function to quickly drop/subset from data?
-
-# TODO: add function to get GO enrichment, GSEA analysis (see GOATOOLS or STAGES or Enrichr?)
