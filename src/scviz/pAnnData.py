@@ -114,6 +114,7 @@ class pAnnData:
         self._summary = value
         self._update_obs()
 
+    # -----------------------------
     # UTILITY FUNCTIONS
     def _set_RS(self, rs):
         # print rs shape, as well as protein and peptide shape if available
@@ -162,16 +163,6 @@ class pAnnData:
     
     def _has_data(self):
         return self.prot is not None or self.pep is not None
-
-    def _check_data(self, on):
-        if on not in ['protein', 'peptide']:
-            raise ValueError("Invalid input: on must be either 'protein' or 'peptide'.")
-        elif on == 'protein' and self.prot is None:
-            raise ValueError("No protein data found in AnnData object.")
-        elif on == 'peptide' and self.pep is None:
-            raise ValueError("No peptide data found in AnnData object.")
-        else:
-            return True
 
     def _update_summary(self):
         if self.prot is not None:
@@ -237,7 +228,26 @@ class pAnnData:
     def _append_history(self, action):
         self._history.append(action)
 
+    def print_history(self):
+        formatted_history = "\n".join(f"{i}: {action}" for i, action in enumerate(self._history, 1))
+        print("-------------------------------\nHistory:\n-------------------------------\n"+formatted_history)
+
+    # -----------------------------
+    # TESTING/CHECKING FUNCTIONS
+
+    def _check_data(self, on):
+        # check if protein or peptide data exists
+        if on not in ['protein', 'peptide']:
+            raise ValueError("Invalid input: on must be either 'protein' or 'peptide'.")
+        elif on == 'protein' and self.prot is None:
+            raise ValueError("No protein data found in AnnData object.")
+        elif on == 'peptide' and self.pep is None:
+            raise ValueError("No peptide data found in AnnData object.")
+        else:
+            return True
+
     def _check_rankcol(self, on = 'protein', class_values = None):
+        # check if average and rank columns exist for the specified class values
         if on == 'protein':
             adata = self.prot
         elif on == 'peptide':
@@ -251,11 +261,6 @@ class pAnnData:
             rank_col = f'Rank: {class_value}'
             if average_col not in adata.var.columns or rank_col not in adata.var.columns:
                 raise ValueError(f"Class name not found in .var. Please run plot_rankquank() beforehand and check that the input matches the class names in {on}.var['Average: ']")
-
-
-    def print_history(self):
-        formatted_history = "\n".join(f"{i}: {action}" for i, action in enumerate(self._history, 1))
-        print("-------------------------------\nHistory:\n-------------------------------\n"+formatted_history)
 
     # -----------------------------
     # EDITING FUNCTIONS
@@ -348,59 +353,71 @@ class pAnnData:
 
     # -----------------------------
     # PROCESSING FUNCTIONS
-    def cv(self, layer = "X_raw", classes = None, on = 'protein'):
+    def cv(self, classes = None, on = 'protein', layer = "X", debug = False):
         if not self._check_data(on):
             pass
 
-        if on == 'protein':
-            adata = self.prot
-        elif on == 'peptide':
-            adata = self.pep
-
-        if layer == "X":
-            # do nothing
-            pass
-        elif layer in adata.layers.keys():
-            self.set_X(layer = layer, on = on)
-
-        if classes is None:
-            # combine all .obs columns per row into one string
-            quant_col_index = adata.obs.columns.get_loc(next(col for col in adata.obs.columns if "_quant" in col))
-            selected_columns = adata.obs.iloc[:, :quant_col_index]
-            classes_list = selected_columns.apply(lambda x: '_'.join(x), axis=1).unique()
-            classes = selected_columns.columns.tolist()
-        elif isinstance(classes, str):
-            # check if classes is one of the columns of adata.obs
-            if classes not in adata.obs.columns:
-                raise ValueError(f"Invalid value for 'classes'. '{classes}' is not a column in adata.obs.")
-            
-            classes_list = adata.obs[classes].unique()
-        elif isinstance(classes, list):
-            # check if all classes are columns of adata.obs
-            if not all([c in adata.obs.columns for c in classes]):
-                raise ValueError(f"Invalid value for 'classes'. Not all elements in '{classes}' are columns in adata.obs.")
-            classes_list = adata.obs[classes].apply(lambda x: '_'.join(x), axis=1).unique()
-        else:
-            raise ValueError("Invalid value for 'classes'. Must be None, a string or a list of strings.")
+        adata = self.prot if on == 'protein' else self.pep
+        classes_list = utils.get_classlist(adata, classes)
 
         for j, class_value in enumerate(classes_list):
             if classes is None:
                 values = class_value.split('_')
-                print(f'Classes: {classes}, Values: {values}')
+                print(f'Classes: {classes}, Values: {values}') if debug else None
                 data_filtered = utils.filter(adata, classes, values, suppress_warnings=True)
             elif isinstance(classes, str):
-                print(f'Class: {classes}, Value: {class_value}')
+                print(f'Class: {classes}, Value: {class_value}') if debug else None
                 data_filtered = utils.filter(adata, classes, class_value, suppress_warnings=True)
             elif isinstance(classes, list):
                 values = class_value.split('_')
-                print(f'Classes: {classes}, Values: {values}')
+                print(f'Classes: {classes}, Values: {values}') if debug else None
                 data_filtered = utils.filter(adata, classes, values, suppress_warnings=True)
 
-        adata.var['CV: '+ class_value] = variation(data_filtered.X.toarray(), axis=0)
+            cv_data = data_filtered.X.toarray() if layer == "X" else data_filtered.layers[layer].toarray() if layer in data_filtered.layers else None
+            if cv_data is None:
+                raise ValueError(f"Layer '{layer}' not found in adata.layers.")
 
-    # TODO: ADD THIS
-    def rank(self, layer = "X_raw", on = 'protein', ascending = False):
-        self._history.append(f"{on}: Ranked {layer} data. Ranking stored in var['rank'].")
+            adata.var['CV: '+ class_value] = variation(cv_data, axis=0)
+
+        self._history.append(f"{on}: Coefficient of Variation (CV) calculated for {layer} data by {classes}. E.g. CV stored in var['CV: {class_value}'].")
+
+    # TODO: Need to figure out how to make this interface with plot functions, probably do reordering by each class_value within the loop?
+    def rank(self, classes = None, on = 'protein', layer = "X"):
+        if not self._check_data(on):
+            pass
+
+        adata = self.prot if on == 'protein' else self.pep
+        classes_list = utils.get_classlist(adata, classes)
+        
+        for j, class_value in enumerate(classes_list):
+            if classes is None:
+                values = class_value.split('_')
+                print(f'Classes: {classes}, Values: {values}')
+                rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
+            elif isinstance(classes, str):
+                print(f'Class: {classes}, Value: {class_value}')
+                rank_data = utils.filter(adata, classes, class_value, suppress_warnings=True)
+            elif isinstance(classes, list):
+                values = class_value.split('_')
+                print(f'Classes: {classes}, Values: {values}')
+                rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
+
+            rank_df = rank_data.to_df().transpose()
+            rank_df['Average: '+class_value] = np.nanmean(rank_data.X.toarray(), axis=0)
+            rank_df['Stdev: '+class_value] = np.nanstd(rank_data.X.toarray(), axis=0)
+            rank_df.sort_values(by=['Average: '+class_value], ascending=False, inplace=True)
+            rank_df['Rank: '+class_value] = np.where(rank_df['Average: '+class_value].isna(), np.nan, np.arange(1, len(rank_df) + 1))
+
+            # revert back to original data order (need to do so, because we sorted rank_df)
+            sorted_indices = rank_df.index
+            rank_df = rank_df.loc[adata.var.index]
+            adata.var['Average: ' + class_value] = rank_df['Average: ' + class_value]
+            adata.var['Stdev: ' + class_value] = rank_df['Stdev: ' + class_value]
+            adata.var['Rank: ' + class_value] = rank_df['Rank: ' + class_value]
+            rank_df = rank_df.reindex(sorted_indices)
+            
+
+        self._history.append(f"{on}: Ranked {layer} data. Ranking, average and stdev stored in var.")
 
     # TODO: add ability to impute within class (provide variable(s) for grouping, etc.) [See ColumnTransformer in sklearn]
     # TODO: add imputation for minimum [https://github.com/scikit-learn/scikit-learn/issues/19783]

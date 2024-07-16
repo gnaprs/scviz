@@ -109,8 +109,7 @@ def plot_significance(ax, x1, x2, y, h, col, pval):
     ax.plot([x1, x1, x2, x2], [y, y+h, y+h, y], lw=1, c=col)
     ax.text((x1+x2)*.5, y+h, sig, ha='center', va='bottom', color=col)
 
-# TODO: fix
-def plot_cv(ax,data,value='protein_count', classes=None, **kwargs):
+def plot_cv(ax, pdata, classes=None, layer = 'X', on = 'protein', order = None, return_df = False, **kwargs):
     """
     Generate a box and whisker plot for the coefficient of variation (CV) of different cases.
 
@@ -124,32 +123,29 @@ def plot_cv(ax,data,value='protein_count', classes=None, **kwargs):
     matplotlib.axes.Axes: The axis with the plotted data.
 
     Example:
-    >>> import matplotlib.pyplot as plt
-    >>> import pandas as pd
-    >>> cases = [['a','50g'],['b','50g'],['a','30g'],['b','30g']]
-    >>> fig, ax = plt.subplots()
-    >>> plot_cv(ax, data, cases, color = ['blue','red','green','orange'])
     """
+    pdata.cv(classes = classes, on = on, layer = layer)
+    adata = utils.get_adata(pdata, on)    
+    classes_list = utils.get_classlist(adata, classes = classes, order = order)
 
-    for j in range(len(cases)):
-        vars = ['CV'] + cases[j]
-        cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
+    cv_data = []
+    for class_value in classes_list:
+        cv_col = f'CV: {class_value}'
+        if cv_col in adata.var.columns:
+            cv_values = adata.var[cv_col].values
+            cv_data.append(pd.DataFrame({'Class': class_value, 'CV': cv_values}))
 
-        nsample = len(cols)
+    cv_df = pd.concat(cv_data, ignore_index=True)
 
-        # merge all abundance columns into one column
-        X = np.zeros((nsample*len(data)))
-        for i in range(nsample):
-            X[i*len(data):(i+1)*len(data)] = data[cols[i]].values
-        # remove nans
-        X = X[~np.isnan(X)]/100
-        # make box and whiskers plot of coefficient of variation
-        ax.boxplot(X, positions=[j+1], widths=0.5, patch_artist = True,
-                    flierprops=dict(marker='o', alpha=0.2, markersize=2, markerfacecolor=color[j], markeredgecolor=color[j]),
-                    whiskerprops=dict(color='black', linestyle='-', linewidth=0.5),
-                    medianprops=dict(color='black', linewidth=0.5),
-                    boxprops=dict(facecolor=color[j], color='black', linewidth=0.5),
-                    capprops=dict(color=color[j], linewidth=0.5))
+    # return cv_df for user to plot themselves
+    if return_df:
+        return cv_df
+    
+    sns.violinplot(x='Class', y='CV', data=cv_df, ax=ax, **kwargs)
+    plt.title('Coefficient of Variation (CV) by Class')
+    plt.xlabel('Class')
+    plt.ylabel('CV')
+    
     return ax
 
 def plot_summary(ax, pdata, value='protein_count', classes=None, plot_mean = True, **kwargs):
@@ -648,7 +644,7 @@ def mark_volcano(ax, volcano_df, label, label_color="black", s=10, alpha=1, show
 
     return ax
 
-def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=['Blues'], color=['blue'], order = None, s=20, alpha=0.2, calpha=1, append_var=True, exp_alpha = 70):
+def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=['Blues'], color=['blue'], order = None, s=20, alpha=0.2, calpha=1, exp_alpha = 70, debug = False):
     """
     Plot rank abundance of proteins across different classes.
 
@@ -681,14 +677,14 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
     for j, class_value in enumerate(classes_list):
         if classes is None:
             values = class_value.split('_')
-            print(f'Classes: {classes}, Values: {values}')
+            # print(f'Classes: {classes}, Values: {values}') if debug else None
             rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
         elif isinstance(classes, str):
-            print(f'Class: {classes}, Value: {class_value}')
+            # print(f'Class: {classes}, Value: {class_value}') if debug else None
             rank_data = utils.filter(adata, classes, class_value, suppress_warnings=True)
         elif isinstance(classes, list):
             values = class_value.split('_')
-            print(f'Classes: {classes}, Values: {values}')
+            # print(f'Classes: {classes}, Values: {values}') if debug else None
             rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
 
         plot_df = rank_data.to_df().transpose()
@@ -698,13 +694,11 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
         plot_df['Rank: '+class_value] = np.where(plot_df['Average: '+class_value].isna(), np.nan, np.arange(1, len(plot_df) + 1))
 
         sorted_indices = plot_df.index
-
-        if append_var:
-            plot_df = plot_df.loc[adata.var.index]
-            adata.var['Average: ' + class_value] = plot_df['Average: ' + class_value]
-            adata.var['Stdev: ' + class_value] = plot_df['Stdev: ' + class_value]
-            adata.var['Rank: ' + class_value] = plot_df['Rank: ' + class_value]
-            plot_df = plot_df.reindex(sorted_indices)
+        plot_df = plot_df.loc[adata.var.index]
+        adata.var['Average: ' + class_value] = plot_df['Average: ' + class_value]
+        adata.var['Stdev: ' + class_value] = plot_df['Stdev: ' + class_value]
+        adata.var['Rank: ' + class_value] = plot_df['Rank: ' + class_value]
+        plot_df = plot_df.reindex(sorted_indices)
 
         stats_df = plot_df.filter(regex = 'Average: |Stdev: |Rank: ', axis=1)
         plot_df = plot_df.drop(stats_df.columns, axis=1)
@@ -730,10 +724,10 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
         Y = Y[~np.isnan(X)]
         X = X[~np.isnan(X)]
 
-        print(f'nsample: {nsample}, nprot: {np.max(Y)}')
+        print(f'nsample: {nsample}, nprot: {np.max(Y)}') if debug else None
 
-        ax.scatter(stats_df['Rank: '+class_value], stats_df['Average: '+class_value], marker='.', color=color[j], alpha=calpha)
         ax.scatter(Y, X, c=Z, marker='.',cmap=cmap[j], s=s,alpha=alpha)
+        ax.scatter(stats_df['Rank: '+class_value], stats_df['Average: '+class_value], marker='.', color=color[j], alpha=calpha)
         ax.set_yscale('log')
         ax.set_xlabel('Rank')
         ax.set_ylabel('Abundance')
@@ -876,7 +870,7 @@ def plot_abundance_2D(ax,data,cases,genes='all', cmap='Blues',color=['blue'],s=2
 
     return ax
 
-def plot_raincloud(ax,pdata,classes = None, layer = 'X', on = 'protein', order = None, append_var=True, color=['blue'],boxcolor='black',linewidth=0.5):
+def plot_raincloud(ax,pdata,classes = None, layer = 'X', on = 'protein', order = None, color=['blue'],boxcolor='black',linewidth=0.5, debug = False):
     adata = utils.get_adata(pdata, on)
 
     classes_list = utils.get_classlist(adata, classes = classes, order = order)
@@ -885,14 +879,14 @@ def plot_raincloud(ax,pdata,classes = None, layer = 'X', on = 'protein', order =
     for j, class_value in enumerate(classes_list):
         if classes is None:
             values = class_value.split('_')
-            print(f'Classes: {classes}, Values: {values}')
+            print(f'Classes: {classes}, Values: {values}') if debug else None
             rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
         elif isinstance(classes, str):
-            print(f'Class: {classes}, Value: {class_value}')
+            print(f'Class: {classes}, Value: {class_value}') if debug else None
             rank_data = utils.filter(adata, classes, class_value, suppress_warnings=True)
         elif isinstance(classes, list):
             values = class_value.split('_')
-            print(f'Classes: {classes}, Values: {values}')
+            print(f'Classes: {classes}, Values: {values}') if debug else None
             rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
 
         plot_df = rank_data.to_df().transpose()
@@ -903,12 +897,11 @@ def plot_raincloud(ax,pdata,classes = None, layer = 'X', on = 'protein', order =
 
         sorted_indices = plot_df.index
 
-        if append_var:
-            plot_df = plot_df.loc[adata.var.index]
-            adata.var['Average: ' + class_value] = plot_df['Average: ' + class_value]
-            adata.var['Stdev: ' + class_value] = plot_df['Stdev: ' + class_value]
-            adata.var['Rank: ' + class_value] = plot_df['Rank: ' + class_value]
-            plot_df = plot_df.reindex(sorted_indices)
+        plot_df = plot_df.loc[adata.var.index]
+        adata.var['Average: ' + class_value] = plot_df['Average: ' + class_value]
+        adata.var['Stdev: ' + class_value] = plot_df['Stdev: ' + class_value]
+        adata.var['Rank: ' + class_value] = plot_df['Rank: ' + class_value]
+        plot_df = plot_df.reindex(sorted_indices)
 
         stats_df = plot_df.filter(regex = 'Average: |Stdev: |Rank: ', axis=1)
         plot_df = plot_df.drop(stats_df.columns, axis=1)
