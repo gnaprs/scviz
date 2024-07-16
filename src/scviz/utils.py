@@ -68,7 +68,21 @@ def get_samplenames(adata, class_type):
     else:
         raise ValueError("Invalid input for 'class_type'. It should be None, a string, or a list of strings.")
     
-def get_classlist(adata, layer = 'X', classes = None, order = None):
+def get_classlist(adata, classes = None, order = None):
+    """
+    Returns a list of unique classes for the given class(es) type. Helper function for plot functions.
+
+    Parameters:
+    - adata (anndata.AnnData): The AnnData object containing the classes.
+    - classes (str or list of str): The classes to use for selecting samples. E.g. 'cell_type' or ['cell_type', 'treatment'].
+    - order (list of str): The order to sort the classes in. Default is None.
+
+    Returns:
+    - list of str: The unique classes.
+
+    Example:
+    >>> classes = get_classlist(adata, classes = classes, order = order)
+    """
 
     if classes is None:
         # combine all .obs columns per row into one string
@@ -105,8 +119,14 @@ def get_classlist(adata, layer = 'X', classes = None, order = None):
         classes_list = order
 
     return classes_list
-    
 
+def get_adata(pdata, on = 'protein'):
+    if on == 'protein':
+        return pdata.prot
+    elif on == 'peptide':
+        return pdata.pep
+    else:
+        raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
 def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = False):
     """

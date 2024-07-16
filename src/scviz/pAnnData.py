@@ -6,6 +6,7 @@ import scanpy as sc
 import copy
 
 from scipy import sparse
+from scipy.stats import variation
 from sklearn.preprocessing import MultiLabelBinarizer, normalize
 from sklearn.decomposition import PCA
 from sklearn.impute import SimpleImputer, KNNImputer
@@ -16,6 +17,8 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 from pandas.testing import assert_frame_equal
+
+from scviz import utils
 
 from typing import (  # Meta  # Generic ABCs  # Generic
     TYPE_CHECKING,
@@ -234,6 +237,22 @@ class pAnnData:
     def _append_history(self, action):
         self._history.append(action)
 
+    def _check_rankcol(self, on = 'protein', class_values = None):
+        if on == 'protein':
+            adata = self.prot
+        elif on == 'peptide':
+            adata = self.pep
+
+        if class_values is None:
+            raise ValueError("class_values must be None")
+
+        for class_value in class_values:
+            average_col = f'Average: {class_value}'
+            rank_col = f'Rank: {class_value}'
+            if average_col not in adata.var.columns or rank_col not in adata.var.columns:
+                raise ValueError(f"Class name not found in .var. Please run plot_rankquank() beforehand and check that the input matches the class names in {on}.var['Average: ']")
+
+
     def print_history(self):
         formatted_history = "\n".join(f"{i}: {action}" for i, action in enumerate(self._history, 1))
         print("-------------------------------\nHistory:\n-------------------------------\n"+formatted_history)
@@ -329,9 +348,6 @@ class pAnnData:
 
     # -----------------------------
     # PROCESSING FUNCTIONS
-
-    # TODO: add cv calculation, typically within class (provide variable(s) for grouping, etc.), default assumes all samples are in the same group
-    # FIX CLASSES
     def cv(self, layer = "X_raw", classes = None, on = 'protein'):
         if not self._check_data(on):
             pass
@@ -348,18 +364,43 @@ class pAnnData:
             self.set_X(layer = layer, on = on)
 
         if classes is None:
-            means = np.mean(adata.X.toarray(), axis=0)
-            stds = np.std(adata.X.toarray(), axis=0)
-            cv = stds / means
-            adata.obs['cv'] = cv
-            print(f"{on}: Coefficient of variation calculated and stored in obs['cv'].")
+            # combine all .obs columns per row into one string
+            quant_col_index = adata.obs.columns.get_loc(next(col for col in adata.obs.columns if "_quant" in col))
+            selected_columns = adata.obs.iloc[:, :quant_col_index]
+            classes_list = selected_columns.apply(lambda x: '_'.join(x), axis=1).unique()
+            classes = selected_columns.columns.tolist()
+        elif isinstance(classes, str):
+            # check if classes is one of the columns of adata.obs
+            if classes not in adata.obs.columns:
+                raise ValueError(f"Invalid value for 'classes'. '{classes}' is not a column in adata.obs.")
+            
+            classes_list = adata.obs[classes].unique()
+        elif isinstance(classes, list):
+            # check if all classes are columns of adata.obs
+            if not all([c in adata.obs.columns for c in classes]):
+                raise ValueError(f"Invalid value for 'classes'. Not all elements in '{classes}' are columns in adata.obs.")
+            classes_list = adata.obs[classes].apply(lambda x: '_'.join(x), axis=1).unique()
         else:
-            cvs = []
-            for c in classes:
-                means = np.mean(adata.X.toarray()[adata.obs[classes] == c], axis=0)
-                stds = np.std(adata.X.toarray()[adata.obs[classes] == c], axis=0)
-                cv = stds / means
-                cvs.append(cv)
+            raise ValueError("Invalid value for 'classes'. Must be None, a string or a list of strings.")
+
+        for j, class_value in enumerate(classes_list):
+            if classes is None:
+                values = class_value.split('_')
+                print(f'Classes: {classes}, Values: {values}')
+                data_filtered = utils.filter(adata, classes, values, suppress_warnings=True)
+            elif isinstance(classes, str):
+                print(f'Class: {classes}, Value: {class_value}')
+                data_filtered = utils.filter(adata, classes, class_value, suppress_warnings=True)
+            elif isinstance(classes, list):
+                values = class_value.split('_')
+                print(f'Classes: {classes}, Values: {values}')
+                data_filtered = utils.filter(adata, classes, values, suppress_warnings=True)
+
+        adata.var['CV: '+ class_value] = variation(data_filtered.X.toarray(), axis=0)
+
+    # TODO: ADD THIS
+    def rank(self, layer = "X_raw", on = 'protein', ascending = False):
+        self._history.append(f"{on}: Ranked {layer} data. Ranking stored in var['rank'].")
 
     # TODO: add ability to impute within class (provide variable(s) for grouping, etc.) [See ColumnTransformer in sklearn]
     # TODO: add imputation for minimum [https://github.com/scikit-learn/scikit-learn/issues/19783]
@@ -673,7 +714,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
     print("pAnnData object created. Use `print(pdata)` to view the object.")
     return pdata
 
-def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None):
+def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Translated'):
     if not report_file:
         raise ValueError("Importing from DIA-NN: report.tsv must be provided")
     print("--------------------------\nStarting import...\n--------------------------")
@@ -685,7 +726,9 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     # -----------------------------
     # PROTEIN DATA
     # prot_X: sparse data matrix
-    prot_X_pivot = report_all.pivot_table(index='Master.Protein', columns='Run', values='PG.MaxLFQ', aggfunc='first')
+    if prot_value is not 'PG.MaxLFQ':
+        print("INFO: Protein value specified is not PG.MaxLFQ, please check if correct.")
+    prot_X_pivot = report_all.pivot_table(index='Master.Protein', columns='Run', values=prot_value, aggfunc='first')
     prot_X = sparse.csr_matrix(prot_X_pivot.values).T
     # prot_var_names: protein names
     prot_var_names = prot_X_pivot.index.values
@@ -708,7 +751,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     # -----------------------------
     # PEPTIDE DATA
     # pep_X: sparse data matrix
-    pep_X_pivot = report_all.pivot_table(index='Precursor.Id', columns='Run', values='Precursor.Translated', aggfunc='first')
+    pep_X_pivot = report_all.pivot_table(index='Precursor.Id', columns='Run', values=pep_value, aggfunc='first')
     pep_X = sparse.csr_matrix(pep_X_pivot.values).T
     # pep_var_names: peptide sequence
     pep_var_names = pep_X_pivot.index.values
@@ -769,6 +812,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     pdata.pep.obs.columns = obs_columns if obs_columns else list(range(len(pep_obs.columns)))
 
     pdata._update_summary()
+    pdata._append_history(f"Imported protein data from {report_file}, using {prot_value} as protein value and {pep_value} as peptide value.")
     print("pAnnData object created. Use `print(pdata)` to view the object.")
 
     return pdata
