@@ -68,6 +68,46 @@ def get_samplenames(adata, class_type):
     else:
         raise ValueError("Invalid input for 'class_type'. It should be None, a string, or a list of strings.")
     
+def get_classlist(adata, layer = 'X', classes = None, order = None):
+
+    if classes is None:
+        # combine all .obs columns per row into one string
+        # NOTE: might break, should use better method to filter out file-related columns
+        quant_col_index = adata.obs.columns.get_loc(next(col for col in adata.obs.columns if "_quant" in col))
+        selected_columns = adata.obs.iloc[:, :quant_col_index]
+        classes_list = selected_columns.apply(lambda x: '_'.join(x), axis=1).unique()
+        classes = selected_columns.columns.tolist()
+    elif isinstance(classes, str):
+        # check if classes is one of the columns of adata.obs
+        if classes not in adata.obs.columns:
+            raise ValueError(f"Invalid value for 'classes'. '{classes}' is not a column in adata.obs.")
+        classes_list = adata.obs[classes].unique()
+    elif isinstance(classes, list):
+        # check if all classes are columns of adata.obs
+        if not all([c in adata.obs.columns for c in classes]):
+            raise ValueError(f"Invalid value for 'classes'. Not all elements in '{classes}' are columns in adata.obs.")
+        classes_list = adata.obs[classes].apply(lambda x: '_'.join(x), axis=1).unique()
+    else:
+        raise ValueError("Invalid value for 'classes'. Must be None, a string or a list of strings.")
+
+    if order is not None:
+        # check if order list matches classes_list
+        missing_elements = set(classes_list) - set(order)
+        extra_elements = set(order) - set(classes_list)
+        # Print missing and extra elements if any
+        if missing_elements or extra_elements:
+            if missing_elements:
+                print(f"Missing elements in 'order': {missing_elements}")
+            if extra_elements:
+                print(f"Extra elements in 'order': {extra_elements}")
+            raise ValueError("The 'order' list does not match 'classes_list'.")
+        # if they match, then reorder classes_list to match order
+        classes_list = order
+
+    return classes_list
+    
+
+
 def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = False):
     """
     Filters out for the given class(es) type. Returns a copy of the filtered pdata object, does not modify the original object.
@@ -104,15 +144,15 @@ def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = F
     
     if isinstance(class_type, str):
         query = f"(adata.obs['{class_type}'] == '{values}')"
-        print(query)
+        print('DEVELOPMENT: testing for query - ', query)
     elif isinstance(class_type, list):
         values = [[val] for val in values]
         if exact_cases:
             query = " | ".join([" & ".join(["(adata.obs['{}'] == '{}')".format(cls, val) for cls, val in zip(class_type, vals)]) for vals in values])
-            print(query)
+            print('DEVELOPMENT: testing for query - ', query)
         else:
             query = " & ".join(["({})".format(' | '.join(["(adata.obs['{}'] == '{}')".format(cls, val) for val in vals])) for cls, vals in zip(class_type, values)])
-            print(query)
+            print('DEVELOPMENT: testing for query - ', query)
     else:
         raise ValueError("Invalid input for 'class_type'. It should be None, a string, or a list of strings.")
     

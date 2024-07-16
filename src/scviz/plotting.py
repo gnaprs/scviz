@@ -42,7 +42,6 @@ from scviz import utils
 
 sns.set_theme(context='paper', style='ticks')
 
-# DONE
 def get_color(resource_type, n=None):
     """
     Generate a list of colors, a colormap, or a palette from package defaults.
@@ -683,44 +682,44 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
     else:
         raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
-    if classes is None:
-        # combine all .obs columns per row into one string
-        quant_col_index = adata.obs.columns.get_loc(next(col for col in adata.obs.columns if "_quant" in col))
-        selected_columns = adata.obs.iloc[:, :quant_col_index]
-        classes_list = selected_columns.apply(lambda x: '_'.join(x), axis=1).unique()
-        classes = selected_columns.columns.tolist()
+    classes_list = utils.get_classlist(adata, classes = classes, order = order)
 
-    elif isinstance(classes, str):
-        # check if classes is one of the columns of adata.obs
-        if classes not in adata.obs.columns:
-            raise ValueError(f"Invalid value for 'classes'. '{classes}' is not a column in adata.obs.")
+    # if classes is None:
+    #     # combine all .obs columns per row into one string
+    #     quant_col_index = adata.obs.columns.get_loc(next(col for col in adata.obs.columns if "_quant" in col))
+    #     selected_columns = adata.obs.iloc[:, :quant_col_index]
+    #     classes_list = selected_columns.apply(lambda x: '_'.join(x), axis=1).unique()
+    #     classes = selected_columns.columns.tolist()
+    # elif isinstance(classes, str):
+    #     # check if classes is one of the columns of adata.obs
+    #     if classes not in adata.obs.columns:
+    #         raise ValueError(f"Invalid value for 'classes'. '{classes}' is not a column in adata.obs.")
         
-        classes_list = adata.obs[classes].unique()
+    #     classes_list = adata.obs[classes].unique()
+    # elif isinstance(classes, list):
+    #     # check if all classes are columns of adata.obs
+    #     if not all([c in adata.obs.columns for c in classes]):
+    #         raise ValueError(f"Invalid value for 'classes'. Not all elements in '{classes}' are columns in adata.obs.")
+        
+    #     classes_list = adata.obs[classes].apply(lambda x: '_'.join(x), axis=1).unique()
+    # else:
+    #     raise ValueError("Invalid value for 'classes'. Must be None, a string or a list of strings.")
 
-    elif isinstance(classes, list):
-        # check if all classes are columns of adata.obs
-        if not all([c in adata.obs.columns for c in classes]):
-            raise ValueError(f"Invalid value for 'classes'. Not all elements in '{classes}' are columns in adata.obs.")
+    # if order is not None:
+    #     # check if order list matches classes_list
+    #     missing_elements = set(classes_list) - set(order)
+    #     extra_elements = set(order) - set(classes_list)
         
-        classes_list = adata.obs[classes].apply(lambda x: '_'.join(x), axis=1).unique()
-    else:
-        raise ValueError("Invalid value for 'classes'. Must be None, a string or a list of strings.")
-
-    if order is not None:
-        # check if order list matches classes_list
-        missing_elements = set(classes_list) - set(order)
-        extra_elements = set(order) - set(classes_list)
+    #     # Print missing and extra elements if any
+    #     if missing_elements or extra_elements:
+    #         if missing_elements:
+    #             print(f"Missing elements in 'order': {missing_elements}")
+    #         if extra_elements:
+    #             print(f"Extra elements in 'order': {extra_elements}")
+    #         raise ValueError("The 'order' list does not match 'classes_list'.")
         
-        # Print missing and extra elements if any
-        if missing_elements or extra_elements:
-            if missing_elements:
-                print(f"Missing elements in 'order': {missing_elements}")
-            if extra_elements:
-                print(f"Extra elements in 'order': {extra_elements}")
-            raise ValueError("The 'order' list does not match 'classes_list'.")
-        
-        # if they match, then reorder classes_list to match order
-        classes_list = order
+    #     # if they match, then reorder classes_list to match order
+    #     classes_list = order
 
     for j, class_value in enumerate(classes_list):
         if classes is None:
@@ -783,6 +782,37 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
         ax.set_ylabel('Abundance')
 
     return ax
+
+def mark_rankquant(plot, pdata, names, class_values, layer = "X", on = 'protein',color='red',s=10,alpha=1,show_names=True):
+    # pdata type
+    if on == 'protein':
+        adata = pdata.prot
+    elif on == 'peptide':
+        adata = pdata.pep
+    else:
+        raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
+
+    for class_value in class_values:
+        average_col = 'Average: ' + class_value
+        rank_col = 'Rank: ' + class_value
+        # quick check if names are in the data
+        if average_col not in adata.var.columns or rank_col not in adata.var.columns:
+            raise ValueError(f"Class name not found in .var. Please run plot_rankquank() beforehand and check that the input matches the class names in {on}.var['Average: ']")
+
+    for j, class_value in enumerate(class_values):
+        print('Class: ', class_value)
+        
+        for i, txt in enumerate(names):
+            try:
+                x = adata.var['Average: '+class_value].loc[txt]
+                y = adata.var['Rank: '+class_value].loc[txt]
+            except Exception as e:
+                print(f"Name {txt} not found in {on}.var. Check {on} name for spelling errors and whether it is in data.")
+                continue
+            if show_names:
+                plot.annotate(txt, (y,x), xytext=(y+10,x*1.1), fontsize=8)
+            plot.scatter(y,x,marker='o',color=color,s=s, alpha=alpha)
+    return plot
 
 # TODO: make function work from get_abundance or get_abundance_query, actually plot the protein abundances - refer to graph from tingyu
 def plot_abundance(ax, prot_data, classes, genelist, cmap='Blues', color=['blue'], s=20, alpha=0.2, calpha=1):
@@ -900,72 +930,131 @@ def plot_abundance_2D(ax,data,cases,genes='all', cmap='Blues',color=['blue'],s=2
 
     return ax
 
-# TODO: fix
-def mark_rankquant(plot,pdata,names,class_values, layer = "X", on = 'protein',color='red',s=10,alpha=1,show_names=True):
-    # pdata type
+def plot_raincloud(ax,pdata,classes = None, layer = 'X', on = 'protein', order = None, append_var=True, color=['blue'],boxcolor='black',linewidth=0.5):
     if on == 'protein':
         adata = pdata.prot
     elif on == 'peptide':
         adata = pdata.pep
     else:
         raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
+    
+    if classes is None:
+            # combine all .obs columns per row into one string
+            quant_col_index = adata.obs.columns.get_loc(next(col for col in adata.obs.columns if "_quant" in col))
+            selected_columns = adata.obs.iloc[:, :quant_col_index]
+            classes_list = selected_columns.apply(lambda x: '_'.join(x), axis=1).unique()
+            classes = selected_columns.columns.tolist()
 
-    for class_value in class_values:
-        average_col = 'Average: ' + class_value
-        rank_col = 'Rank: ' + class_value
-        # quick check if names are in the data
-        if average_col not in adata.var.columns or rank_col not in adata.var.columns:
-            raise ValueError(f"Class name not found in .var. Please run plot_rankquank() beforehand and check that the input matches the class names in {on}.var['Average: ']")
-
-    for j, class_value in enumerate(class_values):
-        print('Class: ', class_value)
+    elif isinstance(classes, str):
+        # check if classes is one of the columns of adata.obs
+        if classes not in adata.obs.columns:
+            raise ValueError(f"Invalid value for 'classes'. '{classes}' is not a column in adata.obs.")
         
-        for i, txt in enumerate(names):
-            try:
-                x = adata.var['Average: '+class_value].loc[txt]
-                y = adata.var['Rank: '+class_value].loc[txt]
-            except Exception as e:
-                print(f"Name {txt} not found in {on}.var. Check {on} name for spelling errors and whether it is in data.")
-                continue
-            if show_names:
-                plot.annotate(txt, (y,x), xytext=(y+10,x*1.1), fontsize=8)
-            plot.scatter(y,x,marker='o',color=color,s=s, alpha=alpha)
-    return plot
+        classes_list = adata.obs[classes].unique()
 
-def plot_raincloud(ax,data,cases,color=['blue'],boxcolor='black',linewidth=0.5):
-    # extract columns that contain the abundance data for the specified method and amount
+    elif isinstance(classes, list):
+        # check if all classes are columns of adata.obs
+        if not all([c in adata.obs.columns for c in classes]):
+            raise ValueError(f"Invalid value for 'classes'. Not all elements in '{classes}' are columns in adata.obs.")
+        
+        classes_list = adata.obs[classes].apply(lambda x: '_'.join(x), axis=1).unique()
+    else:
+        raise ValueError("Invalid value for 'classes'. Must be None, a string or a list of strings.")
+
+    if order is not None:
+        # check if order list matches classes_list
+        missing_elements = set(classes_list) - set(order)
+        extra_elements = set(order) - set(classes_list)
+        
+        # Print missing and extra elements if any
+        if missing_elements or extra_elements:
+            if missing_elements:
+                print(f"Missing elements in 'order': {missing_elements}")
+            if extra_elements:
+                print(f"Extra elements in 'order': {extra_elements}")
+            raise ValueError("The 'order' list does not match 'classes_list'.")
+        
+        # if they match, then reorder classes_list to match order
+        classes_list = order
+
     data_X = []
-    for j in range(len(cases)):
-        vars = ['Abundance: '] + cases[j]
-        cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-        # concat elements 1 till end of vars into one string
-        append_string = '_'.join(vars[1:])
 
-        # average abundance of proteins across these columns, ignoring NaN values
-        data['Average: '+append_string] = data[cols].mean(axis=1, skipna=True)
-        data['Stdev: '+append_string] = data[cols].std(axis=1, skipna=True)
+    for j, class_value in enumerate(classes_list):
+        if classes is None:
+            values = class_value.split('_')
+            print(f'Classes: {classes}, Values: {values}')
+            rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
+        elif isinstance(classes, str):
+            print(f'Class: {classes}, Value: {class_value}')
+            rank_data = utils.filter(adata, classes, class_value, suppress_warnings=True)
+        elif isinstance(classes, list):
+            values = class_value.split('_')
+            print(f'Classes: {classes}, Values: {values}')
+            rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
 
-        # sort by average abundance
-        data.sort_values(by=['Average: '+append_string], ascending=False, inplace=True)
+        plot_df = rank_data.to_df().transpose()
+        plot_df['Average: '+class_value] = np.nanmean(rank_data.X.toarray(), axis=0)
+        plot_df['Stdev: '+class_value] = np.nanstd(rank_data.X.toarray(), axis=0)
+        plot_df.sort_values(by=['Average: '+class_value], ascending=False, inplace=True)
+        plot_df['Rank: '+class_value] = np.where(plot_df['Average: '+class_value].isna(), np.nan, np.arange(1, len(plot_df) + 1))
 
-        # add rank number
-        data['Rank: '+append_string] = np.arange(1, len(data)+1)
+        sorted_indices = plot_df.index
 
-        nsample = len(cols)
+        if append_var:
+            plot_df = plot_df.loc[adata.var.index]
+            adata.var['Average: ' + class_value] = plot_df['Average: ' + class_value]
+            adata.var['Stdev: ' + class_value] = plot_df['Stdev: ' + class_value]
+            adata.var['Rank: ' + class_value] = plot_df['Rank: ' + class_value]
+            plot_df = plot_df.reindex(sorted_indices)
+
+        stats_df = plot_df.filter(regex = 'Average: |Stdev: |Rank: ', axis=1)
+        plot_df = plot_df.drop(stats_df.columns, axis=1)
+
+        nsample = plot_df.shape[1]
+        nprot = plot_df.shape[0]
 
         # merge all abundance columns into one column
-        X = np.zeros((nsample*len(data)))
+        X = np.zeros((nsample*nprot))
         for i in range(nsample):
-            X[i*len(data):(i+1)*len(data)] = data[cols[i]].values
+            X[i*nprot:(i+1)*nprot] = plot_df.iloc[:, i].values
 
         X = X[~np.isnan(X)]
         X = np.log10(X)
 
         data_X.append(X)
+
+
+    # for j in range(len(cases)):
+    #     vars = ['Abundance: '] + cases[j]
+    #     cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
+    #     # concat elements 1 till end of vars into one string
+    #     append_string = '_'.join(vars[1:])
+
+    #     # average abundance of proteins across these columns, ignoring NaN values
+    #     data['Average: '+append_string] = data[cols].mean(axis=1, skipna=True)
+    #     data['Stdev: '+append_string] = data[cols].std(axis=1, skipna=True)
+
+    #     # sort by average abundance
+    #     data.sort_values(by=['Average: '+append_string], ascending=False, inplace=True)
+
+    #     # add rank number
+    #     data['Rank: '+append_string] = np.arange(1, len(data)+1)
+
+    #     nsample = len(cols)
+
+    #     # merge all abundance columns into one column
+    #     X = np.zeros((nsample*len(data)))
+    #     for i in range(nsample):
+    #         X[i*len(data):(i+1)*len(data)] = data[cols[i]].values
+
+    #     X = X[~np.isnan(X)]
+    #     X = np.log10(X)
+
+    #     data_X.append(X)
         
     # plot
     # Boxplot data
-    bp = ax.boxplot(data_X, positions=np.arange(1,len(cases)+1)-0.06, widths=0.1, patch_artist = True,
+    bp = ax.boxplot(data_X, positions=np.arange(1,len(classes_list)+1)-0.06, widths=0.1, patch_artist = True,
                     flierprops=dict(marker='o', alpha=0.2, markersize=2, markerfacecolor=boxcolor, markeredgecolor=boxcolor),
                     whiskerprops=dict(color=boxcolor, linestyle='-', linewidth=linewidth),
                     medianprops=dict(color=boxcolor, linewidth=linewidth),
@@ -976,7 +1065,7 @@ def plot_raincloud(ax,data,cases,color=['blue'],boxcolor='black',linewidth=0.5):
     violin_colors = ['thistle', 'orchid']
 
     # Violinplot data
-    vp = ax.violinplot(data_X, points=500, vert=True, positions=np.arange(1,len(cases)+1)+0.06,
+    vp = ax.violinplot(data_X, points=500, vert=True, positions=np.arange(1,len(classes_list)+1)+0.06,
                 showmeans=False, showextrema=False, showmedians=False)
 
     for idx, b in enumerate(vp['bodies']):
@@ -999,7 +1088,7 @@ def plot_raincloud(ax,data,cases,color=['blue'],boxcolor='black',linewidth=0.5):
 
     return ax
 
-def mark_raincloud(plot,data,prot_names,cases,lowest_index=0,color='red',s=10,alpha=1,show_names=True):
+def mark_raincloud(plot,pdata,names,class_values,layer = "X", on = 'protein',lowest_index=0,color='red',s=10,alpha=1,show_names=True):
     for j in range(len(cases)):
         vars = ['Abundance: '] + cases[j]
         append_string = '_'.join(vars[1:])
