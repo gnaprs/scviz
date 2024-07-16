@@ -36,6 +36,7 @@ import matplotlib.patheffects as PathEffects
 from upsetplot import plot, generate_counts, from_contents, query, UpSet
 from adjustText import adjust_text
 import umap.umap_ as umap
+import scanpy as sc
 
 from scviz import utils
 
@@ -108,7 +109,7 @@ def plot_significance(ax, x1, x2, y, h, col, pval):
     ax.plot([x1, x1, x2, x2], [y, y+h, y+h, y], lw=1, c=col)
     ax.text((x1+x2)*.5, y+h, sig, ha='center', va='bottom', color=col)
 
-def plot_cv(ax,data,cases,color=['blue']):
+def plot_cv(ax, pdata, classes=None, layer = 'X', on = 'protein', order = None, return_df = False, **kwargs):
     """
     Generate a box and whisker plot for the coefficient of variation (CV) of different cases.
 
@@ -122,46 +123,115 @@ def plot_cv(ax,data,cases,color=['blue']):
     matplotlib.axes.Axes: The axis with the plotted data.
 
     Example:
-    >>> import matplotlib.pyplot as plt
-    >>> import pandas as pd
-    >>> cases = [['a','50g'],['b','50g'],['a','30g'],['b','30g']]
-    >>> fig, ax = plt.subplots()
-    >>> plot_cv(ax, data, cases, color = ['blue','red','green','orange'])
     """
+    pdata.cv(classes = classes, on = on, layer = layer)
+    adata = utils.get_adata(pdata, on)    
+    classes_list = utils.get_classlist(adata, classes = classes, order = order)
 
-    for j in range(len(cases)):
-        vars = ['CV'] + cases[j]
-        cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
+    cv_data = []
+    for class_value in classes_list:
+        cv_col = f'CV: {class_value}'
+        if cv_col in adata.var.columns:
+            cv_values = adata.var[cv_col].values
+            cv_data.append(pd.DataFrame({'Class': class_value, 'CV': cv_values}))
 
-        nsample = len(cols)
+    cv_df = pd.concat(cv_data, ignore_index=True)
 
-        # merge all abundance columns into one column
-        X = np.zeros((nsample*len(data)))
-        for i in range(nsample):
-            X[i*len(data):(i+1)*len(data)] = data[cols[i]].values
-        # remove nans
-        X = X[~np.isnan(X)]/100
-        # make box and whiskers plot of coefficient of variation
-        ax.boxplot(X, positions=[j+1], widths=0.5, patch_artist = True,
-                    flierprops=dict(marker='o', alpha=0.2, markersize=2, markerfacecolor=color[j], markeredgecolor=color[j]),
-                    whiskerprops=dict(color='black', linestyle='-', linewidth=0.5),
-                    medianprops=dict(color='black', linewidth=0.5),
-                    boxprops=dict(facecolor=color[j], color='black', linewidth=0.5),
-                    capprops=dict(color=color[j], linewidth=0.5))
+    # return cv_df for user to plot themselves
+    if return_df:
+        return cv_df
+    
+    sns.violinplot(x='Class', y='CV', data=cv_df, ax=ax, **kwargs)
+    plt.title('Coefficient of Variation (CV) by Class')
+    plt.xlabel('Class')
+    plt.ylabel('CV')
+    
     return ax
 
-def plot_pca(ax, data, cases, cmap=cm.get_cmap('viridis'), s=20, alpha=.8, plot_pc=[1,2]):
+def plot_summary(ax, pdata, value='protein_count', classes=None, plot_mean = True, **kwargs):
+    if pdata.summary is None:
+        pdata._update_summary()
+
+    summary_data = pdata.summary.copy()
+
+    if plot_mean:
+        if classes is None:
+            raise ValueError("Classes must be specified when plot_mean is True.")
+        elif isinstance(classes, str):
+            sns.barplot(x=classes, y=value, hue=classes, data=summary_data, ci='sd', ax=ax, **kwargs)
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+        elif isinstance(classes, list) and len(classes) > 0:
+            if len(classes) == 1:
+                sns.catplot(x=classes[0], y=value, data=summary_data, hue=classes[0], kind='bar', ax=ax, **kwargs)
+                ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+            elif len(classes) >= 2:
+                summary_data['combined_classes'] = summary_data[classes[1:]].astype(str).agg('-'.join, axis=1)
+
+                unique_values = summary_data[classes[0]].unique()
+                num_unique_values = len(unique_values)
+
+                fig, ax = plt.subplots(nrows=num_unique_values, figsize=(10, 5 * num_unique_values))
+
+                if num_unique_values == 1:
+                    ax = [ax]
+
+                for ax_sub, unique_value in zip(ax, unique_values):
+                    subset_data = summary_data[summary_data[classes[0]] == unique_value]
+                    sns.barplot(x='combined_classes', y=value, data=subset_data, hue='combined_classes', ax=ax_sub, **kwargs)
+                    ax_sub.set_title(f"{classes[0]}: {unique_value}")
+                    ax_sub.set_xticklabels(ax_sub.get_xticklabels(), rotation=45, ha='right')
+    else:
+        if classes is None:
+            sns.barplot(x=summary_data.index, y=value, data=summary_data, ax=ax, **kwargs)
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+        elif isinstance(classes, str):
+            sns.barplot(x=summary_data.index, y=value, hue=classes, data=summary_data, ax=ax, **kwargs)
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+        elif isinstance(classes, list) and len(classes) > 0:
+            if len(classes) == 1:
+                sns.barplot(x=summary_data.index, y=value, hue=classes[0], data=summary_data, ax=ax, **kwargs)
+                ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+            elif len(classes) >= 2:
+                summary_data['combined_classes'] = summary_data[classes[1:]].astype(str).agg('-'.join, axis=1)
+                # Create a subplot for each unique value in classes[0]
+                unique_values = summary_data[classes[0]].unique()
+                num_unique_values = len(unique_values)
+                
+                fig, ax = plt.subplots(nrows=num_unique_values, figsize=(10, 5 * num_unique_values))
+                
+                if num_unique_values == 1:
+                    ax = [ax]  # Ensure axes is iterable
+                
+                for ax_sub, unique_value in zip(ax, unique_values):
+                    subset_data = summary_data[summary_data[classes[0]] == unique_value]
+                    sns.barplot(x=subset_data.index, y=value, hue='combined_classes', data=subset_data, ax=ax_sub, **kwargs)
+                    ax_sub.set_title(f"{classes[0]}: {unique_value}")
+                    ax_sub.set_xticklabels(ax_sub.get_xticklabels(), rotation=45, ha='right')
+                
+                plt.tight_layout()            
+        else:
+            raise ValueError("Invalid 'classes' parameter. It should be None, a string, or a non-empty list.")
+
+    plt.tight_layout()
+
+    return ax
+
+# add function to label file name?
+# TODO: implement like pl.umap (sc.pl.umap(pdata.prot, color = ['P62258-1','P12814-1','Q13509', 'type'])) to return list of ax?
+# TODO: if protein_group, then use cbar and cmap to color by protein abundance
+def plot_pca(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, plot_pc=[1,2], pca_params={}, force=False):
     """
     Plot PCA scatter plot.
 
     Parameters:
     - ax (matplotlib.axes.Axes): The axes on which to plot the scatter plot.
-    - data (numpy.ndarray): The input data array.
-    - cases (list): The list of case names.
-    - cmap (matplotlib.colors.Colormap, optional): The colormap to use for coloring the scatter plot. Default is 'viridis'.
+    - pdata (scviz.pAnnData): The input pdata object.
+    - color_by (list): List of classes to color by, can be single string or a list of strings.
+    - cmap (matplotlib.colors.Colormap, optional): The colormap to use for coloring the scatter plot. Default is 'default', using the scviz plotting default color scheme get_color().
     - s (float, optional): The marker size. Default is 20.
     - alpha (float, optional): The marker transparency. Default is 0.8.
     - plot_pc (list, optional): The principal components to plot. Default is PC1 and PC2, as in [1, 2]. Can also include 3 components to plot in 3D, as in [1,2,3]
+    - force (bool, optional): If True, force PCA calculation even if already exists in pdata.{on}. Default is False. Use to force re-calculation on a different layer.
 
     Returns:
     - ax (matplotlib.axes.Axes): The axes with the scatter plot.
@@ -171,16 +241,15 @@ def plot_pca(ax, data, cases, cmap=cm.get_cmap('viridis'), s=20, alpha=.8, plot_
     - AssertionError: If the axes is not a 3D projection but plot_pc includes 3 components.
 
     Example:
-    >>> import matplotlib.pyplot as plt
-    >>> import pandas as pd
-    >>> import numpy as np
+    >>> from scviz import pAnnData as pAnnData
     >>> from scviz import plotting as scplt
-    >>> data = pd.read_excel('tests/data.xlsx', sheet_name='Proteins')
-    >>> cases = [['head'],['heart'],['tail']]
+    >>> import numpy as np
+    >>> import matplotlib.pyplot as plt
+    >>> pdata = pAnnData.import_proteomeDiscoverer(prot_file='prot.txt', pep_file='pep.txt')
+    >>> color = 'type'
     >>> fig, ax = plt.subplots(1,1)
-    >>> ax, pca = scplt.plot_pca(ax, data, cases, cmap='viridis', s=20, alpha=.8, plot_pc=[1,2])
+    >>> ax, pca = scplt.plot_pca(ax, pdata, on = 'protein', layer = 'X_impute_median', color = color, s=20, alpha=.8, plot_pc=[1,2])
     """
-    dict_data = utils.get_abundance(data, cases, abun_type='raw')
 
     if len(plot_pc) == 3:
         assert ax.name == '3d', "The ax must be a 3D projection, please define projection='3d'"
@@ -190,50 +259,87 @@ def plot_pca(ax, data, cases, cmap=cm.get_cmap('viridis'), s=20, alpha=.8, plot_
     if len(plot_pc) == 3:
         pc_z=plot_pc[2]-1
 
-    # make stack of all abundance data
-    X = np.hstack([np.array(dict_data[list(dict_data.keys())[i]]) for i in range(len(dict_data))])
-    X = X.T
+    if on == 'protein':
+        adata = pdata.prot
+    elif on == 'peptide':
+        adata = pdata.pep
+    else:
+        raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
-    # make sample array
-    y = np.hstack([np.repeat(i, dict_data[list(dict_data.keys())[i]].shape[1]) for i in range(len(dict_data))])
-    print(f'BEFORE: Number of samples|Number of proteins: {X.shape}')
+    default_pca_params = {'n_comps': min(len(adata.obs_names), len(adata.var_names))-1, 'random_state': 42}
+    pca_param = {**default_pca_params, **(pca_params if pca_params else {})}
 
-    # remove columns that contain nan in X
-    X = X[:, ~np.isnan(X).any(axis=0)]
-    print(f'AFTER: Number of samples|Number of proteins: {X.shape}')
-    X = np.log2(X+1)
+    if 'X_pca' in adata.obsm.keys():
+        if force == False:
+            print(f'PCA already exists in {on} data, using existing PCA')
+        else:
+            print(f'PCA already exists in {on} data, force is True, re-calculating PCA')
+            print(f'Calculating PCA on {on} data using {layer} layer')
+            pdata.pca(on=on, layer=layer, **pca_param)
+    else:
+        print(f'Calculating PCA on {on} data using {layer} layer')
+        pdata.pca(on=on, layer=layer, **pca_param)
 
-    Xnorm = (X - X.mean(axis=0)) / X.std(axis=0)
+    X_pca = adata.obsm['X_pca']
+    pca = adata.uns['pca']
 
-    pca = PCA()
-    Xt = pca.fit_transform(Xnorm)
-  
+    # TODO: Fix
+    # GREY COLOR (color is None)
+    if color_by == None:
+        color_mapped = ['grey' for i in range(len(X_pca)[0])]
+        cmap = 'Greys'
+        legend_elements = [mpatches.Patch(color='grey', label='All samples') for i in range(len(X_pca)[0])]
+        pass
+
+    # TODO: Fix
+    # CONTINUOUS COLOR (color is a protein in adata.var_names)
+    if color_by in adata.var_names:
+        pass
+
+    # CATEGORICAL COLOR (color is a class/subclass in adata.obs.columns)
+    if color_by in adata.obs.columns:
+        y = utils.get_samplenames(adata, color_by)
+        color_dict = {class_type: i for i, class_type in enumerate(set(y))}
+        color_mapped = [color_dict[val] for val in y]
+        if cmap == 'default':  
+            cmap = get_color('cmap')
+        else:
+            cmap = cm.get_cmap(cmap)
+        norm = mcolors.Normalize(vmin=min(color_mapped), vmax=max(color_mapped))
+        legend_elements = [mpatches.Patch(color=cmap(norm(color_dict[key])), label=key) for key in color_dict]
+
+    # FIX for list of strings (combined color_by)
+
     if len(plot_pc) == 2:
-        ax.scatter(Xt[:,pc_x], Xt[:,pc_y], c=y, cmap=cmap, s=s, alpha=alpha)
-        ax.set_xlabel('PC'+str(pc_x+1)+' ('+str(round(pca.explained_variance_ratio_[pc_x]*100,2))+'%)')
-        ax.set_ylabel('PC'+str(pc_y+1)+' ('+str(round(pca.explained_variance_ratio_[pc_y]*100,2))+'%)')
+        ax.scatter(X_pca[:,pc_x], X_pca[:,pc_y], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
+        ax.set_xlabel('PC'+str(pc_x+1)+' ('+str(round(pca['variance_ratio'][pc_x]*100,2))+'%)')
+        ax.set_ylabel('PC'+str(pc_y+1)+' ('+str(round(pca['variance_ratio'][pc_y]*100,2))+'%)')
 
     elif len(plot_pc) == 3:
-        ax.scatter(Xt[:,pc_x], Xt[:,pc_y], Xt[:, pc_z], c=y, cmap=cmap, s=s, alpha=alpha)
-        ax.set_xlabel('PC'+str(pc_x+1)+' ('+str(round(pca.explained_variance_ratio_[pc_x]*100,2))+'%)')
-        ax.set_ylabel('PC'+str(pc_y+1)+' ('+str(round(pca.explained_variance_ratio_[pc_y]*100,2))+'%)')
-        ax.set_zlabel('PC'+str(pc_z+1)+' ('+str(round(pca.explained_variance_ratio_[pc_z]*100,2))+'%)')
+        ax.scatter(X_pca[:,pc_x], X_pca[:,pc_y], X_pca[:, pc_z], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
+        ax.set_xlabel('PC'+str(pc_x+1)+' ('+str(round(pca['variance_ratio'][pc_x]*100,2))+'%)')
+        ax.set_ylabel('PC'+str(pc_y+1)+' ('+str(round(pca['variance_ratio'][pc_y]*100,2))+'%)')
+        ax.set_zlabel('PC'+str(pc_z+1)+' ('+str(round(pca['variance_ratio'][pc_z]*100,2))+'%)')
+
+    # legend
+    ax.legend(handles=legend_elements, title = color_by, loc='upper right', bbox_to_anchor=(1.35, 1), frameon=False)
 
     return ax, pca
 
-def plot_umap(ax, data, cases, cmap=cm.get_cmap('viridis'), s=20, alpha=.8, umap_params={}):
+# TODO
+def plot_umap(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False):
     """
     This function plots the Uniform Manifold Approximation and Projection (UMAP) of the protein data.
 
     Parameters:
         ax (matplotlib.axes.Axes): The axes to plot on.
         data (pandas.DataFrame): The protein data to plot.
-        cases (list): The cases to include in the plot.
+        color_by (str): The column in the data to color by.
         cmap (matplotlib.colors.Colormap, optional): The colormap to use for the plot. Defaults to 'viridis'.
         s (int, optional): The size of the points in the plot. Defaults to 20.
         alpha (float, optional): The transparency of the points in the plot. Defaults to 0.8.
         umap_params (dict, optional): A dictionary of parameters to pass to the UMAP function. 
-            Possible keys are 'n_neighbors', 'min_dist', 'n_components', 'metric', and 'random_state'. 
+            Possible keys are 'min_dist', 'n_components', 'metric', and 'random_state'. 
             Defaults to an empty dictionary, in which case the default UMAP parameters are used.
 
     Returns:
@@ -243,47 +349,58 @@ def plot_umap(ax, data, cases, cmap=cm.get_cmap('viridis'), s=20, alpha=.8, umap
     Raises:
         AssertionError: If 'n_components' is 3 but the axes is not a 3D projection.
     """
-    default_umap_params = {'n_neighbors': 15, 'min_dist': 0.1, 'n_components': 2, 'metric': 'euclidean', 'random_state': 42}
+    default_umap_params = {'n_components': 2, 'random_state': 42}
     umap_param = {**default_umap_params, **(umap_params if umap_params else {})}
     
     if umap_param['n_components'] == 3:
         assert ax.name == '3d', "The ax must be a 3D projection, please define projection='3d'"
 
-    dict_data = utils.get_abundance(data, cases, abun_type='raw')
+    if on == 'protein':
+        adata = pdata.prot
+    elif on == 'peptide':
+        adata = pdata.pep
+    else:
+        raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
+ 
+    if force == False:
+        if 'X_umap' in adata.obsm.keys():
+            print(f'UMAP already exists in {on} data, using existing UMAP')
+        else:
+            pdata.umap(on=on, layer=layer, **umap_param)
+    else:
+        print(f'UMAP calculation forced, re-calculating UMAP')
+        pdata.umap(on=on, layer=layer, **umap_param)
 
-    # make stack of all abundance data
-    X = np.hstack([np.array(dict_data[list(dict_data.keys())[i]]) for i in range(len(dict_data))])
-    X = X.T
+    Xt = adata.obsm['X_umap']
+    umap = adata.uns['umap']
 
-    # make sample array
-    y = np.hstack([np.repeat(i, dict_data[list(dict_data.keys())[i]].shape[1]) for i in range(len(dict_data))])
-    print(f'BEFORE: Number of samples|Number of proteins: {X.shape}')
-
-    # remove columns that contain nan in X
-    X = X[:, ~np.isnan(X).any(axis=0)]
-    print(f'AFTER: Number of samples|Number of proteins: {X.shape}')
-    # X = np.log2(X+1)
-
-    Xnorm = (X - X.mean(axis=0)) / X.std(axis=0)
-
-    fit_umap = umap.UMAP(**umap_param)
-    Xt = fit_umap.fit_transform(Xnorm)
-    # Xt = pca.fit_transform(Xnorm)
+    y = utils.get_samplenames(adata, color_by)
+    color_dict = {class_type: i for i, class_type in enumerate(set(y))}
+    color_mapped = [color_dict[val] for val in y]
+    if cmap == 'default':  
+        cmap = get_color('cmap')
+    else:
+        cmap = cm.get_cmap(cmap)
+    norm = mcolors.Normalize(vmin=min(color_mapped), vmax=max(color_mapped))
 
     if umap_param['n_components'] == 1:
-        ax.scatter(Xt[:,0], range(len(Xt)), c=y, cmap=cmap)
-        ax.set_xlabel('UMAP 1')
+        ax.scatter(Xt[:,0], range(len(Xt)), c=color_mapped, cmap=cmap, s=s, alpha=alpha)
+        ax.set_xlabel('UMAP 1', fontsize=text_size)
     if umap_param['n_components'] == 2:
-        ax.scatter(Xt[:,0], Xt[:,1], c=y, cmap=cmap)
-        ax.set_xlabel('UMAP 1')
-        ax.set_ylabel('UMAP 2')
+        ax.scatter(Xt[:,0], Xt[:,1], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
+        ax.set_xlabel('UMAP 1', fontsize=text_size)
+        ax.set_ylabel('UMAP 2', fontsize=text_size)
     if umap_param['n_components'] == 3:
-        ax.scatter(Xt[:,0], Xt[:,1], Xt[:,2], c=y, cmap=cmap)
-        ax.set_xlabel('UMAP 1')
-        ax.set_ylabel('UMAP 2')
-        ax.set_zlabel('UMAP 3')
+        ax.scatter(Xt[:,0], Xt[:,1], Xt[:,2], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
+        ax.set_xlabel('UMAP 1', fontsize=text_size)
+        ax.set_ylabel('UMAP 2', fontsize=text_size)
+        ax.set_zlabel('UMAP 3', fontsize=text_size)
 
-    return ax, fit_umap
+    # legend
+    legend_elements = [mpatches.Patch(color=cmap(norm(color_dict[key])), label=key) for key in color_dict]
+    ax.legend(handles=legend_elements, title = color_by, loc='upper right', bbox_to_anchor=(1.3, 1), fontsize=text_size)
+
+    return ax, umap
 
 def plot_pca_scree(ax, pca):
     """
@@ -316,6 +433,7 @@ def plot_pca_scree(ax, pca):
     
     return ax
 
+# double check
 def plot_heatmap(ax, heatmap_data, cmap=cm.get_cmap('seismic'), norm_values=[4,5.5,7], linewidth=.5, annotate=True, square=False, cbar_kws = {'label': 'Abundance (AU)'}):
     """
     Plot annotated heatmap of protein abundance data.
@@ -342,14 +460,18 @@ def plot_heatmap(ax, heatmap_data, cmap=cm.get_cmap('seismic'), norm_values=[4,5
 
     return ax
 
-def plot_volcano(ax, data, cases, label=5, color=None, alpha=0.5, pval=0.05, log2fc=1, linewidth=0.5, fontsize = 8):
+# double check
+def plot_volcano(ax, label=5, color=None, alpha=0.5, pval=0.05, log2fc=1, linewidth=0.5, fontsize = 8, de_data = None, pdata = None, class_type = None, values = None, on = 'protein', method='ttest',):
     """
     Plot a volcano plot on the given axes.
 
     Parameters:
     ax (matplotlib.axes.Axes): The axes on which to plot.
-    data (pandas.DataFrame): The data to plot.
-    cases (list): The cases to consider.
+    pdata (scviz.pAnnData): The input pdata object.
+    class_type (str): The class type to use for the comparison.
+    values (list): The values to compare.
+    on (str, optional): The data to use for the comparison. Defaults to 'protein'.
+    method (str, optional): The method to use for the comparison. Defaults to 'ttest'.
     label (int or list): The genes to highlight. If an int, the top and bottom n genes are shown. If a list, only those genes are shown. Can also accept list with 2 numbers to show top and bottom n genes [top, bottom]. If none, no labels will be plotted.
     color (dict, optional): A dictionary mapping significance to colors. Defaults to {'not significant': 'grey', 'upregulated': 'red', 'downregulated': 'blue'}.
     alpha (float, optional): The alpha value for the scatter plot. Defaults to 0.5.
@@ -383,7 +505,13 @@ def plot_volcano(ax, data, cases, label=5, color=None, alpha=0.5, pval=0.05, log
     >>> plt.legend(handles=[upregulated, downregulated, no_significance], loc='upper right', bbox_to_anchor=(0.99, 0.99), borderaxespad=0., frameon=True, prop={'size': 7})
     >>> plt.show()
     """
-    volcano_df = utils.get_protein_DE(data, cases)
+    if de_data is None and pdata is None:
+        raise ValueError("Either de_data or pdata must be provided.")
+
+    if de_data is not None:
+        volcano_df = de_data
+    else:
+        volcano_df = utils.get_DE(pdata, class_type, values, on, method)
     volcano_df['p_value'] = volcano_df['p_value'].replace([np.inf, -np.inf], np.nan)
     volcano_df = volcano_df.dropna(subset=['p_value'])
     volcano_df['-log10(p_value)'] = -np.log10(volcano_df['p_value'])
@@ -446,6 +574,7 @@ def plot_volcano(ax, data, cases, label=5, color=None, alpha=0.5, pval=0.05, log
 
     return ax, volcano_df
 
+# double check
 def mark_volcano(ax, volcano_df, label, label_color="black", s=10, alpha=1, show_names=True, fontsize=8):
     """
     Mark the volcano plot with specific proteins.
@@ -515,9 +644,118 @@ def mark_volcano(ax, volcano_df, label, label_color="black", s=10, alpha=1, show
 
     return ax
 
-# VERIFY FUNCTIONS BELOW
+def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=['Blues'], color=['blue'], order = None, s=20, alpha=0.2, calpha=1, exp_alpha = 70, debug = False):
+    """
+    Plot rank abundance of proteins across different classes.
+
+    Parameters:
+    ax (matplotlib.axes.Axes): The axis on which to plot.
+    pdata (scviz.pAnnData): The input pdata object.
+    classes (list of str): A list of classes to plot. If None, all .obs are combined into identifier classes. Default is None.
+    layer (str, optional): The layer to use for the plot. Default is 'X'.
+    on (str, optional): The data to use for the plot. Default is 'protein'.
+    cmap (str, optional): The colormap to use for the scatter plot. Default is 'Blues'.
+    color (list of str, optional): A list of colors for the scatter plots of each class. If not provided, all plots will be blue.
+    order (list of str, optional): The order of the classes to plot. If not provided, the classes will be plotted in the order they appear in the data.
+    s (float, optional): The marker size. Default is 20.
+    alpha (float, optional): The marker transparency. Default is 0.2.
+    calpha (float, optional): The marker transparency for distribution dots. Default is 1.
+    append_var (bool, optional): If True, append the average and stdev values to the pdata.[on].var. Default is True. Needs to be True for mark_rankquant to work.
+    exp_alpha (float, optional): The exponent for the pdf value based on average abundance. Default is 70.
+    
+    Example:
+    >>> colors = sns.color_palette("Blues", 4)
+    >>> cmaps = ['Blues', 'Reds', 'Greens', 'Oranges']
+    >>> fig, ax = plt.subplots(figsize=(4,3))
+    >>> ax = scplt.plot_rankquant(ax, pdata_filter, classes = 'size', order = ['sc', '5k','10k', '20k'], cmap = cmaps, color=colors, calpha = 1, alpha = 0.005)
+    
+    """
+    
+    adata = utils.get_adata(pdata, on)
+    classes_list = utils.get_classlist(adata, classes = classes, order = order)
+
+    for j, class_value in enumerate(classes_list):
+        if classes is None:
+            values = class_value.split('_')
+            # print(f'Classes: {classes}, Values: {values}') if debug else None
+            rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
+        elif isinstance(classes, str):
+            # print(f'Class: {classes}, Value: {class_value}') if debug else None
+            rank_data = utils.filter(adata, classes, class_value, suppress_warnings=True)
+        elif isinstance(classes, list):
+            values = class_value.split('_')
+            # print(f'Classes: {classes}, Values: {values}') if debug else None
+            rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
+
+        plot_df = rank_data.to_df().transpose()
+        plot_df['Average: '+class_value] = np.nanmean(rank_data.X.toarray(), axis=0)
+        plot_df['Stdev: '+class_value] = np.nanstd(rank_data.X.toarray(), axis=0)
+        plot_df.sort_values(by=['Average: '+class_value], ascending=False, inplace=True)
+        plot_df['Rank: '+class_value] = np.where(plot_df['Average: '+class_value].isna(), np.nan, np.arange(1, len(plot_df) + 1))
+
+        sorted_indices = plot_df.index
+        plot_df = plot_df.loc[adata.var.index]
+        adata.var['Average: ' + class_value] = plot_df['Average: ' + class_value]
+        adata.var['Stdev: ' + class_value] = plot_df['Stdev: ' + class_value]
+        adata.var['Rank: ' + class_value] = plot_df['Rank: ' + class_value]
+        plot_df = plot_df.reindex(sorted_indices)
+
+        stats_df = plot_df.filter(regex = 'Average: |Stdev: |Rank: ', axis=1)
+        plot_df = plot_df.drop(stats_df.columns, axis=1)
+
+        nsample = plot_df.shape[1]
+        nprot = plot_df.shape[0]
+
+        # merge all abundance columns into one column
+        X = np.zeros((nsample*nprot))
+        Y = np.zeros((nsample*nprot))
+        Z = np.zeros((nsample*nprot)) # pdf value based on average abundance
+        for i in range(nsample):
+            X[i*nprot:(i+1)*nprot] = plot_df.iloc[:, i].values
+            Y[i*nprot:(i+1)*nprot] = stats_df['Rank: '+class_value].values
+            mu = np.log10(stats_df['Average: '+class_value].values)
+            std = np.log10(stats_df['Stdev: '+class_value].values)
+            z = (np.log10(X[i*nprot:(i+1)*nprot]) - mu)/std
+            z = np.power(z,2)
+            Z[i*nprot:(i+1)*nprot] = np.exp(-z*exp_alpha)
+
+        # remove NaN values
+        Z = Z[~np.isnan(X)]
+        Y = Y[~np.isnan(X)]
+        X = X[~np.isnan(X)]
+
+        print(f'nsample: {nsample}, nprot: {np.max(Y)}') if debug else None
+
+        ax.scatter(Y, X, c=Z, marker='.',cmap=cmap[j], s=s,alpha=alpha)
+        ax.scatter(stats_df['Rank: '+class_value], stats_df['Average: '+class_value], marker='.', color=color[j], alpha=calpha)
+        ax.set_yscale('log')
+        ax.set_xlabel('Rank')
+        ax.set_ylabel('Abundance')
+
+    return ax
+
+def mark_rankquant(plot, pdata, names, class_values, layer = "X", on = 'protein',color='red',s=10,alpha=1,show_names=True):
+    adata = utils.get_adata(pdata, on)
+    # TEST: check if names are in the data
+    pdata._check_rankcol(on, class_values)
+
+    for j, class_value in enumerate(class_values):
+        print('Class: ', class_value)
+        
+        for i, txt in enumerate(names):
+            try:
+                x = adata.var['Average: '+class_value].loc[txt]
+                y = adata.var['Rank: '+class_value].loc[txt]
+            except Exception as e:
+                print(f"Name {txt} not found in {on}.var. Check {on} name for spelling errors and whether it is in data.")
+                continue
+            if show_names:
+                plot.annotate(txt, (y,x), xytext=(y+10,x*1.1), fontsize=8)
+            plot.scatter(y,x,marker='o',color=color,s=s, alpha=alpha)
+    return plot
+
 # TODO: make function work from get_abundance or get_abundance_query, actually plot the protein abundances - refer to graph from tingyu
-def plot_abundance(ax, prot_data, cases, genelist, cmap='Blues', color=['blue'], s=20, alpha=0.2, calpha=1):
+def plot_abundance(ax, prot_data, classes, genelist, cmap='Blues', color=['blue'], s=20, alpha=0.2, calpha=1):
     """
     Plot the abundance of proteins across different cases.
 
@@ -560,52 +798,6 @@ def plot_abundance(ax, prot_data, cases, genelist, cmap='Blues', color=['blue'],
         Z = np.zeros((nsample*len(prot_data))) # pdf value based on average abundance
         for i in range(nsample):
             X[i*len(prot_data):(i+1)*len(prot_data)] = prot_data[cols[i]].values
-
-def plot_rankquant(ax,data,cases,cmap=['Blues'],color=['blue'],s=20,alpha=0.2,calpha=1):
-    # extract columns that contain the abundance data for the specified method and amount
-    for j in range(len(cases)):
-        vars = ['Abundance: '] + cases[j]
-        cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-        # concat elements 1 till end of vars into one string
-        append_string = '_'.join(vars[1:])
-
-        # average abundance of proteins across these columns, ignoring NaN values
-        data['Average: '+append_string] = data[cols].mean(axis=1, skipna=True)
-        data['Stdev: '+append_string] = data[cols].std(axis=1, skipna=True)
-
-        # sort by average abundance
-        data.sort_values(by=['Average: '+append_string], ascending=False, inplace=True)
-
-        # add rank number
-        data['Rank: '+append_string] = np.arange(1, len(data)+1)
-
-        nsample = len(cols)
-
-        # merge all abundance columns into one column
-        X = np.zeros((nsample*len(data)))
-        Y = np.zeros((nsample*len(data)))
-        Z = np.zeros((nsample*len(data))) # pdf value based on average abundance
-        for i in range(nsample):
-            X[i*len(data):(i+1)*len(data)] = data[cols[i]].values
-            Y[i*len(data):(i+1)*len(data)] = data['Rank: '+append_string].values
-            mu = np.log10(data['Average: '+append_string].values)
-            std = np.log10(data['Stdev: '+append_string].values)
-            z = (np.log10(X[i*len(data):(i+1)*len(data)]) - mu)/std
-            z = np.power(z,2)
-            Z[i*len(data):(i+1)*len(data)] = np.exp(-z*70)
-
-        # remove NaN values
-        Z = Z[~np.isnan(X)]
-        Y = Y[~np.isnan(X)]
-        X = X[~np.isnan(X)]
-        # plot
-
-        ax.scatter(data['Rank: '+append_string], data['Average: '+append_string], marker='.', color=color[j], alpha=calpha)
-        ax.scatter(Y, X, c=Z, marker='.',cmap=cmap[j], s=s,alpha=alpha)
-        # set y axis to log
-        ax.set_yscale('log')
-
-    return ax
 
 def plot_abundance_2D(ax,data,cases,genes='all', cmap='Blues',color=['blue'],s=20,alpha=[0.2,1],calpha=1):
     
@@ -678,66 +870,65 @@ def plot_abundance_2D(ax,data,cases,genes='all', cmap='Blues',color=['blue'],s=2
 
     return ax
 
-def mark_rankquant(plot,data,names,cases,color='red',s=10,alpha=1,show_names=True):
-    for j in range(len(cases)):
-        vars = ['Abundance: '] + cases[j]
+def plot_raincloud(ax,pdata,classes = None, layer = 'X', on = 'protein', order = None, color=['blue'],boxcolor='black',linewidth=0.5, debug = False):
+    adata = utils.get_adata(pdata, on)
 
-        # concat elements 1 till end of vars into one string
-        append_string = '_'.join(vars[1:])
-        
-        for i, txt in enumerate(names):
-            x = data['Average: '+append_string][data['Accession']==txt].values[0]
-            y = data['Rank: '+append_string][data['Accession']==txt].values[0]
-            if show_names:
-                plot.annotate(txt, (y,x), xytext=(y+10,x*1.1), fontsize=8)
-            plot.scatter(y,x,marker='o',color=color,s=s, alpha=alpha)
-    return plot
-
-def plot_raincloud(ax,data,cases,color=['blue'],boxcolor='black',linewidth=0.5):
-    # extract columns that contain the abundance data for the specified method and amount
+    classes_list = utils.get_classlist(adata, classes = classes, order = order)
     data_X = []
-    for j in range(len(cases)):
-        vars = ['Abundance: '] + cases[j]
-        cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-        # concat elements 1 till end of vars into one string
-        append_string = '_'.join(vars[1:])
 
-        # average abundance of proteins across these columns, ignoring NaN values
-        data['Average: '+append_string] = data[cols].mean(axis=1, skipna=True)
-        data['Stdev: '+append_string] = data[cols].std(axis=1, skipna=True)
+    for j, class_value in enumerate(classes_list):
+        if classes is None:
+            values = class_value.split('_')
+            print(f'Classes: {classes}, Values: {values}') if debug else None
+            rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
+        elif isinstance(classes, str):
+            print(f'Class: {classes}, Value: {class_value}') if debug else None
+            rank_data = utils.filter(adata, classes, class_value, suppress_warnings=True)
+        elif isinstance(classes, list):
+            values = class_value.split('_')
+            print(f'Classes: {classes}, Values: {values}') if debug else None
+            rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
 
-        # sort by average abundance
-        data.sort_values(by=['Average: '+append_string], ascending=False, inplace=True)
+        plot_df = rank_data.to_df().transpose()
+        plot_df['Average: '+class_value] = np.nanmean(rank_data.X.toarray(), axis=0)
+        plot_df['Stdev: '+class_value] = np.nanstd(rank_data.X.toarray(), axis=0)
+        plot_df.sort_values(by=['Average: '+class_value], ascending=False, inplace=True)
+        plot_df['Rank: '+class_value] = np.where(plot_df['Average: '+class_value].isna(), np.nan, np.arange(1, len(plot_df) + 1))
 
-        # add rank number
-        data['Rank: '+append_string] = np.arange(1, len(data)+1)
+        sorted_indices = plot_df.index
 
-        nsample = len(cols)
+        plot_df = plot_df.loc[adata.var.index]
+        adata.var['Average: ' + class_value] = plot_df['Average: ' + class_value]
+        adata.var['Stdev: ' + class_value] = plot_df['Stdev: ' + class_value]
+        adata.var['Rank: ' + class_value] = plot_df['Rank: ' + class_value]
+        plot_df = plot_df.reindex(sorted_indices)
+
+        stats_df = plot_df.filter(regex = 'Average: |Stdev: |Rank: ', axis=1)
+        plot_df = plot_df.drop(stats_df.columns, axis=1)
+
+        nsample = plot_df.shape[1]
+        nprot = plot_df.shape[0]
 
         # merge all abundance columns into one column
-        X = np.zeros((nsample*len(data)))
+        X = np.zeros((nsample*nprot))
         for i in range(nsample):
-            X[i*len(data):(i+1)*len(data)] = data[cols[i]].values
+            X[i*nprot:(i+1)*nprot] = plot_df.iloc[:, i].values
 
         X = X[~np.isnan(X)]
         X = np.log10(X)
 
         data_X.append(X)
         
-    # plot
-    # Boxplot data
-    bp = ax.boxplot(data_X, positions=np.arange(1,len(cases)+1)-0.06, widths=0.1, patch_artist = True,
+    # boxplot
+    bp = ax.boxplot(data_X, positions=np.arange(1,len(classes_list)+1)-0.06, widths=0.1, patch_artist = True,
                     flierprops=dict(marker='o', alpha=0.2, markersize=2, markerfacecolor=boxcolor, markeredgecolor=boxcolor),
                     whiskerprops=dict(color=boxcolor, linestyle='-', linewidth=linewidth),
                     medianprops=dict(color=boxcolor, linewidth=linewidth),
                     boxprops=dict(facecolor='none', color=boxcolor, linewidth=linewidth),
                     capprops=dict(color=boxcolor, linewidth=linewidth))
 
-    # Create a list of colors for the violin plots based on the number of features you have
-    violin_colors = ['thistle', 'orchid']
-
-    # Violinplot data
-    vp = ax.violinplot(data_X, points=500, vert=True, positions=np.arange(1,len(cases)+1)+0.06,
+    # Violinplot
+    vp = ax.violinplot(data_X, points=500, vert=True, positions=np.arange(1,len(classes_list)+1)+0.06,
                 showmeans=False, showextrema=False, showmedians=False)
 
     for idx, b in enumerate(vp['bodies']):
@@ -760,13 +951,20 @@ def plot_raincloud(ax,data,cases,color=['blue'],boxcolor='black',linewidth=0.5):
 
     return ax
 
-def mark_raincloud(plot,data,prot_names,cases,lowest_index=0,color='red',s=10,alpha=1,show_names=True):
-    for j in range(len(cases)):
-        vars = ['Abundance: '] + cases[j]
-        append_string = '_'.join(vars[1:])
+def mark_raincloud(plot,pdata,names,class_values,layer = "X", on = 'protein',lowest_index=0,color='red',s=10,alpha=1,show_names=True):
+    adata = utils.get_adata(pdata, on)
+    # TEST: check if names are in the data
+    pdata._check_rankcol(on, class_values)
+
+    for j, class_value in enumerate(class_values):
+        print('Class: ', class_value)
                 
-        for i, txt in enumerate(prot_names):
-            y = np.log10(data['Average: '+append_string][data['Accession']==txt].values[0])
-            x = lowest_index + j + .14 + 0.8
+        for i, txt in enumerate(names):
+            try:
+                y = np.log10(adata.var['Average: '+class_value].loc[txt])
+                x = lowest_index + j + .14 + 0.8
+            except Exception as e:
+                print(f"Name {txt} not found in {on}.var. Check {on} name for spelling errors and whether it is in data.")
+                continue
             plot.scatter(x,y,marker='o',color=color,s=s, alpha=alpha)
     return plot

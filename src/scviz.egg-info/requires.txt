@@ -8,6 +8,7 @@ scipy
 umap-learn
 adjustText
 AnnData
+requests
 
 [pytest]
 openpyxl

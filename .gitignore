@@ -8,6 +8,9 @@ tests/__pycache__/
 docs/
 CHANGELOG.md
 .vscode/
-dev/report.tsv
-dev/report.pg_matrix.tsv
-dev/rs.csv
+dev/*.csv
+dev/*.tsv
+dev/scviz_planning.docx
+dev/*.png
+dev/*.xlsx
+dev/windy*.py
