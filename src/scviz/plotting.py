@@ -438,6 +438,7 @@ def plot_pca_scree(ax, pca):
     
     return ax
 
+# double check
 def plot_heatmap(ax, heatmap_data, cmap=cm.get_cmap('seismic'), norm_values=[4,5.5,7], linewidth=.5, annotate=True, square=False, cbar_kws = {'label': 'Abundance (AU)'}):
     """
     Plot annotated heatmap of protein abundance data.
@@ -464,6 +465,7 @@ def plot_heatmap(ax, heatmap_data, cmap=cm.get_cmap('seismic'), norm_values=[4,5
 
     return ax
 
+# double check
 def plot_volcano(ax, label=5, color=None, alpha=0.5, pval=0.05, log2fc=1, linewidth=0.5, fontsize = 8, de_data = None, pdata = None, class_type = None, values = None, on = 'protein', method='ttest',):
     """
     Plot a volcano plot on the given axes.
@@ -577,6 +579,7 @@ def plot_volcano(ax, label=5, color=None, alpha=0.5, pval=0.05, log2fc=1, linewi
 
     return ax, volcano_df
 
+# double check
 def mark_volcano(ax, volcano_df, label, label_color="black", s=10, alpha=1, show_names=True, fontsize=8):
     """
     Mark the volcano plot with specific proteins.
@@ -646,52 +649,6 @@ def mark_volcano(ax, volcano_df, label, label_color="black", s=10, alpha=1, show
 
     return ax
 
-# VERIFY FUNCTIONS BELOW
-# TODO: make function work from get_abundance or get_abundance_query, actually plot the protein abundances - refer to graph from tingyu
-def plot_abundance(ax, prot_data, classes, genelist, cmap='Blues', color=['blue'], s=20, alpha=0.2, calpha=1):
-    """
-    Plot the abundance of proteins across different cases.
-
-    Parameters:
-    ax (matplotlib.axes.Axes): The axis on which to plot.
-    prot_data (pandas.DataFrame): The protein data to plot.
-    cases (list of list of str): A list of cases to plot. Each case is a list of strings that are used to select the columns from the data.
-    cmap (str, optional): The colormap to use for the scatter plot. Default is 'Blues'.
-    color (list of str, optional): A list of colors for the scatter plots of each case. If not provided, all plots will be blue.
-    s (float, optional): The marker size. Default is 20.
-    alpha (float, optional): The marker transparency. Default is 0.2.
-    calpha (float, optional): The marker transparency for the case average. Default is 1.
-
-    Returns:
-    matplotlib.axes.Axes: The axis with the plotted data.
-
-    Example:
-    >>> import matplotlib.pyplot as plt
-    >>> import pandas as pd
-    >>> cases = [['a','50g'],['b','50g'],['a','30g'],['b','30g']]
-    >>> fig, ax = plt.subplots()
-    >>> plot_abundance(ax, prot_data, cases, cmap='Blues', color = ['blue','red','green','orange'])
-    """
-
-    for j in range(len(cases)):
-        vars = ['Abundance: '] + cases[j]
-        append_string = '_'.join(vars[1:])
-
-        cols = [col for col in prot_data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-
-        # average abundance of proteins across these columns, ignoring NaN values
-        prot_data['Average: '+append_string] = prot_data[cols].mean(axis=1, skipna=True)
-        prot_data['Stdev: '+append_string] = prot_data[cols].std(axis=1, skipna=True)
-
-        nsample = len(cols)
-
-        # merge all abundance columns into one column
-        X = np.zeros((nsample*len(prot_data)))
-        Y = np.zeros((nsample*len(prot_data)))
-        Z = np.zeros((nsample*len(prot_data))) # pdf value based on average abundance
-        for i in range(nsample):
-            X[i*len(prot_data):(i+1)*len(prot_data)] = prot_data[cols[i]].values
-
 def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=['Blues'], color=['blue'], order = None, s=20, alpha=0.2, calpha=1, append_var=True, exp_alpha = 70):
     """
     Plot rank abundance of proteins across different classes.
@@ -731,7 +688,6 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
         quant_col_index = adata.obs.columns.get_loc(next(col for col in adata.obs.columns if "_quant" in col))
         selected_columns = adata.obs.iloc[:, :quant_col_index]
         classes_list = selected_columns.apply(lambda x: '_'.join(x), axis=1).unique()
-
         classes = selected_columns.columns.tolist()
 
     elif isinstance(classes, str):
@@ -799,8 +755,6 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
 
         nsample = plot_df.shape[1]
         nprot = plot_df.shape[0]
-        
-        print(f'nsample: {nsample}, nprot: {nprot}')
 
         # merge all abundance columns into one column
         X = np.zeros((nsample*nprot))
@@ -820,56 +774,60 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
         Y = Y[~np.isnan(X)]
         X = X[~np.isnan(X)]
 
+        print(f'nsample: {nsample}, nprot: {np.max(Y)}')
+
         ax.scatter(stats_df['Rank: '+class_value], stats_df['Average: '+class_value], marker='.', color=color[j], alpha=calpha)
         ax.scatter(Y, X, c=Z, marker='.',cmap=cmap[j], s=s,alpha=alpha)
         ax.set_yscale('log')
         ax.set_xlabel('Rank')
         ax.set_ylabel('Abundance')
 
-    # # extract columns that contain the abundance data for the specified method and amount
-    # for j in range(len(cases)):
-    #     vars = ['Abundance: '] + cases[j]
-    #     cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-    #     # concat elements 1 till end of vars into one string
-    #     append_string = '_'.join(vars[1:])
-
-    #     # average abundance of proteins across these columns, ignoring NaN values
-    #     data['Average: '+append_string] = data[cols].mean(axis=1, skipna=True)
-    #     data['Stdev: '+append_string] = data[cols].std(axis=1, skipna=True)
-
-    #     # sort by average abundance
-    #     data.sort_values(by=['Average: '+append_string], ascending=False, inplace=True)
-
-    #     # add rank number
-    #     data['Rank: '+append_string] = np.arange(1, len(data)+1)
-
-    #     nsample = len(cols)
-
-    #     # merge all abundance columns into one column
-    #     X = np.zeros((nsample*len(data)))
-    #     Y = np.zeros((nsample*len(data)))
-    #     Z = np.zeros((nsample*len(data))) # pdf value based on average abundance
-    #     for i in range(nsample):
-    #         X[i*len(data):(i+1)*len(data)] = data[cols[i]].values
-    #         Y[i*len(data):(i+1)*len(data)] = data['Rank: '+append_string].values
-    #         mu = np.log10(data['Average: '+append_string].values)
-    #         std = np.log10(data['Stdev: '+append_string].values)
-    #         z = (np.log10(X[i*len(data):(i+1)*len(data)]) - mu)/std
-    #         z = np.power(z,2)
-    #         Z[i*len(data):(i+1)*len(data)] = np.exp(-z*70)
-
-    #     # remove NaN values
-    #     Z = Z[~np.isnan(X)]
-    #     Y = Y[~np.isnan(X)]
-    #     X = X[~np.isnan(X)]
-    #     # plot
-
-    #     ax.scatter(data['Rank: '+append_string], data['Average: '+append_string], marker='.', color=color[j], alpha=calpha)
-    #     ax.scatter(Y, X, c=Z, marker='.',cmap=cmap[j], s=s,alpha=alpha)
-    #     # set y axis to log
-    #     ax.set_yscale('log')
-
     return ax
+
+# TODO: make function work from get_abundance or get_abundance_query, actually plot the protein abundances - refer to graph from tingyu
+def plot_abundance(ax, prot_data, classes, genelist, cmap='Blues', color=['blue'], s=20, alpha=0.2, calpha=1):
+    """
+    Plot the abundance of proteins across different cases.
+
+    Parameters:
+    ax (matplotlib.axes.Axes): The axis on which to plot.
+    prot_data (pandas.DataFrame): The protein data to plot.
+    cases (list of list of str): A list of cases to plot. Each case is a list of strings that are used to select the columns from the data.
+    cmap (str, optional): The colormap to use for the scatter plot. Default is 'Blues'.
+    color (list of str, optional): A list of colors for the scatter plots of each case. If not provided, all plots will be blue.
+    s (float, optional): The marker size. Default is 20.
+    alpha (float, optional): The marker transparency. Default is 0.2.
+    calpha (float, optional): The marker transparency for the case average. Default is 1.
+
+    Returns:
+    matplotlib.axes.Axes: The axis with the plotted data.
+
+    Example:
+    >>> import matplotlib.pyplot as plt
+    >>> import pandas as pd
+    >>> cases = [['a','50g'],['b','50g'],['a','30g'],['b','30g']]
+    >>> fig, ax = plt.subplots()
+    >>> plot_abundance(ax, prot_data, cases, cmap='Blues', color = ['blue','red','green','orange'])
+    """
+
+    for j in range(len(cases)):
+        vars = ['Abundance: '] + cases[j]
+        append_string = '_'.join(vars[1:])
+
+        cols = [col for col in prot_data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
+
+        # average abundance of proteins across these columns, ignoring NaN values
+        prot_data['Average: '+append_string] = prot_data[cols].mean(axis=1, skipna=True)
+        prot_data['Stdev: '+append_string] = prot_data[cols].std(axis=1, skipna=True)
+
+        nsample = len(cols)
+
+        # merge all abundance columns into one column
+        X = np.zeros((nsample*len(prot_data)))
+        Y = np.zeros((nsample*len(prot_data)))
+        Z = np.zeros((nsample*len(prot_data))) # pdf value based on average abundance
+        for i in range(nsample):
+            X[i*len(prot_data):(i+1)*len(prot_data)] = prot_data[cols[i]].values
 
 def plot_abundance_2D(ax,data,cases,genes='all', cmap='Blues',color=['blue'],s=20,alpha=[0.2,1],calpha=1):
     
@@ -942,16 +900,33 @@ def plot_abundance_2D(ax,data,cases,genes='all', cmap='Blues',color=['blue'],s=2
 
     return ax
 
-def mark_rankquant(plot,pdata,names,class_values,color='red',s=10,alpha=1,show_names=True):
-    for j in range(len(class_values)):
-        vars = ['Abundance: '] + class_values[j]
+# TODO: fix
+def mark_rankquant(plot,pdata,names,class_values, layer = "X", on = 'protein',color='red',s=10,alpha=1,show_names=True):
+    # pdata type
+    if on == 'protein':
+        adata = pdata.prot
+    elif on == 'peptide':
+        adata = pdata.pep
+    else:
+        raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
-        # concat elements 1 till end of vars into one string
-        append_string = '_'.join(vars[1:])
+    for class_value in class_values:
+        average_col = 'Average: ' + class_value
+        rank_col = 'Rank: ' + class_value
+        # quick check if names are in the data
+        if average_col not in adata.var.columns or rank_col not in adata.var.columns:
+            raise ValueError(f"Class name not found in .var. Please run plot_rankquank() beforehand and check that the input matches the class names in {on}.var['Average: ']")
+
+    for j, class_value in enumerate(class_values):
+        print('Class: ', class_value)
         
         for i, txt in enumerate(names):
-            x = data['Average: '+append_string][data['Accession']==txt].values[0]
-            y = data['Rank: '+append_string][data['Accession']==txt].values[0]
+            try:
+                x = adata.var['Average: '+class_value].loc[txt]
+                y = adata.var['Rank: '+class_value].loc[txt]
+            except Exception as e:
+                print(f"Name {txt} not found in {on}.var. Check {on} name for spelling errors and whether it is in data.")
+                continue
             if show_names:
                 plot.annotate(txt, (y,x), xytext=(y+10,x*1.1), fontsize=8)
             plot.scatter(y,x,marker='o',color=color,s=s, alpha=alpha)
