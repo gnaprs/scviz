@@ -461,9 +461,9 @@ def plot_heatmap(ax, heatmap_data, cmap=cm.get_cmap('seismic'), norm_values=[4,5
     return ax
 
 # double check
-def plot_volcano(ax, label=5, color=None, alpha=0.5, pval=0.05, log2fc=1, linewidth=0.5, fontsize = 8, de_data = None, pdata = None, class_type = None, values = None, on = 'protein', method='ttest',):
+def plot_volcano(ax, pdata = None, class_type = None, values = None, on = 'protein', method='ttest', label=5, color=None, alpha=0.5, pval=0.05, log2fc=1, linewidth=0.5, fontsize = 8, de_data = None):
     """
-    Plot a volcano plot on the given axes.
+    Plot a volcano plot on the given axes. Calculates DE on pdata across the given class_type and values. Alternatively, can use pre-calculated DE data (see pdata.de() dataframe for example input).
 
     Parameters:
     ax (matplotlib.axes.Axes): The axes on which to plot.
@@ -511,16 +511,12 @@ def plot_volcano(ax, label=5, color=None, alpha=0.5, pval=0.05, log2fc=1, linewi
     if de_data is not None:
         volcano_df = de_data
     else:
-        volcano_df = utils.get_DE(pdata, class_type, values, on, method)
-    volcano_df['p_value'] = volcano_df['p_value'].replace([np.inf, -np.inf], np.nan)
+        if class_type is None or values is None:
+            raise ValueError("If pdata is provided, class_type and values must also be provided.")
+        volcano_df = pdata.de(class_type, values, on = on, method = method, pval = pval, log2fc = log2fc)
+    
     volcano_df = volcano_df.dropna(subset=['p_value'])
-    volcano_df['-log10(p_value)'] = -np.log10(volcano_df['p_value'])
-    volcano_df['significance_score'] = volcano_df['-log10(p_value)'] * volcano_df['log2fc']
-
-    volcano_df['significance'] = 'not significant'
-    volcano_df.loc[(volcano_df['p_value'] < pval) & (volcano_df['log2fc'] > log2fc), 'significance'] = 'upregulated'
-    volcano_df.loc[(volcano_df['p_value'] < pval) & (volcano_df['log2fc'] < -log2fc), 'significance'] = 'downregulated'
-
+    
     default_color = {'not significant': 'grey', 'upregulated': 'red', 'downregulated': 'blue'}
     if color:
         default_color.update(color)
@@ -572,7 +568,7 @@ def plot_volcano(ax, label=5, color=None, alpha=0.5, pval=0.05, log2fc=1, linewi
             texts.append(txt)
         adjust_text(texts, expand=(2, 2), arrowprops = dict(arrowstyle = '->', color = 'k', zorder = 5))
 
-    return ax, volcano_df
+    return ax
 
 # double check
 def mark_volcano(ax, volcano_df, label, label_color="black", s=10, alpha=1, show_names=True, fontsize=8):

@@ -131,6 +131,7 @@ def get_adata(pdata, on = 'protein'):
     else:
         raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
+# IMPORTANT: move to class function, ensure nothing else breaks
 def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = False):
     """
     Filters out for the given class(es) type. Returns a copy of the filtered pdata object, does not modify the original object.
@@ -189,7 +190,7 @@ def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = F
         if pdata.pep is not None:
             adata = pdata.pep
             pdata.pep = adata[eval(query)]
-        pdata._summary()
+        pdata._update_summary()
         pdata._append_history(f"Filtered by class type: {class_type}, values: {values}, exact_cases: {exact_cases}. Copy of the filtered pAnnData object returned.")    
 
     return pdata
@@ -433,87 +434,6 @@ def get_abundance_query(pdata, cases, genelist, search='gene', on = 'protein'):
         combined_abundance_data = pd.concat([combined_abundance_data, data_abundance[cols]], axis=1)
 
     return matched_features_data, combined_abundance_data
-
-# !TODO: implement chi2 and fisher tests, consider also adding correlation tests
-# FC method: specify mean, prot pairwise median, or pep pairwise median
-def stats_DE(pdata, class_type, values, on = 'protein', method='ttest'):
-    """
-    Calculate differential expression (DE) of proteins across different groups.
-
-    This function calculates the DE of proteins across different groups. The cases to compare can be specified, and the method to use for DE can be specified as well.
-
-    Args:
-        pdata (pAnnData): The pAnnData object containing the protein data.
-        class_type (str): The class type to use for selecting samples. E.g. 'cell_type'.
-        values (list of list of str): The values to select for within the class_type. E.g. [['wt', 'kd'], ['control', 'treatment']].
-        on (str, optional): The type of data to perform DE on. Default is 'protein'. Other options include 'peptide'.
-        method (str, optional): The method to use for DE. Default is 'ttest'. Other methods include 'mannwhitneyu', 'wilcoxon', 'chi2', and 'fisher'.
-
-    Returns:
-        df_stats (pandas.DataFrame): A DataFrame containing the DE statistics for each protein.
-
-    Raises:
-        ValueError: If the number of cases is not exactly two.
-
-    Example:
-        >>> from scviz import utils as scutils
-        >>> stats_sc_20000 = scutils.get_DE(data, [['cortex','sc'], ['cortex','20000']])
-    """
-
-    # this is for case 1/case 2 comparison!
-    # make sure only two cases are given
-    if len(values) != 2:
-        raise ValueError('Please provide exactly two cases to compare.')
-
-    pdata_case1 = filter(pdata, class_type, values[0], exact_cases=True)
-    pdata_case2 = filter(pdata, class_type, values[1], exact_cases=True)
-
-    if on == 'protein':
-        abundance_case1 = pdata_case1.prot
-        abundance_case2 = pdata_case2.prot
-    elif on == 'peptide':
-        abundance_case1 = pdata_case1.pep
-        abundance_case2 = pdata_case2.pep
-
-    n1 = abundance_case1.shape[0]
-    n2 = abundance_case2.shape[0]
-
-    group1_string = '_'.join(values[0])
-    group2_string = '_'.join(values[1])
-
-    # create a dataframe for stats
-    df_stats = pd.DataFrame(index=abundance_case1.var_names, columns=[group1_string,group2_string,'log2fc', 'p_value', 'test_statistic'])
-    df_stats[group1_string] = np.mean(abundance_case1.X.toarray(), axis=0)
-    df_stats[group2_string] = np.mean(abundance_case2.X.toarray(), axis=0)
-    df_stats['log2fc'] = np.log2(np.divide(np.mean(abundance_case1.X.toarray(), axis=0), np.mean(abundance_case2.X.toarray(), axis=0)))
-
-    if method == 'ttest':
-        for protein in range(0, abundance_case1.shape[1]):
-            t_test = ttest_ind(abundance_case1.X.toarray()[:,protein], abundance_case2.X.toarray()[:,protein])
-            df_stats['p_value'].iloc[protein] = t_test.pvalue
-            df_stats['test_statistic'].iloc[protein] = t_test.statistic
-    elif method == 'mannwhitneyu':
-        for row in range(0, len(abundance_case1)):
-            mwu = mannwhitneyu(abundance_case1.iloc[row,0:n1-1].dropna().values, abundance_case2.iloc[row,0:n2-1].dropna().values)
-            df_stats['p_value'].iloc[row] = mwu.pvalue
-            df_stats['test_statistic'].iloc[row] = mwu.statistic
-    elif method == 'wilcoxon':
-        for row in range(0, len(abundance_case1)):
-            w, p = wilcoxon(abundance_case1.iloc[row,0:n1-1].dropna().values, abundance_case2.iloc[row,0:n2-1].dropna().values)
-            df_stats['p_value'].iloc[row] = p
-            df_stats['test_statistic'].iloc[row] = w
-    # elif method == 'chi2':
-    #     for row in range(0, len(aligned_case1)):
-    #         chi2 = chi2_contingency([aligned_case1.iloc[row,0:n1-1].dropna().values, aligned_case2.iloc[row,0:n2-1].dropna().values])
-    #         df_stats['p_value'].iloc[row] = chi2.pvalue
-    #         df_stats['t_statistic'].iloc[row] = chi2.statistic
-    # elif method == 'fisher':
-    #     for row in range(0, len(aligned_case1)):
-    #         fisher = fisher_exact([aligned_case1.iloc[row,0:n1-1].dropna().values, aligned_case2.iloc[row,0:n2-1].dropna().values])
-    #         df_stats['p_value'].iloc[row] = fisher[1]
-    #         df_stats['t_statistic'].iloc[row] = fisher[0]
-
-    return df_stats
 
 # TODO: sync with get_uniprot_fields
 def convert_identifiers(input_list, input_type, output_type, df):
