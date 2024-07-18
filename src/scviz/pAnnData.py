@@ -633,12 +633,16 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         prot_var = prot_all.loc[:, 'Protein FDR Confidence: Combined':'# Razor Peptides']
         # prot_obs_names: file names
         prot_obs_names = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: (F\d+):')[0].values
-        # prot_obs: sample typing from the column name
+        # prot_obs: sample typing from the column name, drop column if all 'n/a'
         prot_obs = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
         prot_obs = pd.DataFrame(prot_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(str.strip).astype('category')
+        if (prot_obs == "n/a").all().any():
+            print("WARNING: Found columns with all 'n/a'. Dropping these columns.")
+            prot_obs = prot_obs.loc[:, ~(prot_obs == "n/a").all()]
 
         print(f"Number of files: {len(prot_obs_names)}")
         print(f"Number of proteins: {len(prot_var)}")
+        print(f"Number of obs: {len(prot_obs.columns)}")
     else:
         prot_X = prot_layers_mbr = prot_var_names = prot_var = prot_obs_names = prot_obs = None
 
@@ -661,9 +665,13 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         pep_obs_names = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: (F\d+):')[0].values
         # pep_var: peptide metadata
         pep_var = pep_all.loc[:, 'Modifications':'Theo. MH+ [Da]']
-        # prot_obs: sample typing from the column name
+        # prot_obs: sample typing from the column name, drop column if all 'n/a'
         pep_obs = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
         pep_obs = pd.DataFrame(pep_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(str.strip).astype('category')
+        if (pep_obs == "n/a").all().any():
+            print("WARNING: Found columns with all 'n/a'. Dropping these columns.")
+            pep_obs = pep_obs.loc[:, ~(pep_obs == "n/a").all()]
+
 
         print(f"Number of files: {len(pep_obs_names)}")
         print(f"Number of peptides: {len(pep_var)}")
