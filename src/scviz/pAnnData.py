@@ -6,7 +6,7 @@ import scanpy as sc
 import copy
 
 from scipy import sparse
-from scipy.stats import variation
+from scipy.stats import variation, ttest_ind, mannwhitneyu, wilcoxon
 from sklearn.preprocessing import MultiLabelBinarizer, normalize
 from sklearn.decomposition import PCA
 from sklearn.impute import SimpleImputer, KNNImputer
@@ -48,6 +48,8 @@ class pAnnData:
         List of actions taken on the data.
     summary : pd.DataFrame
         Summary of the data, typically used for filtering.
+    stats : Dict
+        Dictionary of differential expression results.
     """
 
     def __init__(self, 
@@ -70,8 +72,10 @@ class pAnnData:
 
         self._history = []
         self._summary = pd.DataFrame()
-    
-    # GETTERS
+        self._stats = {}
+
+    # -----------------------------
+    # SETTERS/GETTERS    
     @property
     def prot(self):
         return self._prot
@@ -91,8 +95,11 @@ class pAnnData:
     @property
     def summary(self):
         return self._summary
+    
+    @property
+    def stats(self):
+        return self._stats
 
-    # SETTERS
     @prot.setter
     def prot(self, value: ad.AnnData):
         self._prot = value
@@ -113,6 +120,10 @@ class pAnnData:
     def summary(self, value: pd.DataFrame):
         self._summary = value
         self._update_obs()
+
+    @stats.setter
+    def stats(self, value):
+        self._stats = value
 
     # -----------------------------
     # UTILITY FUNCTIONS
@@ -233,7 +244,7 @@ class pAnnData:
         print("-------------------------------\nHistory:\n-------------------------------\n"+formatted_history)
 
     # -----------------------------
-    # TESTING/CHECKING FUNCTIONS
+    # TESTS FUNCTIONS
 
     def _check_data(self, on):
         # check if protein or peptide data exists
@@ -381,6 +392,97 @@ class pAnnData:
 
         self._history.append(f"{on}: Coefficient of Variation (CV) calculated for {layer} data by {classes}. E.g. CV stored in var['CV: {class_value}'].")
 
+    # !TODO: implement chi2 and fisher tests, consider also adding correlation tests
+    # FC method: specify mean, prot pairwise median, or pep pairwise median
+    # TODO: implement layer support
+    def de(self, class_type, values, method = 'ttest', on = 'protein', layer = "X", pval=0.05, log2fc=1):
+        """
+        Calculate differential expression (DE) of proteins across different groups.
+
+        This function calculates the DE of proteins across different groups. The cases to compare can be specified, and the method to use for DE can be specified as well.
+
+        Args:
+            self (pAnnData): The pAnnData object containing the protein data.
+            class_type (str): The class type to use for selecting samples. E.g. 'cell_type'.
+            values (list of list of str): The values to select for within the class_type. E.g. [['wt', 'kd'], ['control', 'treatment']].
+            on (str, optional): The type of data to perform DE on. Default is 'protein'. Other options include 'peptide'.
+            method (str, optional): The method to use for DE. Default is 'ttest'. Other methods include 'mannwhitneyu', 'wilcoxon', 'chi2', and 'fisher'.
+
+        Returns:
+            df_stats (pandas.DataFrame): A DataFrame containing the DE statistics for each protein.
+
+        Raises:
+            ValueError: If the number of cases is not exactly two.
+
+        Example:
+            >>> from scviz import utils as scutils
+            >>> stats_sc_20000 = pdata.de(['cell_type','size'], [['cortex', 'sc'], ['cortex', '20000']])
+        """
+
+        if not self._check_data(on):
+            pass
+
+        # this is for case 1/case 2 comparison!
+        # make sure only two cases are given
+        if len(values) != 2:
+            raise ValueError('Please provide exactly two cases to compare.')
+
+        pdata_case1 = utils.filter(self, class_type, values[0], exact_cases=True)
+        pdata_case2 = utils.filter(self, class_type, values[1], exact_cases=True)
+
+        if on == 'protein':
+            abundance_case1 = pdata_case1.prot
+            abundance_case2 = pdata_case2.prot
+        elif on == 'peptide':
+            abundance_case1 = pdata_case1.pep
+            abundance_case2 = pdata_case2.pep
+
+        n1 = abundance_case1.shape[0]
+        n2 = abundance_case2.shape[0]
+
+        group1_string = '_'.join(values[0]) if isinstance(values[0], list) else values[0]
+        group2_string = '_'.join(values[1]) if isinstance(values[1], list) else values[1]
+
+        comparison_string = f'{group1_string} vs {group2_string}'
+
+        # create a dataframe for stats
+        df_stats = pd.DataFrame(index=abundance_case1.var_names, columns=[group1_string,group2_string,'log2fc', 'p_value', 'test_statistic'])
+        df_stats[group1_string] = np.mean(abundance_case1.X.toarray(), axis=0)
+        df_stats[group2_string] = np.mean(abundance_case2.X.toarray(), axis=0)
+        df_stats['log2fc'] = np.log2(np.divide(np.mean(abundance_case1.X.toarray(), axis=0), np.mean(abundance_case2.X.toarray(), axis=0)))
+
+        if method == 'ttest':
+            for protein in range(0, abundance_case1.shape[1]):
+                t_test = ttest_ind(abundance_case1.X.toarray()[:,protein], abundance_case2.X.toarray()[:,protein])
+                df_stats['p_value'].iloc[protein] = t_test.pvalue
+                df_stats['test_statistic'].iloc[protein] = t_test.statistic
+        elif method == 'mannwhitneyu':
+            for row in range(0, len(abundance_case1)):
+                mwu = mannwhitneyu(abundance_case1.iloc[row,0:n1-1].dropna().values, abundance_case2.iloc[row,0:n2-1].dropna().values)
+                df_stats['p_value'].iloc[row] = mwu.pvalue
+                df_stats['test_statistic'].iloc[row] = mwu.statistic
+        elif method == 'wilcoxon':
+            for row in range(0, len(abundance_case1)):
+                w, p = wilcoxon(abundance_case1.iloc[row,0:n1-1].dropna().values, abundance_case2.iloc[row,0:n2-1].dropna().values)
+                df_stats['p_value'].iloc[row] = p
+                df_stats['test_statistic'].iloc[row] = w
+
+        df_stats['p_value'] = df_stats['p_value'].replace([np.inf, -np.inf], np.nan)
+        non_nan_mask = df_stats['p_value'].notna()
+
+        df_stats.loc[non_nan_mask, '-log10(p_value)'] = -np.log10(df_stats.loc[non_nan_mask, 'p_value'])
+        df_stats.loc[non_nan_mask, 'significance_score'] = df_stats.loc[non_nan_mask, '-log10(p_value)'] * df_stats.loc[non_nan_mask, 'log2fc']
+
+        df_stats.loc[non_nan_mask, 'significance'] = 'not significant'
+        df_stats.loc[non_nan_mask & (df_stats['p_value'] < pval) & (df_stats['log2fc'] > log2fc), 'significance'] = 'upregulated'
+        df_stats.loc[non_nan_mask & (df_stats['p_value'] < pval) & (df_stats['log2fc'] < -log2fc), 'significance'] = 'downregulated'
+
+        self._stats[comparison_string] = df_stats
+        print(f'Differential expression calculated for {class_type} {values} using {method}. DE statistics stored in .stats["{comparison_string}"].')
+        self._append_history(f"{on}: Differential expression calculated for {class_type} {values} using {method}. DE statistics stored in .stats['{comparison_string}'].")
+
+        return df_stats
+
     # TODO: Need to figure out how to make this interface with plot functions, probably do reordering by each class_value within the loop?
     def rank(self, classes = None, on = 'protein', layer = "X"):
         if not self._check_data(on):
@@ -493,6 +595,10 @@ class pAnnData:
             pass
         elif layer in adata.layers.keys():
             self.set_X(layer = layer, on = on)
+
+        if 'pca' not in adata.uns:
+            print("PCA not found in AnnData object. Running PCA with default settings.")
+            self.pca(on = on, layer = layer)
 
         sc.pp.neighbors(adata, **kwargs)
 
@@ -633,12 +739,16 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         prot_var = prot_all.loc[:, 'Protein FDR Confidence: Combined':'# Razor Peptides']
         # prot_obs_names: file names
         prot_obs_names = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: (F\d+):')[0].values
-        # prot_obs: sample typing from the column name
+        # prot_obs: sample typing from the column name, drop column if all 'n/a'
         prot_obs = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
         prot_obs = pd.DataFrame(prot_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(str.strip).astype('category')
+        if (prot_obs == "n/a").all().any():
+            print("WARNING: Found columns with all 'n/a'. Dropping these columns.")
+            prot_obs = prot_obs.loc[:, ~(prot_obs == "n/a").all()]
 
         print(f"Number of files: {len(prot_obs_names)}")
         print(f"Number of proteins: {len(prot_var)}")
+        print(f"Number of obs: {len(prot_obs.columns)}")
     else:
         prot_X = prot_layers_mbr = prot_var_names = prot_var = prot_obs_names = prot_obs = None
 
@@ -661,9 +771,13 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         pep_obs_names = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: (F\d+):')[0].values
         # pep_var: peptide metadata
         pep_var = pep_all.loc[:, 'Modifications':'Theo. MH+ [Da]']
-        # prot_obs: sample typing from the column name
+        # prot_obs: sample typing from the column name, drop column if all 'n/a'
         pep_obs = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
         pep_obs = pd.DataFrame(pep_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(str.strip).astype('category')
+        if (pep_obs == "n/a").all().any():
+            print("WARNING: Found columns with all 'n/a'. Dropping these columns.")
+            pep_obs = pep_obs.loc[:, ~(pep_obs == "n/a").all()]
+
 
         print(f"Number of files: {len(pep_obs_names)}")
         print(f"Number of peptides: {len(pep_var)}")
