@@ -484,11 +484,11 @@ def get_pca_importance(model, initial_feature_names):
     """
 
     # number of components
-    n_pcs= model.PCs.shape[0]
+    n_pcs= model['PCs'].shape[0]
 
     # get the index of the most important feature on EACH component
     # LIST COMPREHENSION HERE
-    most_important = [np.abs(model.PCs[i]).argmax() for i in range(n_pcs)]
+    most_important = [np.abs(model['PCs'][i]).argmax() for i in range(n_pcs)]
 
     # get the names
     most_important_names = [initial_feature_names[most_important[i]] for i in range(n_pcs)]
