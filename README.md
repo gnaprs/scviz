@@ -1,10 +1,10 @@
 # scviz
-The `scviz` package is a Python library designed for scientific visualization of single cell proteomics data, with plans to support more data types in the future
+The `scviz` package is a Python library designed for scientific visualization of single cell proteomics data, with plans to support more data types in the future.
 
 ## Installation
-Use the package manager [pip](https://pip.pypa.io/en/stable/) to install scviz. Currently, scviz is only available on testPyPi:
+Use the package manager [pip](https://pip.pypa.io/en/stable/) to install scviz. Currently, scviz is available on testPyPi:
 ```bash
-pip install -i https://test.pypi.org/simple/ scviz==0.0.2
+pip install -i https://test.pypi.org/simple/ scviz
 ```
 A local version of the package can also be installed by:
 ```bash

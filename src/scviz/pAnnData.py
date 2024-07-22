@@ -179,6 +179,8 @@ class pAnnData:
         if self.prot is not None:
             self.prot.obs['protein_quant'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1) / self.prot.X.shape[1]
             self.prot.obs['protein_count'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1)
+            self.prot.obs['protein_missingvalues'] = np.isnan(self.prot.X.toarray()).mean()
+            
             if 'X_mbr' in self.prot.layers:
                 self.prot.obs['mbr_count'] = (self.prot.layers['X_mbr'] == 'Peak Found').sum(axis=1)
                 self.prot.obs['high_count'] = (self.prot.layers['X_mbr'] == 'High').sum(axis=1)
@@ -186,6 +188,8 @@ class pAnnData:
         if self.pep is not None:
             self.pep.obs['peptide_quant'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1) / self.pep.X.shape[1]
             self.pep.obs['peptide_count'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1)
+            self.prot.obs['peptide_missingvalues'] = np.isnan(self.pep.X.toarray()).mean()
+
             if 'X_mbr' in self.pep.layers:
                 self.pep.obs['mbr_count'] = (self.pep.layers['X_mbr'] == 'Peak Found').sum(axis=1)
                 self.pep.obs['high_count'] = (self.pep.layers['X_mbr'] == 'High').sum(axis=1)
@@ -670,6 +674,28 @@ class pAnnData:
         self._append_history(f'{on}: PCA fitted on {layer}, stored in obsm["X_pca"] and varm["PCs"]')
         print(f'{on}: PCA fitted on {layer} and and stored in layers["X_pca"] and uns["pca"]')
 
+    def missingvalues(self, on = 'protein', limit = 0.5):
+        # removes columns (proteins and peptides) with > 0.5 missing values across all samples
+        if not self._check_data(on):
+            pass
+
+        if on == 'protein':
+            adata = self.prot
+
+        elif on == 'peptide':
+            adata = self.pep
+
+        missing_proportion = np.isnan(adata.X.toarray()).mean(axis=0)
+        columns_to_keep = missing_proportion <= limit
+
+        # Filter the data to keep only the desired columns
+        adata = adata[:, columns_to_keep]
+
+        if on == 'protein':
+            self.prot = adata
+        elif on == 'peptide':
+            self.pep = adata
+
     # TODO: add ability to normalize within class (provide variable(s) for grouping, etc.), median normalization options
     def normalize(self, method = 'scale', on = 'protein', set_X = True, **kwargs):  
         if not self._check_data(on):
@@ -693,10 +719,10 @@ class pAnnData:
                 print(f"Normalized {on} data using {method}.")
         elif method == "l2":
             if on == 'protein':
-                self.prot.layers['X_l2'] = normalize(self.prot.X, norm='l2')
+                self.prot.layers['X_l2'] = normalize(self.prot.X.toarray(), norm='l2')
                 print(f"Normalized {on} data using {method}.")
             else:
-                self.pep.layers['X_l2'] = normalize(self.pep.X, norm='l2')
+                self.pep.layers['X_l2'] = normalize(self.pep.X.toarray(), norm='l2')
                 print(f"Normalized {on} data using {method}.")
         elif method == 'log2':
             if on == 'protein':

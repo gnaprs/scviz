@@ -47,9 +47,11 @@ from scviz import pAnnData
 
 # Thoughts: functions that act on panndata and return only panndata should be panndata methods, utility functions should be in utils
 
+# ----------------
+# DATA PROCESSING FUNCTIONS
 def get_samplenames(adata, class_type):
     """
-    Get the sample names for the given class(es) type.
+    Gets the sample names for the given class(es) type. Helper function for plot functions. 
 
     Parameters:
     - adata (anndata.AnnData): The AnnData object containing the sample names.
@@ -131,6 +133,50 @@ def get_adata(pdata, on = 'protein'):
     else:
         raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
+def get_upset_contents(pdata, classes, on = 'protein'):
+    """
+    Get the contents for an UpSet plot based on the specified case list. Helper function for UpSet plots.
+
+    Parameters:
+    - pdata (pAnnData): The pAnnData object containing the samples.
+    - classes (str or list of str): The classes to use for selecting samples. E.g. 'cell_type' or ['cell_type', 'treatment'].
+    - on (str): The data type to use for the UpSet plot. Options are 'protein' or 'peptide'. Default is 'protein'.
+
+    Returns:
+    - dict: The contents for the UpSet plot.
+    """
+
+    if on == 'protein':
+        adata = pdata.prot
+    elif on == 'peptide':
+        adata = pdata.pep
+    else:
+        raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
+
+    classes_list = get_classlist(adata, classes)
+    upset_dict = {}
+
+    for j, class_value in enumerate(classes_list):
+        if classes is None:
+            values = class_value.split('_')
+            # print(f'Classes: {classes}, Values: {values}') if debug else None
+            data_filter = filter(adata, classes, values, suppress_warnings=True)
+        elif isinstance(classes, str):
+            # print(f'Class: {classes}, Value: {class_value}') if debug else None
+            data_filter = filter(adata, classes, class_value, suppress_warnings=True)
+        elif isinstance(classes, list):
+            values = class_value.split('_')
+            # print(f'Classes: {classes}, Values: {values}') if debug else None
+            data_filter = filter(adata, classes, values, suppress_warnings=True)
+
+        # get proteins that are present in the filtered data (at least one value is not NaN)
+        prot_present = data_filter.var_names[(~np.isnan(data_filter.X.toarray())).sum(axis=0) > 0]
+        upset_dict[class_value] = prot_present.tolist()
+
+    upset_data = from_contents(upset_dict)
+
+    return upset_data
+
 # IMPORTANT: move to class function, ensure nothing else breaks
 def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = False):
     """
@@ -195,6 +241,8 @@ def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = F
 
     return pdata
 
+# ----------------
+# EXPLORATION(?) FUNCTIONS
 def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction']):
     """ Get data from Uniprot for a list of proteins
 
@@ -229,39 +277,8 @@ def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_nam
     df = pd.read_csv(io.StringIO(results.text), sep='\t')
     return df
 
-def get_upset_contents(pdata, classes, on = 'protein'):
-    if on == 'protein':
-        adata = pdata.prot
-    elif on == 'peptide':
-        adata = pdata.pep
-    else:
-        raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
-
-    classes_list = get_classlist(adata, classes)
-    upset_dict = {}
-
-    for j, class_value in enumerate(classes_list):
-        if classes is None:
-            values = class_value.split('_')
-            # print(f'Classes: {classes}, Values: {values}') if debug else None
-            data_filter = filter(adata, classes, values, suppress_warnings=True)
-        elif isinstance(classes, str):
-            # print(f'Class: {classes}, Value: {class_value}') if debug else None
-            data_filter = filter(adata, classes, class_value, suppress_warnings=True)
-        elif isinstance(classes, list):
-            values = class_value.split('_')
-            # print(f'Classes: {classes}, Values: {values}') if debug else None
-            data_filter = filter(adata, classes, values, suppress_warnings=True)
-
-        # get proteins that are present in the filtered data (at least one value is not NaN)
-        prot_present = data_filter.var_names[(~np.isnan(data_filter.X.toarray())).sum(axis=0) > 0]
-        upset_dict[class_value] = prot_present.tolist()
-
-    upset_data = from_contents(upset_dict)
-
-    return upset_data
-
-
+# ----------------
+# STATISTICAL TEST FUNCTIONS
 # TODO: fix with pdata.summary maybe call stats_ttest instead
 def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_results=False, test_variable='total_count'):
     """
@@ -307,6 +324,41 @@ def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_resu
     ttest_df = pd.DataFrame(ttest_params, columns=['Group1', 'Group2', 'T-statistic', 'P-value', 'N1', 'N2'])
     return ttest_df
 
+def get_pca_importance(model, initial_feature_names, n=1):
+    """
+    Get the most important feature for each principal component in a PCA model.
+
+    Args:
+        model (sklearn.decomposition.PCA): The PCA model.
+        initial_feature_names (list): The initial feature names. Typically adata.var_names.
+        n (int): The number of top features to return for each principal component.
+
+        
+    Returns:
+        df (pd.DataFrame): A DataFrame containing the most important feature for each principal component.
+
+    Example:
+        >>> from scviz import utils as scutils
+        >>> pca = PCA(n_components=5)
+        >>> pca.fit(data)
+        >>> df = scutils.get_pca_importance(pca)
+    """
+
+    # number of components
+    n_pcs= model['PCs'].shape[0]
+
+    # get the index of the most important feature on EACH component
+    most_important = [np.abs(model['PCs'][i]).argsort()[-n:][::-1] for i in range(n_pcs)]
+    most_important_names = [[initial_feature_names[idx] for idx in most_important[i]] for i in range(n_pcs)]
+
+
+    dic = {'PC{}'.format(i): most_important_names[i] for i in range(n_pcs)}
+    df = pd.DataFrame(dic.items(), columns=['Principal Component', 'Top Features'])
+
+    return df
+
+# ----------------
+# TO FIX
 # TODO: fix
 def get_query(pdata, search_term, search_on = 'gene', on = 'protein'):
     valid_search_terms = ['gene', 'protein', 'description', 'pathway', 'all']
@@ -464,43 +516,6 @@ def convert_identifiers(input_list, input_type, output_type, df):
     output_list = df.loc[df[input_type].isin(input_list), output_type].tolist()
 
     return output_list
-
-def get_pca_importance(model, initial_feature_names):
-    """
-    Get the most important feature for each principal component in a PCA model.
-
-    Args:
-        model (sklearn.decomposition.PCA): The PCA model.
-        initial_feature_names (list): The initial feature names. Typically adata.var_names.
-
-    Returns:
-        df (pd.DataFrame): A DataFrame containing the most important feature for each principal component.
-
-    Example:
-        >>> from scviz import utils as scutils
-        >>> pca = PCA(n_components=5)
-        >>> pca.fit(data)
-        >>> df = scutils.get_pca_importance(pca)
-    """
-
-    # number of components
-    n_pcs= model['PCs'].shape[0]
-
-    # get the index of the most important feature on EACH component
-    # LIST COMPREHENSION HERE
-    most_important = [np.abs(model['PCs'][i]).argmax() for i in range(n_pcs)]
-
-    # get the names
-    most_important_names = [initial_feature_names[most_important[i]] for i in range(n_pcs)]
-
-    # LIST COMPREHENSION HERE AGAIN
-    dic = {'PC{}'.format(i): most_important_names[i] for i in range(n_pcs)}
-
-    # build the dataframe
-    df = pd.DataFrame(dic.items())
-
-    return df
-
 # TODO: add function to get GO enrichment, GSEA analysis (see GOATOOLS or STAGES or Enrichr?)
 # TO INTEGRATE
 def get_string_id(gene,species = 9606):
@@ -577,40 +592,3 @@ def get_string_network(gene,comparison,species = 9606):
         file.write(response.content)
     
     return True
-
-
-# NEED TO SOFTCODE THIS...
-# def get_upset_contents(type):
-#     ## start by making user specify the fixed variables and dependent variables (e.g. with assign values for fixed)
-#     ## make use dictionary? e.g. fixed = {'grad_time': ['0', '1', '2'], 'region': ['cortex', 'snpc'], 'phenotype': ['sc', '4sc', '10c', '25c', '50c']}
-#     ## if we can extract out all data for each fixed variable, then we can use the from_contents function to make the upset plot
-
-#     # SPECIFY AMOUNTS
-#     if type == 'amt':
-#         # SPECIFY ENZYMES
-#         amt_contents = {}
-#         amts = ['sc', '4sc', '10c', '25c','50c']
-
-#         # for same enzyme, compare amounts
-#         for grad_time in grad_times:
-#             amt_contents[grad_time] = {}
-#             for region in regions:
-#                 amt_contents[grad_time][region] = {}
-#                 for phenotype in phenotypes:
-#                     df_occ = pd.DataFrame(columns=['Protein', 'sc', '4sc', '10c', '25c', '50c', 'Total'])
-#                     for amt in amts:
-#                         cols = [col for col in data.columns if amt in col and phenotype in col and grad_time in col and region in col and 'Abundance: F' in col]
-#                         df_occ[amt] = data[cols].notnull().sum(axis=1)
-#                     df_occ['Protein'] = data['Accession']
-#                     df_occ['Total'] = df_occ[amts].sum(axis=1)
-#                     df_occ[amts] = df_occ[amts].astype(bool)
-#                     content = {amt: df_occ['Protein'][df_occ[amt]].values for amt in amts}
-#                     amt_contents[grad_time][region][phenotype] = from_contents(content)
-        
-#         return_contents = amt_contents
-
-#     else:
-#         print('Please specify either "amt" or "enzyme"')
-#         return_contents = None
-
-#     return return_contents
