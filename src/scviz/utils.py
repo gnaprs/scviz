@@ -133,7 +133,7 @@ def get_adata(pdata, on = 'protein'):
     else:
         raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
-def get_upset_contents(pdata, classes, on = 'protein'):
+def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True):
     """
     Get the contents for an UpSet plot based on the specified case list. Helper function for UpSet plots.
 
@@ -173,9 +173,12 @@ def get_upset_contents(pdata, classes, on = 'protein'):
         prot_present = data_filter.var_names[(~np.isnan(data_filter.X.toarray())).sum(axis=0) > 0]
         upset_dict[class_value] = prot_present.tolist()
 
-    upset_data = from_contents(upset_dict)
-
-    return upset_data
+    if upsetForm:
+        upset_data = from_contents(upset_dict)
+        return upset_data
+    
+    else:
+        return upset_dict
 
 # IMPORTANT: move to class function, ensure nothing else breaks
 def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = False):

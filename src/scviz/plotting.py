@@ -33,7 +33,8 @@ import matplotlib.colors as mcolors
 import matplotlib.collections as clt
 import matplotlib.cm as cm
 import matplotlib.patheffects as PathEffects
-from upsetplot import plot, generate_counts, from_contents, query, UpSet
+from matplotlib_venn import venn2_unweighted, venn2_circles, venn3_unweighted, venn3_circles
+import upsetplot
 from adjustText import adjust_text
 import umap.umap_ as umap
 import scanpy as sc
@@ -299,14 +300,20 @@ def plot_pca(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='defa
     # CATEGORICAL COLOR (color is a class/subclass in adata.obs.columns)
     if color_by in adata.obs.columns:
         y = utils.get_samplenames(adata, color_by)
-        color_dict = {class_type: i for i, class_type in enumerate(set(y))}
-        color_mapped = [color_dict[val] for val in y]
-        if cmap == 'default':  
-            cmap = get_color('cmap')
+
+        if cmap == 'default':
+            unique_classes = len(set(y))
+            colors = get_color('colors', n=unique_classes)
+            color_dict = {class_type: colors[i] for i, class_type in enumerate(set(y))}
+            color_mapped = [color_dict[val] for val in y]
+            cmap = None
+            legend_elements = [mpatches.Patch(color=color_dict[key], label=key) for i, key in enumerate(color_dict)]
         else:
+            color_dict = {class_type: i for i, class_type in enumerate(set(y))}
+            color_mapped = [color_dict[val] for val in y]
             cmap = cm.get_cmap(cmap)
-        norm = mcolors.Normalize(vmin=min(color_mapped), vmax=max(color_mapped))
-        legend_elements = [mpatches.Patch(color=cmap(norm(color_dict[key])), label=key) for key in color_dict]
+            norm = mcolors.Normalize(vmin=min(color_mapped), vmax=max(color_mapped))
+            legend_elements = [mpatches.Patch(color=cmap(norm(color_dict[key])), label=key) for key in color_dict]
 
     # FIX for list of strings (combined color_by)
 
@@ -749,6 +756,43 @@ def mark_rankquant(plot, pdata, names, class_values, layer = "X", on = 'protein'
                 plot.annotate(txt, (y,x), xytext=(y+10,x*1.1), fontsize=8)
             plot.scatter(y,x,marker='o',color=color,s=s, alpha=alpha)
     return plot
+
+def plot_venn(ax, pdata, classes, **kwargs):
+    set_dict = utils.get_upset_contents(pdata, classes, upsetForm=False)
+
+    num_keys = len(set_dict)
+    set_colors = get_color('colors', n=num_keys)
+    set_labels = list(set_dict.keys())
+    set_list = [set(value) for value in set_dict.values()]
+
+    venn_functions = {
+        2: lambda: (venn2_unweighted(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, **kwargs),
+                    venn2_circles(subsets=(1, 1, 1), ax = ax,  linewidth=1)),
+        3: lambda: (venn3_unweighted(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, **kwargs),
+                    venn3_circles(subsets=(1, 1, 1, 1, 1, 1, 1), ax = ax, linewidth=1))
+    }
+
+    if num_keys in venn_functions:
+        ax = venn_functions[num_keys]()
+    else:
+        raise ValueError("Venn diagrams only accept either 2 or 3 sets. For more than 3 sets, use the plot_upset function.")
+
+    return ax
+
+def plot_upset(pdata, classes, **kwargs):
+    # example of further styling
+    # upplot.style_subsets(present=["sc"], absent=['5k','10k','20k'],facecolor="black", label="sc only")
+    # upplot.style_subsets(absent=["sc"], present=['5k','10k','20k'],facecolor="red", label="in all but sc")
+    # uplot = upplot.plot(fig = fig)
+
+    # uplot["intersections"].set_ylabel("Subset size")
+    # uplot["totals"].set_xlabel("Protein count")
+
+    data_upset = utils.get_upset_contents(pdata, classes = classes)
+    upplot = upsetplot.UpSet(data_upset, subset_size="count", show_counts=True, facecolor = 'black', **kwargs)
+
+    return upplot
+
 
 # TODO: make function work from get_abundance or get_abundance_query, actually plot the protein abundances - refer to graph from tingyu
 def plot_abundance(ax, prot_data, classes, genelist, cmap='Blues', color=['blue'], s=20, alpha=0.2, calpha=1):
