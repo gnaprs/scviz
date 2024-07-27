@@ -737,7 +737,7 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
 
     return ax
 
-def mark_rankquant(plot, pdata, names, class_values, layer = "X", on = 'protein',color='red',s=10,alpha=1,show_names=True):
+def mark_rankquant(plot, pdata, names, class_values, layer = "X", on = 'protein', color='red', s=10,alpha=1,show_names=True, name_type='accession'):
     adata = utils.get_adata(pdata, on)
     # TEST: check if names are in the data
     pdata._check_rankcol(on, class_values)
@@ -753,15 +753,25 @@ def mark_rankquant(plot, pdata, names, class_values, layer = "X", on = 'protein'
                 print(f"Name {txt} not found in {on}.var. Check {on} name for spelling errors and whether it is in data.")
                 continue
             if show_names:
+                if name_type == 'accession':
+                    pass
+                elif name_type == 'gene':
+                    txt = adata.var['Gene'].loc[txt]
+                # elif name_type == 'name':
+
                 plot.annotate(txt, (y,x), xytext=(y+10,x*1.1), fontsize=8)
             plot.scatter(y,x,marker='o',color=color,s=s, alpha=alpha)
     return plot
 
-def plot_venn(ax, pdata, classes, **kwargs):
+def plot_venn(ax, pdata, classes, set_colors = 'default', **kwargs):
     set_dict = utils.get_upset_contents(pdata, classes, upsetForm=False)
 
     num_keys = len(set_dict)
-    set_colors = get_color('colors', n=num_keys)
+    if set_colors == 'default':
+        set_colors = get_color('colors', n=num_keys)
+    elif len(set_colors) != num_keys:
+        raise ValueError("The number of colors provided must match the number of sets.")
+    
     set_labels = list(set_dict.keys())
     set_list = [set(value) for value in set_dict.values()]
 

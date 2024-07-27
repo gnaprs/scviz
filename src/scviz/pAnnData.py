@@ -763,6 +763,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         prot_var_names = prot_all['Accession'].values
         # prot_var: protein metadata
         prot_var = prot_all.loc[:, 'Protein FDR Confidence: Combined':'# Razor Peptides']
+        prot_var.rename(columns={'Gene Symbol': 'Genes'}, inplace=True)
         # prot_obs_names: file names
         prot_obs_names = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: (F\d+):')[0].values
         # prot_obs: sample typing from the column name, drop column if all 'n/a'
@@ -871,7 +872,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
     print("pAnnData object created. Use `print(pdata)` to view the object.")
     return pdata
 
-def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Translated'):
+def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Translated', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id']):
     if not report_file:
         raise ValueError("Importing from DIA-NN: report.tsv must be provided")
     print("--------------------------\nStarting import...\n--------------------------")
@@ -885,16 +886,14 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     # prot_X: sparse data matrix
     if prot_value is not 'PG.MaxLFQ':
         print("INFO: Protein value specified is not PG.MaxLFQ, please check if correct.")
-    prot_X_pivot = report_all.pivot_table(index='Master.Protein', columns='Run', values=prot_value, aggfunc='first')
+    prot_X_pivot = report_all.pivot_table(index='Master.Protein', columns='Run', values=prot_value, aggfunc='first', sort=False)
     prot_X = sparse.csr_matrix(prot_X_pivot.values).T
     # prot_var_names: protein names
     prot_var_names = prot_X_pivot.index.values
     # prot_obs: file names
     prot_obs_names = prot_X_pivot.columns.values
 
-    # TO ADD: number of peptides detected?
-    # prot_var: protein metadata
-    prot_var_columns = ['Genes', 'Master.Protein']
+    # prot_var: protein metadata (default: Genes, Master.Protein)
     if 'First.Protein.Description' in report_all.columns:
         prot_var_columns.insert(0, 'First.Protein.Description')
 
@@ -908,14 +907,13 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     # -----------------------------
     # PEPTIDE DATA
     # pep_X: sparse data matrix
-    pep_X_pivot = report_all.pivot_table(index='Precursor.Id', columns='Run', values=pep_value, aggfunc='first')
+    pep_X_pivot = report_all.pivot_table(index='Precursor.Id', columns='Run', values=pep_value, aggfunc='first', sort=False)
     pep_X = sparse.csr_matrix(pep_X_pivot.values).T
     # pep_var_names: peptide sequence
     pep_var_names = pep_X_pivot.index.values
     # pep_obs_names: file names
     pep_obs_names = pep_X_pivot.columns.values
-    # pep_var: peptide sequence with modifications
-    pep_var_columns = ['Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id']
+    # pep_var: peptide sequence with modifications (default: Genes, Protein.Group, Precursor.Charge, Modified.Sequence, Stripped.Sequence, Precursor.Id)
     pep_var = report_all.loc[:, pep_var_columns].drop_duplicates(subset='Precursor.Id').drop(columns='Precursor.Id')
     # pep_obs: sample typing from the column name, same as prot_obs
     pep_obs = prot_obs
@@ -933,6 +931,11 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     reorder_indices = [index_dict[protein] for protein in prot_var_names]
     rs = rs[:, reorder_indices]
     print("RS matrix successfully computed")
+
+    # TO ADD: number of peptides per protein
+    # number of proteins per peptide
+    # make columns isUnique for peptide
+    sum_values = np.sum(rs, axis=1)
 
     # -----------------------------
     # ASSERTIONS
