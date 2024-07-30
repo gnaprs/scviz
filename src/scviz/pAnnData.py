@@ -179,6 +179,8 @@ class pAnnData:
         if self.prot is not None:
             self.prot.obs['protein_quant'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1) / self.prot.X.shape[1]
             self.prot.obs['protein_count'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1)
+            self.prot.obs['protein_missingvalues'] = np.isnan(self.prot.X.toarray()).mean()
+            
             if 'X_mbr' in self.prot.layers:
                 self.prot.obs['mbr_count'] = (self.prot.layers['X_mbr'] == 'Peak Found').sum(axis=1)
                 self.prot.obs['high_count'] = (self.prot.layers['X_mbr'] == 'High').sum(axis=1)
@@ -186,6 +188,8 @@ class pAnnData:
         if self.pep is not None:
             self.pep.obs['peptide_quant'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1) / self.pep.X.shape[1]
             self.pep.obs['peptide_count'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1)
+            self.prot.obs['peptide_missingvalues'] = np.isnan(self.pep.X.toarray()).mean()
+
             if 'X_mbr' in self.pep.layers:
                 self.pep.obs['mbr_count'] = (self.pep.layers['X_mbr'] == 'Peak Found').sum(axis=1)
                 self.pep.obs['high_count'] = (self.pep.layers['X_mbr'] == 'High').sum(axis=1)
@@ -670,6 +674,28 @@ class pAnnData:
         self._append_history(f'{on}: PCA fitted on {layer}, stored in obsm["X_pca"] and varm["PCs"]')
         print(f'{on}: PCA fitted on {layer} and and stored in layers["X_pca"] and uns["pca"]')
 
+    def missingvalues(self, on = 'protein', limit = 0.5):
+        # removes columns (proteins and peptides) with > 0.5 missing values across all samples
+        if not self._check_data(on):
+            pass
+
+        if on == 'protein':
+            adata = self.prot
+
+        elif on == 'peptide':
+            adata = self.pep
+
+        missing_proportion = np.isnan(adata.X.toarray()).mean(axis=0)
+        columns_to_keep = missing_proportion <= limit
+
+        # Filter the data to keep only the desired columns
+        adata = adata[:, columns_to_keep]
+
+        if on == 'protein':
+            self.prot = adata
+        elif on == 'peptide':
+            self.pep = adata
+
     # TODO: add ability to normalize within class (provide variable(s) for grouping, etc.), median normalization options
     def normalize(self, method = 'scale', on = 'protein', set_X = True, **kwargs):  
         if not self._check_data(on):
@@ -693,10 +719,10 @@ class pAnnData:
                 print(f"Normalized {on} data using {method}.")
         elif method == "l2":
             if on == 'protein':
-                self.prot.layers['X_l2'] = normalize(self.prot.X, norm='l2')
+                self.prot.layers['X_l2'] = normalize(self.prot.X.toarray(), norm='l2')
                 print(f"Normalized {on} data using {method}.")
             else:
-                self.pep.layers['X_l2'] = normalize(self.pep.X, norm='l2')
+                self.pep.layers['X_l2'] = normalize(self.pep.X.toarray(), norm='l2')
                 print(f"Normalized {on} data using {method}.")
         elif method == 'log2':
             if on == 'protein':
@@ -737,6 +763,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         prot_var_names = prot_all['Accession'].values
         # prot_var: protein metadata
         prot_var = prot_all.loc[:, 'Protein FDR Confidence: Combined':'# Razor Peptides']
+        prot_var.rename(columns={'Gene Symbol': 'Genes'}, inplace=True)
         # prot_obs_names: file names
         prot_obs_names = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: (F\d+):')[0].values
         # prot_obs: sample typing from the column name, drop column if all 'n/a'
@@ -845,7 +872,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
     print("pAnnData object created. Use `print(pdata)` to view the object.")
     return pdata
 
-def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Translated'):
+def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Translated', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id']):
     if not report_file:
         raise ValueError("Importing from DIA-NN: report.tsv must be provided")
     print("--------------------------\nStarting import...\n--------------------------")
@@ -859,16 +886,14 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     # prot_X: sparse data matrix
     if prot_value is not 'PG.MaxLFQ':
         print("INFO: Protein value specified is not PG.MaxLFQ, please check if correct.")
-    prot_X_pivot = report_all.pivot_table(index='Master.Protein', columns='Run', values=prot_value, aggfunc='first')
+    prot_X_pivot = report_all.pivot_table(index='Master.Protein', columns='Run', values=prot_value, aggfunc='first', sort=False)
     prot_X = sparse.csr_matrix(prot_X_pivot.values).T
     # prot_var_names: protein names
     prot_var_names = prot_X_pivot.index.values
     # prot_obs: file names
     prot_obs_names = prot_X_pivot.columns.values
 
-    # TO ADD: number of peptides detected?
-    # prot_var: protein metadata
-    prot_var_columns = ['Genes', 'Master.Protein']
+    # prot_var: protein metadata (default: Genes, Master.Protein)
     if 'First.Protein.Description' in report_all.columns:
         prot_var_columns.insert(0, 'First.Protein.Description')
 
@@ -882,14 +907,13 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     # -----------------------------
     # PEPTIDE DATA
     # pep_X: sparse data matrix
-    pep_X_pivot = report_all.pivot_table(index='Precursor.Id', columns='Run', values=pep_value, aggfunc='first')
+    pep_X_pivot = report_all.pivot_table(index='Precursor.Id', columns='Run', values=pep_value, aggfunc='first', sort=False)
     pep_X = sparse.csr_matrix(pep_X_pivot.values).T
     # pep_var_names: peptide sequence
     pep_var_names = pep_X_pivot.index.values
     # pep_obs_names: file names
     pep_obs_names = pep_X_pivot.columns.values
-    # pep_var: peptide sequence with modifications
-    pep_var_columns = ['Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id']
+    # pep_var: peptide sequence with modifications (default: Genes, Protein.Group, Precursor.Charge, Modified.Sequence, Stripped.Sequence, Precursor.Id)
     pep_var = report_all.loc[:, pep_var_columns].drop_duplicates(subset='Precursor.Id').drop(columns='Precursor.Id')
     # pep_obs: sample typing from the column name, same as prot_obs
     pep_obs = prot_obs
@@ -907,6 +931,11 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     reorder_indices = [index_dict[protein] for protein in prot_var_names]
     rs = rs[:, reorder_indices]
     print("RS matrix successfully computed")
+
+    # TO ADD: number of peptides per protein
+    # number of proteins per peptide
+    # make columns isUnique for peptide
+    sum_values = np.sum(rs, axis=1)
 
     # -----------------------------
     # ASSERTIONS
