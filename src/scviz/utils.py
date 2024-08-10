@@ -41,7 +41,7 @@ from scipy.stats import ttest_ind, mannwhitneyu, wilcoxon, chi2_contingency, fis
 from scipy.sparse import csr_matrix
 from sklearn.impute import SimpleImputer, KNNImputer
 
-from upsetplot import from_contents
+import upsetplot
 import anndata as ad
 from scviz import pAnnData
 
@@ -174,11 +174,17 @@ def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True):
         upset_dict[class_value] = prot_present.tolist()
 
     if upsetForm:
-        upset_data = from_contents(upset_dict)
+        upset_data = upsetplot.from_contents(upset_dict)
         return upset_data
     
     else:
         return upset_dict
+
+def get_upset_query(upset_content, present, absent):
+    prot_query = upsetplot.query(upset_content, present=present, absent=absent).data['id'].tolist()
+    prot_query_df = get_uniprot_fields(prot_query)
+
+    return prot_query_df
 
 # IMPORTANT: move to class function, ensure nothing else breaks
 def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = False):
@@ -219,7 +225,6 @@ def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = F
         query = f"(adata.obs['{class_type}'] == '{values}')"
         print('DEVELOPMENT: testing for query - ', query)
     elif isinstance(class_type, list):
-        values = [[val] for val in values]
         if exact_cases:
             query = " | ".join([" & ".join(["(adata.obs['{}'] == '{}')".format(cls, val) for cls, val in zip(class_type, vals)]) for vals in values])
             print('DEVELOPMENT: testing for query - ', query)
@@ -246,7 +251,7 @@ def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = F
 
 # ----------------
 # EXPLORATION(?) FUNCTIONS
-def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction']):
+def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction']):
     """ Get data from Uniprot for a list of proteins
 
     Args:
@@ -271,6 +276,9 @@ def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_nam
     query = "%28" + query + "%29"
     format_type = 'tsv'
     
+    print(f"Querying Uniprot for {len(prot_list)} proteins")
+    print(f"Fields: {fields}")
+
     # full url
     url = f'{base_url}?fields={fields}&format={format_type}&query={query}'
     
@@ -519,6 +527,7 @@ def convert_identifiers(input_list, input_type, output_type, df):
     output_list = df.loc[df[input_type].isin(input_list), output_type].tolist()
 
     return output_list
+
 # TODO: add function to get GO enrichment, GSEA analysis (see GOATOOLS or STAGES or Enrichr?)
 # TO INTEGRATE
 def get_string_id(gene,species = 9606):

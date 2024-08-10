@@ -14,3 +14,4 @@ dev/scviz_planning.docx
 dev/*.png
 dev/*.xlsx
 dev/windy*.py
+dev/cellstore_analysis.ipynb
