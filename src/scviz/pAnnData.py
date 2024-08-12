@@ -1,13 +1,16 @@
+from re import A
 import pandas as pd
 import anndata as ad
 import numpy as np
 import scanpy as sc
 
 import copy
+import warnings
 
 from scipy import sparse
 from scipy.stats import variation, ttest_ind, mannwhitneyu, wilcoxon
-from sklearn.preprocessing import MultiLabelBinarizer, normalize
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import MultiLabelBinarizer, normalize, FunctionTransformer
 from sklearn.decomposition import PCA
 from sklearn.impute import SimpleImputer, KNNImputer
 
@@ -50,6 +53,10 @@ class pAnnData:
         Summary of the data, typically used for filtering.
     stats : Dict
         Dictionary of differential expression results.
+    
+    !TODO:
+    - Decide whether classes or class_types
+        
     """
 
     def __init__(self, 
@@ -177,18 +184,18 @@ class pAnnData:
 
     def _update_summary(self):
         if self.prot is not None:
+            # note: missing values is 1-protein_quant
             self.prot.obs['protein_quant'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1) / self.prot.X.shape[1]
             self.prot.obs['protein_count'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1)
-            self.prot.obs['protein_missingvalues'] = np.isnan(self.prot.X.toarray()).mean()
             
             if 'X_mbr' in self.prot.layers:
                 self.prot.obs['mbr_count'] = (self.prot.layers['X_mbr'] == 'Peak Found').sum(axis=1)
                 self.prot.obs['high_count'] = (self.prot.layers['X_mbr'] == 'High').sum(axis=1)
 
         if self.pep is not None:
+            # note: missing values is 1-peptide_quant
             self.pep.obs['peptide_quant'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1) / self.pep.X.shape[1]
             self.pep.obs['peptide_count'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1)
-            self.prot.obs['peptide_missingvalues'] = np.isnan(self.pep.X.toarray()).mean()
 
             if 'X_mbr' in self.pep.layers:
                 self.pep.obs['mbr_count'] = (self.pep.layers['X_mbr'] == 'Peak Found').sum(axis=1)
@@ -399,7 +406,7 @@ class pAnnData:
     # !TODO: implement chi2 and fisher tests, consider also adding correlation tests
     # FC method: specify mean, prot pairwise median, or pep pairwise median
     # TODO: implement layer support
-    def de(self, class_type, values, method = 'ttest', on = 'protein', layer = "X", pval=0.05, log2fc=1):
+    def de(self, class_type, values, method = 'ttest', layer = "X", pval=0.05, log2fc=1):
         """
         Calculate differential expression (DE) of proteins across different groups.
 
@@ -409,8 +416,7 @@ class pAnnData:
             self (pAnnData): The pAnnData object containing the protein data.
             class_type (str): The class type to use for selecting samples. E.g. 'cell_type'.
             values (list of list of str): The values to select for within the class_type. E.g. [['wt', 'kd'], ['control', 'treatment']].
-            on (str, optional): The type of data to perform DE on. Default is 'protein'. Other options include 'peptide'.
-            method (str, optional): The method to use for DE. Default is 'ttest'. Other methods include 'mannwhitneyu', 'wilcoxon', 'chi2', and 'fisher'.
+            method (str, optional): The method to use for DE. Default is 'ttest'. Other methods include 'mannwhitneyu', 'wilcoxon', 'chi2', and 'fisher'. !TODO: implement pairwise prot median, pairwise pep median.
 
         Returns:
             df_stats (pandas.DataFrame): A DataFrame containing the DE statistics for each protein.
@@ -423,9 +429,6 @@ class pAnnData:
             >>> stats_sc_20000 = pdata.de(['cell_type','size'], [['cortex', 'sc'], ['cortex', '20000']])
         """
 
-        if not self._check_data(on):
-            pass
-
         # this is for case 1/case 2 comparison!
         # make sure only two cases are given
         if len(values) != 2:
@@ -434,12 +437,16 @@ class pAnnData:
         pdata_case1 = utils.filter(self, class_type, values[0], exact_cases=True)
         pdata_case2 = utils.filter(self, class_type, values[1], exact_cases=True)
 
-        if on == 'protein':
-            abundance_case1 = pdata_case1.prot
-            abundance_case2 = pdata_case2.prot
-        elif on == 'peptide':
-            abundance_case1 = pdata_case1.pep
-            abundance_case2 = pdata_case2.pep
+        # TODO: Need to implement pairwise differential expression...
+        # if on == 'protein':
+        #     abundance_case1 = pdata_case1.prot
+        #     abundance_case2 = pdata_case2.prot
+        # elif on == 'peptide':
+        #     abundance_case1 = pdata_case1.pep
+        #     abundance_case2 = pdata_case2.pep
+
+        abundance_case1 = pdata_case1.prot
+        abundance_case2 = pdata_case2.prot
 
         n1 = abundance_case1.shape[0]
         n2 = abundance_case2.shape[0]
@@ -451,6 +458,7 @@ class pAnnData:
 
         # create a dataframe for stats
         df_stats = pd.DataFrame(index=abundance_case1.var_names, columns=[group1_string,group2_string,'log2fc', 'p_value', 'test_statistic'])
+        df_stats['Genes'] = abundance_case1.var['Genes']
         df_stats[group1_string] = np.mean(abundance_case1.X.toarray(), axis=0)
         df_stats[group2_string] = np.mean(abundance_case2.X.toarray(), axis=0)
         df_stats['log2fc'] = np.log2(np.divide(np.mean(abundance_case1.X.toarray(), axis=0), np.mean(abundance_case2.X.toarray(), axis=0)))
@@ -481,9 +489,13 @@ class pAnnData:
         df_stats.loc[non_nan_mask & (df_stats['p_value'] < pval) & (df_stats['log2fc'] > log2fc), 'significance'] = 'upregulated'
         df_stats.loc[non_nan_mask & (df_stats['p_value'] < pval) & (df_stats['log2fc'] < -log2fc), 'significance'] = 'downregulated'
 
+        df_stats = df_stats.dropna(subset=['p_value', 'log2fc', 'significance'])
+        df_stats['significance'] = pd.Categorical(df_stats['significance'], categories=['upregulated', 'downregulated', 'not significant'], ordered=True)
+        df_stats = df_stats.sort_values(by='significance')
+
         self._stats[comparison_string] = df_stats
         print(f'Differential expression calculated for {class_type} {values} using {method}. DE statistics stored in .stats["{comparison_string}"].')
-        self._append_history(f"{on}: Differential expression calculated for {class_type} {values} using {method}. DE statistics stored in .stats['{comparison_string}'].")
+        self._append_history(f"prot: Differential expression calculated for {class_type} {values} using {method}. DE statistics stored in .stats['{comparison_string}'].")
 
         return df_stats
 
@@ -525,64 +537,65 @@ class pAnnData:
 
         self._history.append(f"{on}: Ranked {layer} data. Ranking, average and stdev stored in var.")
 
-    # TODO: add ability to impute within class (provide variable(s) for grouping, etc.) [See ColumnTransformer in sklearn]
-    # TODO: add imputation for minimum [https://github.com/scikit-learn/scikit-learn/issues/19783]
-    # https://towardsdatascience.com/improve-your-data-preprocessing-with-columntransformer-and-pipelines-b6ff7edd2f77
-    def impute(self, layer = "X_raw", method = 'median', on = 'protein', **kwargs):
-        # uses scikit-learn imputers
+    def impute(self, classes = None, layer = "X", method = 'min', on = 'protein', **kwargs):
+        '''Function for imputation, imputes data across samples and stores it in the pdata layer X_impute_method.
+        Unfortunately, the imputers in scikit-learn only impute columns, not rows, which means ColumnTransformer+SimpleImputers won't work.
+        KNN to be implemented later.
+
+        Args:
+            classes (list): List of classes to impute.
+            layer (str): Layer to impute.
+            method (str): Imputation method.
+            on (str): 'protein' or 'peptide'.
+        '''
         if not self._check_data(on):
             pass
 
-        # default imputer settings
-        missing_values = kwargs.pop('missing_values', np.nan)
-        n_neighbors = kwargs.pop('n_neighbors', 2)
-        weights = kwargs.pop('weights', "uniform")
+        adata = self.prot if on == 'protein' else self.pep
+        if layer != "X" and layer not in adata.layers:
+            raise ValueError(f"Layer {layer} not found in .{on}.")
 
-        imputers = {
-            'median': lambda: SimpleImputer(missing_values=missing_values, strategy='median', keep_empty_features = True, **kwargs),
-            'mean': lambda: SimpleImputer(missing_values=missing_values, strategy='mean', keep_empty_features = True, **kwargs),
-            'knn': lambda: KNNImputer(n_neighbors=n_neighbors, weights=weights, keep_empty_features = True, **kwargs)
+        impute_funcs = {
+            'mean': np.nanmean,
+            'median': np.nanmedian,
+            'min': np.nanmin
         }
 
-
-        if method in imputers:
-            imputer = imputers[method]()
-            layer_name = 'X_impute_' + method
-
-            if on == 'protein':
-                self._impute_helper(self.prot, layer, method, layer_name, imputer)
-            else:
-                self._impute_helper(self.prot, layer, method, layer_name, imputer)
-        else:
+        if method not in impute_funcs:
             raise ValueError(f"Unknown method: {method}")
         
-        self._history.append(f"{on}: Imputed {layer} data using {method}. Imputed data stored in `{layer_name}`.")
+        impute_func = impute_funcs.get(method)
+        impute_data = adata.layers[layer] if layer != "X" else adata.X
+        layer_name = 'X_impute_' + method
+        was_sparse = sparse.issparse(impute_data)
 
-    def _impute_helper(self, data, layer, method, layer_name, imputer):
-        '''Helper function for impute, imputes data and stores it in the AnnData object.
+        if was_sparse:
+            impute_data = impute_data.toarray()
 
-        Args:
-            data (AnnData): AnnData object to impute.
-            layer (str): Layer to impute.
-            method (str): Imputation method.
-            layer_name (str): Name of the new layer to store imputed data.
-            imputer (object): Imputer object.
-        '''
-        if layer != "X" and layer not in data.layers:
-            raise ValueError(f"Layer {layer} not found in data.")
+        if classes is None:
+            # manually calculate mean/min/median across rows, ignoring NaNs, and then fill NaNs with mean
+            impute_data[np.isnan(impute_data)] = np.take(impute_func(impute_data, axis=0), np.where(np.isnan(impute_data))[1])
 
-        if method == 'knn':
-            if layer == "X":
-                data.layers[layer_name] = sparse.csr_matrix(imputer.fit_transform(data.X.toarray()))
-            else:
-                data.layers[layer_name] = sparse.csr_matrix(imputer.fit_transform(data.layers[layer].toarray()))
+            print(f"Imputed data across all samples using {method}. New data stored in `{layer_name}`.")
+            self._history.append(f"{on}: Imputed layer {layer} using {method}. Imputed data stored in `{layer_name}`.")
+
         else:
-            if layer == "X":
-                data.layers[layer_name] = imputer.fit_transform(data.X)
-            else:
-                data.layers[layer_name] = imputer.fit_transform(data.layers[layer])
+            sample_names = utils.get_samplenames(adata, classes)
+            unique_identifiers = list(set(sample_names))
+            indices_dict = {identifier: [i for i, sample in enumerate(sample_names) if sample == identifier] for identifier in unique_identifiers}
 
-        print(f"Imputed data using {method}. New data stored in `{layer_name}`.")
+            for identifier, indices in indices_dict.items():
+                subset_data = impute_data[indices,:]
+                subset_data[np.isnan(subset_data)] = np.take(impute_func(subset_data, axis=0), np.where(np.isnan(subset_data))[1])
+                impute_data[indices,:] = subset_data
+
+            print(f"{on}: Imputed based on class(es): {classes} - {unique_identifiers} using {method}")
+            self._history.append(f"{on}: Imputed layer {layer} based on class(es): {classes} - {unique_identifiers} using {method}. Imputed data stored in `{layer_name}`.")
+
+        if was_sparse:
+            adata.layers[layer_name] = sparse.csr_matrix(impute_data)
+        else:
+            adata.layers[layer_name] = impute_data
 
     def neighbor(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.pp.neighbors
@@ -608,6 +621,31 @@ class pAnnData:
 
         self._append_history(f'{on}: Neighbors fitted on {layer}, stored in obs["distances"] and obs["connectivities"]')
         print(f'{on}: Neighbors fitted on {layer} and and stored in obs["distances"] and obs["connectivities"]')
+
+    def leiden(self, on = 'protein', layer = "X", **kwargs):
+        # uses sc.tl.leiden with default resolution of 0.25
+        if not self._check_data(on):
+            pass
+
+        if on == 'protein':
+            adata = self.prot
+        elif on == 'peptide':
+            adata = self.pep
+
+        if 'neighbors' not in adata.uns:
+            print("Neighbors not found in AnnData object. Running neighbors with default settings.")
+            self.neighbor(on = on, layer = layer)
+
+        if layer == "X":
+            # do nothing
+            pass
+        elif layer in adata.layers.keys():
+            self.set_X(layer = layer, on = on)
+
+        sc.tl.leiden(adata, **kwargs)
+
+        self._append_history(f'{on}: Leiden clustering fitted on {layer}, stored in obs["leiden"]')
+        print(f'{on}: Leiden clustering fitted on {layer} and and stored in obs["leiden"]')
 
     def umap(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.tl.umap
@@ -674,8 +712,8 @@ class pAnnData:
         self._append_history(f'{on}: PCA fitted on {layer}, stored in obsm["X_pca"] and varm["PCs"]')
         print(f'{on}: PCA fitted on {layer} and and stored in layers["X_pca"] and uns["pca"]')
 
-    def missingvalues(self, on = 'protein', limit = 0.5):
-        # removes columns (proteins and peptides) with > 0.5 missing values across all samples
+    def nanmissingvalues(self, on = 'protein', limit = 0.5):
+        # sets columns (proteins and peptides) with > 0.5 missing values to NaN across all samples
         if not self._check_data(on):
             pass
 
@@ -686,10 +724,8 @@ class pAnnData:
             adata = self.pep
 
         missing_proportion = np.isnan(adata.X.toarray()).mean(axis=0)
-        columns_to_keep = missing_proportion <= limit
-
-        # Filter the data to keep only the desired columns
-        adata = adata[:, columns_to_keep]
+        columns_to_nan = missing_proportion > limit
+        adata.X[:, columns_to_nan] = np.nan
 
         if on == 'protein':
             self.prot = adata
@@ -697,7 +733,7 @@ class pAnnData:
             self.pep = adata
 
     # TODO: add ability to normalize within class (provide variable(s) for grouping, etc.), median normalization options
-    def normalize(self, method = 'scale', on = 'protein', set_X = True, **kwargs):  
+    def normalize(self, method = 'sum', on = 'protein', set_X = True, **kwargs):  
         if not self._check_data(on):
             pass
 
@@ -706,7 +742,7 @@ class pAnnData:
         # median
         # data = data divide by data_median * data.median.median 
 
-        if method == 'scale':
+        if method == 'sum':
             if on == 'protein':
                 row_sums = np.nansum(self.prot.X.toarray(), axis=1)
                 max_row_sum = np.max(row_sums)
@@ -872,7 +908,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
     print("pAnnData object created. Use `print(pdata)` to view the object.")
     return pdata
 
-def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Translated', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id']):
+def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Translated', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes']):
     if not report_file:
         raise ValueError("Importing from DIA-NN: report.tsv must be provided")
     print("--------------------------\nStarting import...\n--------------------------")
@@ -897,7 +933,15 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     if 'First.Protein.Description' in report_all.columns:
         prot_var_columns.insert(0, 'First.Protein.Description')
 
-    prot_var = report_all.loc[:, prot_var_columns].drop_duplicates(subset='Master.Protein').drop(columns='Master.Protein')
+    existing_prot_var_columns = [col for col in prot_var_columns if col in report_all.columns]
+    missing_columns = set(prot_var_columns) - set(existing_prot_var_columns)
+
+    if missing_columns:
+        warnings.warn(
+            f"Warning: The following columns are missing: {', '.join(missing_columns)}. "
+        )
+
+    prot_var = report_all.loc[:, existing_prot_var_columns].drop_duplicates(subset='Master.Protein').drop(columns='Master.Protein')
     # prot_obs: sample typing from the column name
     prot_obs = pd.DataFrame(prot_X_pivot.columns.values, columns=['Run'])['Run'].str.split('_', expand=True).rename(columns=dict(enumerate(obs_columns)))
     
@@ -913,8 +957,18 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     pep_var_names = pep_X_pivot.index.values
     # pep_obs_names: file names
     pep_obs_names = pep_X_pivot.columns.values
-    # pep_var: peptide sequence with modifications (default: Genes, Protein.Group, Precursor.Charge, Modified.Sequence, Stripped.Sequence, Precursor.Id)
-    pep_var = report_all.loc[:, pep_var_columns].drop_duplicates(subset='Precursor.Id').drop(columns='Precursor.Id')
+    # pep_var: peptide sequence with modifications (default: Genes, Protein.Group, Precursor.Charge, Modified.Sequence, Stripped.Sequence, Precursor.Id, All Mapped Proteins, All Mapped Genes)
+    existing_pep_var_columns = [col for col in pep_var_columns if col in report_all.columns]
+    missing_columns = set(pep_var_columns) - set(existing_pep_var_columns)
+
+    if missing_columns:
+        warnings.warn(
+            f"Warning: The following columns are missing: {', '.join(missing_columns)}. "
+            "Consider running analysis in the newer version of DIA-NN (1.8.1). "
+            "Peptide-protein mapping may differ."
+        )
+    
+    pep_var = report_all.loc[:, existing_pep_var_columns].drop_duplicates(subset='Precursor.Id').drop(columns='Precursor.Id')
     # pep_obs: sample typing from the column name, same as prot_obs
     pep_obs = prot_obs
 

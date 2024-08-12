@@ -468,19 +468,19 @@ def plot_heatmap(ax, heatmap_data, cmap=cm.get_cmap('seismic'), norm_values=[4,5
     return ax
 
 # double check
-def plot_volcano(ax, pdata = None, class_type = None, values = None, on = 'protein', method='ttest', label=5, color=None, alpha=0.5, pval=0.05, log2fc=1, linewidth=0.5, fontsize = 8, de_data = None):
+def plot_volcano(ax, pdata = None, classes = None, values = None, method='ttest', label=5, label_type='Gene', color=None, alpha=0.5, pval=0.05, log2fc=1, linewidth=0.5, fontsize = 8, no_marks=False, de_data = None, return_df = False):
     """
     Plot a volcano plot on the given axes. Calculates DE on pdata across the given class_type and values. Alternatively, can use pre-calculated DE data (see pdata.de() dataframe for example input).
 
     Parameters:
     ax (matplotlib.axes.Axes): The axes on which to plot.
     pdata (scviz.pAnnData): The input pdata object.
-    class_type (str): The class type to use for the comparison.
+    classes (str): The class type to use for the comparison.
     values (list): The values to compare.
-    on (str, optional): The data to use for the comparison. Defaults to 'protein'.
     method (str, optional): The method to use for the comparison. Defaults to 'ttest'.
     label (int or list): The genes to highlight. If an int, the top and bottom n genes are shown. If a list, only those genes are shown. Can also accept list with 2 numbers to show top and bottom n genes [top, bottom]. If none, no labels will be plotted.
-    color (dict, optional): A dictionary mapping significance to colors. Defaults to {'not significant': 'grey', 'upregulated': 'red', 'downregulated': 'blue'}.
+    label_type (str, optional): The type of label to use. Defaults to 'Gene'. Can also be 'Accession' or 'Description'.
+    color (dict, optional): A dictionary mapping significance to colors. Defaults to {'not significant': 'grey', 'enriched': 'red', 'downregulated': 'blue'}.
     alpha (float, optional): The alpha value for the scatter plot. Defaults to 0.5.
     pval (float, optional): The p-value threshold for significance. Defaults to 0.05.
     log2fc (float, optional): The log2 fold change threshold for significance. Defaults to 1.
@@ -504,8 +504,8 @@ def plot_volcano(ax, pdata = None, class_type = None, values = None, on = 'prote
     >>> ax, volcano_df = plot_volcano(ax, data, cases, log2fc=0.5, pval=0.05, alpha=0.5, fontsize=6, label=name_list);
     
     >>> # Create custom artists
-    >>> upregulated = Line2D([0], [0], marker='o', color='w', label='Upregulated', markerfacecolor='red', markersize=6)
-    >>> downregulated = Line2D([0], [0], marker='o', color='w', label='Downregulated', markerfacecolor='blue', markersize=6)
+    >>> upregulated = Line2D([0], [0], marker='o', color='w', label='Enriched', markerfacecolor='red', markersize=6)
+    >>> downregulated = Line2D([0], [0], marker='o', color='w', label='Depleted', markerfacecolor='blue', markersize=6)
     >>> no_significance = Line2D([0], [0], marker='o', color='w', label='No significance', markerfacecolor='grey', markersize=6)
 
     >>> # Add the legend
@@ -518,15 +518,17 @@ def plot_volcano(ax, pdata = None, class_type = None, values = None, on = 'prote
     if de_data is not None:
         volcano_df = de_data
     else:
-        if class_type is None or values is None:
-            raise ValueError("If pdata is provided, class_type and values must also be provided.")
-        volcano_df = pdata.de(class_type, values, on = on, method = method, pval = pval, log2fc = log2fc)
+        if classes is None or values is None:
+            raise ValueError("If pdata is provided, classes and values must also be provided.")
+        volcano_df = pdata.de(classes, values, method = method, pval = pval, log2fc = log2fc)
     
     volcano_df = volcano_df.dropna(subset=['p_value'])
     
     default_color = {'not significant': 'grey', 'upregulated': 'red', 'downregulated': 'blue'}
     if color:
         default_color.update(color)
+    elif no_marks:
+        default_color = {'not significant': 'grey', 'upregulated': 'grey', 'downregulated': 'grey'}
 
     ax.scatter(volcano_df['log2fc'], volcano_df['-log10(p_value)'], c=volcano_df['significance'].map(default_color), alpha=alpha)
     ax.axhline(-np.log10(pval), color='black', linestyle='--', linewidth=linewidth)
@@ -538,7 +540,7 @@ def plot_volcano(ax, pdata = None, class_type = None, values = None, on = 'prote
     max_abs_log2fc = np.max(np.abs(volcano_df['log2fc'])) + 0.5
     ax.set_xlim(-max_abs_log2fc, max_abs_log2fc)
 
-    if label is None or label == 0 or label == [0,0]:
+    if no_marks or label is None or label == 0 or label == [0,0]:
         pass
     else:
         if isinstance(label, int):
@@ -565,9 +567,14 @@ def plot_volcano(ax, pdata = None, class_type = None, values = None, on = 'prote
 
         texts = []
         for i in range(len(label_df)):
+            if label_type == 'Gene':
+                text_label = label_df.iloc[i]['Genes']
+            else:
+                text_label = label_df.index[i]
+
             txt = plt.text(x = label_df.iloc[i]['log2fc'],
                                 y = label_df.iloc[i]['-log10(p_value)'],
-                                s = label_df.index[i],
+                                s = text_label,
                                 fontsize = fontsize,
                                 weight = 'bold', bbox=dict(facecolor='white', edgecolor='black', boxstyle='round'))
             
@@ -575,10 +582,13 @@ def plot_volcano(ax, pdata = None, class_type = None, values = None, on = 'prote
             texts.append(txt)
         adjust_text(texts, expand=(2, 2), arrowprops = dict(arrowstyle = '->', color = 'k', zorder = 5))
 
-    return ax
+    if return_df:
+        return ax, volcano_df
+    else:
+        return ax
 
 # double check
-def mark_volcano(ax, volcano_df, label, label_color="black", s=10, alpha=1, show_names=True, fontsize=8):
+def mark_volcano(ax, volcano_df, label, label_color="black", label_type='Gene', s=10, alpha=1, show_names=True, fontsize=8):
     """
     Mark the volcano plot with specific proteins.
 
@@ -617,9 +627,13 @@ def mark_volcano(ax, volcano_df, label, label_color="black", s=10, alpha=1, show
             if show_names:
                 texts = []
                 for j in range(len(label_df)):
-                    txt = plt.text(x = label_df.iloc[j]['log2fc']+1,
-                                        y = label_df.iloc[j]['-log10(p_value)']+1,
-                                        s = label_df.index[j],
+                    if label_type == 'Gene':
+                        text_label = label_df.iloc[j]['Genes']
+                    else:
+                        text_label = label_df.index[j]
+                    txt = plt.text(x = label_df.iloc[j]['log2fc'],
+                                        y = label_df.iloc[j]['-log10(p_value)'],
+                                        s = text_label,
                                         fontsize = fontsize,
                                         color = label_color[i],
                                         weight = 'bold', bbox=dict(facecolor='white', edgecolor=label_color[i], boxstyle='round'))
@@ -634,9 +648,13 @@ def mark_volcano(ax, volcano_df, label, label_color="black", s=10, alpha=1, show
         if show_names:
             texts = []
             for i in range(len(label_df)):
-                txt = plt.text(x = label_df.iloc[i]['log2fc']+1,
-                                    y = label_df.iloc[i]['-log10(p_value)']+1,
-                                    s = label_df.index[i],
+                if label_type == 'Gene':
+                    text_label = label_df.iloc[i]['Genes']
+                else:
+                    text_label = label_df.index[i]
+                txt = plt.text(x = label_df.iloc[i]['log2fc'],
+                                    y = label_df.iloc[i]['-log10(p_value)'],
+                                    s = text_label,
                                     fontsize = fontsize,
                                     color = label_color,
                                     weight = 'bold', bbox=dict(facecolor='white', edgecolor=label_color, boxstyle='round'))
@@ -737,8 +755,10 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
 
     return ax
 
-def mark_rankquant(plot, pdata, names, class_values, layer = "X", on = 'protein', color='red', s=10,alpha=1,show_names=True, name_type='accession'):
+def mark_rankquant(plot, pdata, mark_df, class_values, layer = "X", on = 'protein', color='red', s=10,alpha=1, show_label=True, label_type='accession'):
     adata = utils.get_adata(pdata, on)
+    names = mark_df['Entry'].tolist()
+    
     # TEST: check if names are in the data
     pdata._check_rankcol(on, class_values)
 
@@ -752,11 +772,11 @@ def mark_rankquant(plot, pdata, names, class_values, layer = "X", on = 'protein'
             except Exception as e:
                 print(f"Name {txt} not found in {on}.var. Check {on} name for spelling errors and whether it is in data.")
                 continue
-            if show_names:
-                if name_type == 'accession':
+            if show_label:
+                if label_type == 'accession':
                     pass
-                elif name_type == 'gene':
-                    txt = adata.var['Gene'].loc[txt]
+                elif label_type == 'gene':
+                    txt = mark_df.loc[mark_df['Entry'] == txt, 'Gene Names'].values[0]
                 # elif name_type == 'name':
 
                 plot.annotate(txt, (y,x), xytext=(y+10,x*1.1), fontsize=8)
@@ -1001,8 +1021,9 @@ def plot_raincloud(ax,pdata,classes = None, layer = 'X', on = 'protein', order =
 
     return ax
 
-def mark_raincloud(plot,pdata,names,class_values,layer = "X", on = 'protein',lowest_index=0,color='red',s=10,alpha=1,show_names=True):
+def mark_raincloud(plot,pdata,mark_df,class_values,layer = "X", on = 'protein',lowest_index=0,color='red',s=10,alpha=1):
     adata = utils.get_adata(pdata, on)
+    names = mark_df['Entry'].tolist()
     # TEST: check if names are in the data
     pdata._check_rankcol(on, class_values)
 
