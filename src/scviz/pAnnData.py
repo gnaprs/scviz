@@ -1,3 +1,4 @@
+from re import A
 import pandas as pd
 import anndata as ad
 import numpy as np
@@ -536,83 +537,65 @@ class pAnnData:
 
         self._history.append(f"{on}: Ranked {layer} data. Ranking, average and stdev stored in var.")
 
-    # TODO: add ability to impute within class (provide variable(s) for grouping, etc.) [See ColumnTransformer in sklearn]
-    # TODO: add imputation for minimum [https://github.com/scikit-learn/scikit-learn/issues/19783]
-    # https://towardsdatascience.com/improve-your-data-preprocessing-with-columntransformer-and-pipelines-b6ff7edd2f77
-    def impute(self, classes = None, layer = "X", method = 'median', on = 'protein', **kwargs):
-        # uses scikit-learn imputers
+    def impute(self, classes = None, layer = "X", method = 'min', on = 'protein', **kwargs):
+        '''Function for imputation, imputes data across samples and stores it in the pdata layer X_impute_method.
+        Unfortunately, the imputers in scikit-learn only impute columns, not rows, which means ColumnTransformer+SimpleImputers won't work.
+        KNN to be implemented later.
+
+        Args:
+            classes (list): List of classes to impute.
+            layer (str): Layer to impute.
+            method (str): Imputation method.
+            on (str): 'protein' or 'peptide'.
+        '''
         if not self._check_data(on):
             pass
 
-        # default imputer settings
-        missing_values = kwargs.pop('missing_values', np.nan)
-        n_neighbors = kwargs.pop('n_neighbors', 2)
-        weights = kwargs.pop('weights', "uniform")
+        adata = self.prot if on == 'protein' else self.pep
+        if layer != "X" and layer not in adata.layers:
+            raise ValueError(f"Layer {layer} not found in .{on}.")
 
-        imputers = {
-            'median': lambda: FunctionTransformer(lambda X: SimpleImputer(missing_values=missing_values, strategy='median', keep_empty_features=True, **kwargs).fit_transform(X.T).T),
-            'mean': lambda: FunctionTransformer(lambda X: SimpleImputer(missing_values=missing_values, strategy='mean', keep_empty_features=True, **kwargs).fit_transform(X.T).T),
-            'knn': lambda: FunctionTransformer(lambda X: KNNImputer(n_neighbors=n_neighbors, weights=weights, keep_empty_features=True, **kwargs).fit_transform(X.T).T)
+        impute_funcs = {
+            'mean': np.nanmean,
+            'median': np.nanmedian,
+            'min': np.nanmin
         }
 
-        if method in imputers:
-            imputer = imputers[method]()
-            layer_name = 'X_impute_' + method
-
-            if on == 'protein':
-                self._impute_helper(self.prot, on, classes, layer, method, layer_name, imputer)
-            else:
-                self._impute_helper(self.pep, on, classes, layer, method, layer_name, imputer)
-        else:
+        if method not in impute_funcs:
             raise ValueError(f"Unknown method: {method}")
         
-    def _impute_helper(self, data, on, classes, layer, method, layer_name, imputer):
-        '''Helper function for impute, imputes data and stores it in the AnnData object.
+        impute_func = impute_funcs.get(method)
+        impute_data = adata.layers[layer] if layer != "X" else adata.X
+        layer_name = 'X_impute_' + method
+        was_sparse = sparse.issparse(impute_data)
 
-        Args:
-            data (AnnData): AnnData object to impute.
-            layer (str): Layer to impute.
-            method (str): Imputation method.
-            layer_name (str): Name of the new layer to store imputed data.
-            imputer (object): Imputer object.
-        '''
-        if layer != "X" and layer not in data.layers:
-            raise ValueError(f"Layer {layer} not found in data.")
+        if was_sparse:
+            impute_data = impute_data.toarray()
 
         if classes is None:
-            final_imputer = imputer
-            print(final_imputer)
+            # manually calculate mean/min/median across rows, ignoring NaNs, and then fill NaNs with mean
+            impute_data[np.isnan(impute_data)] = np.take(impute_func(impute_data, axis=0), np.where(np.isnan(impute_data))[1])
+
             print(f"Imputed data across all samples using {method}. New data stored in `{layer_name}`.")
             self._history.append(f"{on}: Imputed layer {layer} using {method}. Imputed data stored in `{layer_name}`.")
 
         else:
-            sample_names = utils.get_samplenames(data, classes)
+            sample_names = utils.get_samplenames(adata, classes)
             unique_identifiers = list(set(sample_names))
             indices_dict = {identifier: [i for i, sample in enumerate(sample_names) if sample == identifier] for identifier in unique_identifiers}
 
-            transformers = []
             for identifier, indices in indices_dict.items():
-                transformers.append((identifier, imputer, indices))
-
-            final_imputer = ColumnTransformer(
-                transformers, 
-                remainder='passthrough'
-            )
+                subset_data = impute_data[indices,:]
+                subset_data[np.isnan(subset_data)] = np.take(impute_func(subset_data, axis=0), np.where(np.isnan(subset_data))[1])
+                impute_data[indices,:] = subset_data
 
             print(f"{on}: Imputed based on class(es): {classes} - {unique_identifiers} using {method}")
             self._history.append(f"{on}: Imputed layer {layer} based on class(es): {classes} - {unique_identifiers} using {method}. Imputed data stored in `{layer_name}`.")
 
-        # tranpose data because SimpleImputer works on columns (and we're imputing sample rows)
-        if method == 'knn':
-            if layer == "X":
-                data.layers[layer_name] = sparse.csr_matrix(final_imputer.fit_transform(data.X.toarray()))
-            else:
-                data.layers[layer_name] = sparse.csr_matrix(final_imputer.fit_transform(data.layers[layer].toarray()))
+        if was_sparse:
+            adata.layers[layer_name] = sparse.csr_matrix(impute_data)
         else:
-            if layer == "X":
-                data.layers[layer_name] = final_imputer.fit_transform(data.X)
-            else:
-                data.layers[layer_name] = final_imputer.fit_transform(data.layers[layer])
+            adata.layers[layer_name] = impute_data
 
     def neighbor(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.pp.neighbors
