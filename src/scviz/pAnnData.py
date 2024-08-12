@@ -8,7 +8,8 @@ import warnings
 
 from scipy import sparse
 from scipy.stats import variation, ttest_ind, mannwhitneyu, wilcoxon
-from sklearn.preprocessing import MultiLabelBinarizer, normalize
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import MultiLabelBinarizer, normalize, FunctionTransformer
 from sklearn.decomposition import PCA
 from sklearn.impute import SimpleImputer, KNNImputer
 
@@ -538,7 +539,7 @@ class pAnnData:
     # TODO: add ability to impute within class (provide variable(s) for grouping, etc.) [See ColumnTransformer in sklearn]
     # TODO: add imputation for minimum [https://github.com/scikit-learn/scikit-learn/issues/19783]
     # https://towardsdatascience.com/improve-your-data-preprocessing-with-columntransformer-and-pipelines-b6ff7edd2f77
-    def impute(self, layer = "X_raw", method = 'median', on = 'protein', **kwargs):
+    def impute(self, classes = None, layer = "X", method = 'median', on = 'protein', **kwargs):
         # uses scikit-learn imputers
         if not self._check_data(on):
             pass
@@ -549,26 +550,23 @@ class pAnnData:
         weights = kwargs.pop('weights', "uniform")
 
         imputers = {
-            'median': lambda: SimpleImputer(missing_values=missing_values, strategy='median', keep_empty_features = True, **kwargs),
-            'mean': lambda: SimpleImputer(missing_values=missing_values, strategy='mean', keep_empty_features = True, **kwargs),
-            'knn': lambda: KNNImputer(n_neighbors=n_neighbors, weights=weights, keep_empty_features = True, **kwargs)
+            'median': lambda: FunctionTransformer(lambda X: SimpleImputer(missing_values=missing_values, strategy='median', keep_empty_features=True, **kwargs).fit_transform(X.T).T),
+            'mean': lambda: FunctionTransformer(lambda X: SimpleImputer(missing_values=missing_values, strategy='mean', keep_empty_features=True, **kwargs).fit_transform(X.T).T),
+            'knn': lambda: FunctionTransformer(lambda X: KNNImputer(n_neighbors=n_neighbors, weights=weights, keep_empty_features=True, **kwargs).fit_transform(X.T).T)
         }
-
 
         if method in imputers:
             imputer = imputers[method]()
             layer_name = 'X_impute_' + method
 
             if on == 'protein':
-                self._impute_helper(self.prot, layer, method, layer_name, imputer)
+                self._impute_helper(self.prot, on, classes, layer, method, layer_name, imputer)
             else:
-                self._impute_helper(self.prot, layer, method, layer_name, imputer)
+                self._impute_helper(self.pep, on, classes, layer, method, layer_name, imputer)
         else:
             raise ValueError(f"Unknown method: {method}")
         
-        self._history.append(f"{on}: Imputed {layer} data using {method}. Imputed data stored in `{layer_name}`.")
-
-    def _impute_helper(self, data, layer, method, layer_name, imputer):
+    def _impute_helper(self, data, on, classes, layer, method, layer_name, imputer):
         '''Helper function for impute, imputes data and stores it in the AnnData object.
 
         Args:
@@ -581,18 +579,40 @@ class pAnnData:
         if layer != "X" and layer not in data.layers:
             raise ValueError(f"Layer {layer} not found in data.")
 
+        if classes is None:
+            final_imputer = imputer
+            print(final_imputer)
+            print(f"Imputed data across all samples using {method}. New data stored in `{layer_name}`.")
+            self._history.append(f"{on}: Imputed layer {layer} using {method}. Imputed data stored in `{layer_name}`.")
+
+        else:
+            sample_names = utils.get_samplenames(data, classes)
+            unique_identifiers = list(set(sample_names))
+            indices_dict = {identifier: [i for i, sample in enumerate(sample_names) if sample == identifier] for identifier in unique_identifiers}
+
+            transformers = []
+            for identifier, indices in indices_dict.items():
+                transformers.append((identifier, imputer, indices))
+
+            final_imputer = ColumnTransformer(
+                transformers, 
+                remainder='passthrough'
+            )
+
+            print(f"{on}: Imputed based on class(es): {classes} - {unique_identifiers} using {method}")
+            self._history.append(f"{on}: Imputed layer {layer} based on class(es): {classes} - {unique_identifiers} using {method}. Imputed data stored in `{layer_name}`.")
+
+        # tranpose data because SimpleImputer works on columns (and we're imputing sample rows)
         if method == 'knn':
             if layer == "X":
-                data.layers[layer_name] = sparse.csr_matrix(imputer.fit_transform(data.X.toarray()))
+                data.layers[layer_name] = sparse.csr_matrix(final_imputer.fit_transform(data.X.toarray()))
             else:
-                data.layers[layer_name] = sparse.csr_matrix(imputer.fit_transform(data.layers[layer].toarray()))
+                data.layers[layer_name] = sparse.csr_matrix(final_imputer.fit_transform(data.layers[layer].toarray()))
         else:
             if layer == "X":
-                data.layers[layer_name] = imputer.fit_transform(data.X)
+                data.layers[layer_name] = final_imputer.fit_transform(data.X)
             else:
-                data.layers[layer_name] = imputer.fit_transform(data.layers[layer])
-
-        print(f"Imputed data using {method}. New data stored in `{layer_name}`.")
+                data.layers[layer_name] = final_imputer.fit_transform(data.layers[layer])
 
     def neighbor(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.pp.neighbors
@@ -618,6 +638,31 @@ class pAnnData:
 
         self._append_history(f'{on}: Neighbors fitted on {layer}, stored in obs["distances"] and obs["connectivities"]')
         print(f'{on}: Neighbors fitted on {layer} and and stored in obs["distances"] and obs["connectivities"]')
+
+    def leiden(self, on = 'protein', layer = "X", **kwargs):
+        # uses sc.tl.leiden with default resolution of 0.25
+        if not self._check_data(on):
+            pass
+
+        if on == 'protein':
+            adata = self.prot
+        elif on == 'peptide':
+            adata = self.pep
+
+        if 'neighbors' not in adata.uns:
+            print("Neighbors not found in AnnData object. Running neighbors with default settings.")
+            self.neighbor(on = on, layer = layer)
+
+        if layer == "X":
+            # do nothing
+            pass
+        elif layer in adata.layers.keys():
+            self.set_X(layer = layer, on = on)
+
+        sc.tl.leiden(adata, **kwargs)
+
+        self._append_history(f'{on}: Leiden clustering fitted on {layer}, stored in obs["leiden"]')
+        print(f'{on}: Leiden clustering fitted on {layer} and and stored in obs["leiden"]')
 
     def umap(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.tl.umap
@@ -684,8 +729,8 @@ class pAnnData:
         self._append_history(f'{on}: PCA fitted on {layer}, stored in obsm["X_pca"] and varm["PCs"]')
         print(f'{on}: PCA fitted on {layer} and and stored in layers["X_pca"] and uns["pca"]')
 
-    def missingvalues(self, on = 'protein', limit = 0.5):
-        # removes columns (proteins and peptides) with > 0.5 missing values across all samples
+    def nanmissingvalues(self, on = 'protein', limit = 0.5):
+        # sets columns (proteins and peptides) with > 0.5 missing values to NaN across all samples
         if not self._check_data(on):
             pass
 
@@ -696,10 +741,8 @@ class pAnnData:
             adata = self.pep
 
         missing_proportion = np.isnan(adata.X.toarray()).mean(axis=0)
-        columns_to_keep = missing_proportion <= limit
-
-        # Filter the data to keep only the desired columns
-        adata = adata[:, columns_to_keep]
+        columns_to_nan = missing_proportion > limit
+        adata.X[:, columns_to_nan] = np.nan
 
         if on == 'protein':
             self.prot = adata
@@ -707,7 +750,7 @@ class pAnnData:
             self.pep = adata
 
     # TODO: add ability to normalize within class (provide variable(s) for grouping, etc.), median normalization options
-    def normalize(self, method = 'scale', on = 'protein', set_X = True, **kwargs):  
+    def normalize(self, method = 'sum', on = 'protein', set_X = True, **kwargs):  
         if not self._check_data(on):
             pass
 
@@ -716,7 +759,7 @@ class pAnnData:
         # median
         # data = data divide by data_median * data.median.median 
 
-        if method == 'scale':
+        if method == 'sum':
             if on == 'protein':
                 row_sums = np.nansum(self.prot.X.toarray(), axis=1)
                 max_row_sum = np.max(row_sums)
