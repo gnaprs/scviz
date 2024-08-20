@@ -153,6 +153,10 @@ def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True):
     else:
         raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
+    # Common error: if classes is a list with only one element, unpack it
+    if isinstance(classes, list) and len(classes) == 1:
+        classes = classes[0]
+
     classes_list = get_classlist(adata, classes)
     upset_dict = {}
 
