@@ -1,3 +1,4 @@
+from encodings import normalize_encoding
 from re import A
 import pandas as pd
 import anndata as ad
@@ -22,6 +23,7 @@ import matplotlib.pyplot as plt
 from pandas.testing import assert_frame_equal
 
 from scviz import utils
+from scviz import setup
 
 from typing import (  # Meta  # Generic ABCs  # Generic
     TYPE_CHECKING,
@@ -187,6 +189,7 @@ class pAnnData:
             # note: missing values is 1-protein_quant
             self.prot.obs['protein_quant'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1) / self.prot.X.shape[1]
             self.prot.obs['protein_count'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1)
+            self.prot.obs['protein_abundance_sum'] = np.nansum(self.prot.X.toarray(), axis=1)
             
             if 'X_mbr' in self.prot.layers:
                 self.prot.obs['mbr_count'] = (self.prot.layers['X_mbr'] == 'Peak Found').sum(axis=1)
@@ -196,6 +199,7 @@ class pAnnData:
             # note: missing values is 1-peptide_quant
             self.pep.obs['peptide_quant'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1) / self.pep.X.shape[1]
             self.pep.obs['peptide_count'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1)
+            self.pep.obs['peptide_abundance_sum'] = np.nansum(self.pep.X.toarray(), axis=1)
 
             if 'X_mbr' in self.pep.layers:
                 self.pep.obs['mbr_count'] = (self.pep.layers['X_mbr'] == 'Peak Found').sum(axis=1)
@@ -311,8 +315,12 @@ class pAnnData:
 
             self._history.append(f"{on}: Set X to layer {layer}.")
 
+
+    # this is more of a hardcorded filter function (needs a hardcoded query), util filter function is more general soft-coded filter function
+    # maybe call this filter_query, and leave the other as filter
+    # TODO: in docs, show how both functions can be used for the same filtering task
     def filter(self, condition = None, return_copy = True, file_list = None):
-        # docstring
+        # TODO: add docstring, add example of file_list usage
         # example usage: pdata.filter("protein_count > 1000")
         if not self._has_data():
             pass
@@ -403,7 +411,6 @@ class pAnnData:
 
         self._history.append(f"{on}: Coefficient of Variation (CV) calculated for {layer} data by {classes}. E.g. CV stored in var['CV: {class_value}'].")
 
-    # !TODO: implement chi2 and fisher tests, consider also adding correlation tests
     # FC method: specify mean, prot pairwise median, or pep pairwise median
     # TODO: implement layer support
     def de(self, class_type, values, method = 'ttest', layer = "X", pval=0.05, log2fc=1):
@@ -537,7 +544,7 @@ class pAnnData:
 
         self._history.append(f"{on}: Ranked {layer} data. Ranking, average and stdev stored in var.")
 
-    def impute(self, classes = None, layer = "X", method = 'min', on = 'protein', **kwargs):
+    def impute(self, classes = None, layer = "X", method = 'min', on = 'protein', set_X = True, **kwargs):
         '''Function for imputation, imputes data across samples and stores it in the pdata layer X_impute_method.
         Unfortunately, the imputers in scikit-learn only impute columns, not rows, which means ColumnTransformer+SimpleImputers won't work.
         KNN to be implemented later.
@@ -573,7 +580,6 @@ class pAnnData:
             impute_data = impute_data.toarray()
 
         if classes is None:
-            # manually calculate mean/min/median across rows, ignoring NaNs, and then fill NaNs with mean
             impute_data[np.isnan(impute_data)] = np.take(impute_func(impute_data, axis=0), np.where(np.isnan(impute_data))[1])
 
             print(f"Imputed data across all samples using {method}. New data stored in `{layer_name}`.")
@@ -589,13 +595,16 @@ class pAnnData:
                 subset_data[np.isnan(subset_data)] = np.take(impute_func(subset_data, axis=0), np.where(np.isnan(subset_data))[1])
                 impute_data[indices,:] = subset_data
 
-            print(f"{on}: Imputed based on class(es): {classes} - {unique_identifiers} using {method}")
+            print(f"{on}: Imputed based on class(es): {classes} - {unique_identifiers} using {method}. New data stored in `{layer_name}`.")
             self._history.append(f"{on}: Imputed layer {layer} based on class(es): {classes} - {unique_identifiers} using {method}. Imputed data stored in `{layer_name}`.")
 
         if was_sparse:
             adata.layers[layer_name] = sparse.csr_matrix(impute_data)
         else:
             adata.layers[layer_name] = impute_data
+
+        if set_X:
+            self.set_X(layer = layer_name, on = on)
 
     def neighbor(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.pp.neighbors
@@ -732,51 +741,85 @@ class pAnnData:
         elif on == 'peptide':
             self.pep = adata
 
-    # TODO: add ability to normalize within class (provide variable(s) for grouping, etc.), median normalization options
-    def normalize(self, method = 'sum', on = 'protein', set_X = True, **kwargs):  
+    def normalize(self, classes = None, layer = "X", method = 'sum', on = 'protein', set_X = True, **kwargs):  
         if not self._check_data(on):
             pass
 
-        EPSILON = 1e-10  # small constant
+        adata = self.prot if on == 'protein' else self.pep
+        if layer != "X" and layer not in adata.layers:
+            raise ValueError(f"Layer {layer} not found in .{on}.")
 
-        # median
-        # data = data divide by data_median * data.median.median 
+        normalize_funcs = ['sum', 'median', 'mean', 'max', 'reference_feature', 'robust_scale', 'quantile_transform']
 
-        if method == 'sum':
-            if on == 'protein':
-                row_sums = np.nansum(self.prot.X.toarray(), axis=1)
-                max_row_sum = np.max(row_sums)
-                self.prot.layers['X_scale'] = sparse.csr_matrix(self.prot.X.toarray() / (row_sums[:, np.newaxis] + EPSILON) * max_row_sum)
-                print(f"Normalized {on} data using {method}.")
-            else:
-                row_sums = np.nansum(self.pep.X.toarray(), axis=1)
-                max_row_sum = np.max(row_sums)
-                self.pep.layers['X_scale'] = sparse.csr_matrix(self.pep.X.toarray() / (row_sums[:, np.newaxis] + EPSILON) * max_row_sum)
-                print(f"Normalized {on} data using {method}.")
-        elif method == "l2":
-            if on == 'protein':
-                self.prot.layers['X_l2'] = normalize(self.prot.X.toarray(), norm='l2')
-                print(f"Normalized {on} data using {method}.")
-            else:
-                self.pep.layers['X_l2'] = normalize(self.pep.X.toarray(), norm='l2')
-                print(f"Normalized {on} data using {method}.")
-        elif method == 'log2':
-            if on == 'protein':
-                self.prot.layers['X_log2'] = sparse.csr_matrix(np.log2(self.prot.layers['X_raw'].toarray() + 1))
-                print(f"Normalized {on} data using {method}.")
-            else:
-                self.pep.layers['X_log2'] = sparse.csr_matrix(np.log2(self.pep.layers['X_raw'].toarray() + 1))
-                print(f"Normalized {on} data using {method}.")
-        else:
+        if method not in normalize_funcs:
             raise ValueError(f"Unknown method: {method}")
+        
+        normalize_data = adata.layers[layer] if layer != "X" else adata.X
+        layer_name = 'X_norm_' + method
+        was_sparse = sparse.issparse(normalize_data)
+
+        if was_sparse:
+            normalize_data = normalize_data.toarray()
+
+        if classes is None:
+            normalize_data = _normalize_helper(normalize_data, method, **kwargs)
+            
+            print(f"Normalized data across all samples using {method}. New data stored in `{layer_name}`.")
+            self._history.append(f"{on}: Normalized layer {layer} using {method}. Imputed data stored in `{layer_name}`.")
                   
-        self._history.append(f"{on}: Normalized X_raw data using {method} and stored as layers[X_{method}].")
+        if was_sparse:
+            adata.layers[layer_name] = sparse.csr_matrix(normalize_data)
+        else:
+            adata.layers[layer_name] = normalize_data
+
         if set_X:
-            layer_name = 'X_' + method
             self.set_X(layer = layer_name, on = on)
 
+def _normalize_helper(data, method, **kwargs):
+    if method == 'sum':
+        # norm by sum: scale each row s.t. sum of each row is the same as the max sum
+        data_norm = data * (np.nansum(data, axis=1).max() / (np.nansum(data, axis=1)))[:, None]
 
-def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = None):
+    elif method == 'median':
+        # norm by median: scale each row s.t. median of each row is the same as the max median
+        data_norm = data * (np.nanmedian(data, axis=1).max() / (np.nanmedian(data, axis=1)))[:, None]
+
+    elif method == 'mean':
+        # norm by mean: scale each row s.t. mean of each row is the same as the max mean
+        data_norm = data * (np.nanmean(data, axis=1).max() / (np.nanmean(data, axis=1)))[:, None]
+
+    elif method == 'max':
+        # norm by max: scale each row s.t. max value of each row is the same as the max value
+        data_norm = data * (np.nanmax(data, axis=1).max() / (np.nanmax(data, axis=1)))[:, None]
+
+    elif method == 'reference_feature':
+        # norm by reference feature: scale each row s.t. the reference column is the same across all rows (scale to max value of reference column)
+        reference_columns = kwargs.get('reference_columns', [2])
+        scaling_factors = np.nanmean(np.nanmax(data[:, reference_columns], axis=0) / (data[:, reference_columns]), axis=1)
+
+        nan_rows = np.where(np.isnan(scaling_factors))[0]
+        if nan_rows.size > 0:
+            print(f"Rows ({', '.join(map(str, nan_rows))}) were normalized by mean scaling factor because reference feature was missing. Suggest imputation on reference feature by class and re-normalize.")
+
+        scaling_factors = np.where(np.isnan(scaling_factors), np.nanmean(scaling_factors), scaling_factors)
+        data_norm = data * scaling_factors[:, None]
+
+    elif method == 'robust_scale':
+        # norm by robust_scale: Center to the median and component wise scale according to the interquartile range. See sklearn.preprocessing.robust_scale for more information.
+        from sklearn.preprocessing import robust_scale
+        data_norm = robust_scale(data, axis=1)
+
+    elif method == 'quantile_transform':
+        # norm by quantile_transform: Transform features using quantiles information. See sklearn.preprocessing.quantile_transform for more information.
+        from sklearn.preprocessing import quantile_transform
+        data_norm = quantile_transform(data, axis=1)
+
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
+    return data_norm
+
+def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample']):
     if not prot_file and not pep_file:
         raise ValueError("At least one of prot_file or pep_file must be provided")
     print("--------------------------\nStarting import...\n--------------------------")
@@ -943,7 +986,11 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
 
     prot_var = report_all.loc[:, existing_prot_var_columns].drop_duplicates(subset='Master.Protein').drop(columns='Master.Protein')
     # prot_obs: sample typing from the column name
-    prot_obs = pd.DataFrame(prot_X_pivot.columns.values, columns=['Run'])['Run'].str.split('_', expand=True).rename(columns=dict(enumerate(obs_columns)))
+    if obs_columns is None:
+        num_files = len(prot_X_pivot.columns)
+        prot_obs = pd.DataFrame({'File': range(1, num_files + 1)})
+    else:
+        prot_obs = pd.DataFrame(prot_X_pivot.columns.values, columns=['Run'])['Run'].str.split('_', expand=True).rename(columns=dict(enumerate(obs_columns)))
     
     print(f"Number of files: {len(prot_obs_names)}")
     print(f"Number of proteins: {len(prot_var)}")
@@ -1018,12 +1065,14 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     pdata.prot.obs_names = list(prot_obs_names)
     pdata.prot.var_names = list(prot_var_names)
     pdata.prot.obs.columns = obs_columns if obs_columns else list(range(len(prot_obs.columns)))
+    pdata.prot.layers['X_raw'] = prot_X
 
     pdata.pep.obs = pd.DataFrame(pep_obs)
     pdata.pep.var = pd.DataFrame(pep_var)
     pdata.pep.obs_names = list(pep_obs_names)
     pdata.pep.var_names = list(pep_var_names)
     pdata.pep.obs.columns = obs_columns if obs_columns else list(range(len(pep_obs.columns)))
+    pdata.pep.layers['X_raw'] = pep_X
 
     pdata._update_summary()
     pdata._append_history(f"Imported protein data from {report_file}, using {prot_value} as protein value and {pep_value} as peptide value.")

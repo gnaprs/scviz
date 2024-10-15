@@ -217,6 +217,23 @@ def plot_summary(ax, pdata, value='protein_count', classes=None, plot_mean = Tru
 
     return ax
 
+# TODO: WAS WORKING ON THIS
+def plot_abundance(ax, pdata, namelist=None, classes=None, plot_mean = True, layer = 'X', on = 'protein', return_df = False, **kwargs):
+    """
+    Plot the abundance of proteins across different cases.
+
+    Parameters:
+    ax (matplotlib.axes.Axes): The axis on which to plot.
+    pdata (scviz.pAnnData): The input pdata object.
+    namelist (list of str): The list of proteins to plot. If None, all proteins are plotted.
+    classes (str): The class type to use
+
+    Returns:
+    matplotlib.axes.Axes: The axis with the plotted data.
+    """
+
+
+
 # add function to label file name?
 # TODO: implement like pl.umap (sc.pl.umap(pdata.prot, color = ['P62258-1','P12814-1','Q13509', 'type'])) to return list of ax?
 # TODO: if protein_group, then use cbar and cmap to color by protein abundance
@@ -467,7 +484,6 @@ def plot_heatmap(ax, heatmap_data, cmap=cm.get_cmap('seismic'), norm_values=[4,5
 
     return ax
 
-# double check
 def plot_volcano(ax, pdata = None, classes = None, values = None, method='ttest', label=5, label_type='Gene', color=None, alpha=0.5, pval=0.05, log2fc=1, linewidth=0.5, fontsize = 8, no_marks=False, de_data = None, return_df = False):
     """
     Plot a volcano plot on the given axes. Calculates DE on pdata across the given class_type and values. Alternatively, can use pre-calculated DE data (see pdata.de() dataframe for example input).
@@ -587,7 +603,6 @@ def plot_volcano(ax, pdata = None, classes = None, values = None, method='ttest'
     else:
         return ax
 
-# double check
 def mark_volcano(ax, volcano_df, label, label_color="black", label_type='Gene', s=10, alpha=1, show_names=True, fontsize=8):
     """
     Mark the volcano plot with specific proteins.
@@ -783,17 +798,17 @@ def mark_rankquant(plot, pdata, mark_df, class_values, layer = "X", on = 'protei
             plot.scatter(y,x,marker='o',color=color,s=s, alpha=alpha)
     return plot
 
-def plot_venn(ax, pdata, classes, set_colors = 'default', **kwargs):
-    set_dict = utils.get_upset_contents(pdata, classes, upsetForm=False)
+def plot_venn(ax, pdata, classes, set_colors = 'default', return_contents = False, **kwargs):
+    upset_contents = utils.get_upset_contents(pdata, classes, upsetForm=False)
 
-    num_keys = len(set_dict)
+    num_keys = len(upset_contents)
     if set_colors == 'default':
         set_colors = get_color('colors', n=num_keys)
     elif len(set_colors) != num_keys:
         raise ValueError("The number of colors provided must match the number of sets.")
     
-    set_labels = list(set_dict.keys())
-    set_list = [set(value) for value in set_dict.values()]
+    set_labels = list(upset_contents.keys())
+    set_list = [set(value) for value in upset_contents.values()]
 
     venn_functions = {
         2: lambda: (venn2_unweighted(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, **kwargs),
@@ -807,9 +822,12 @@ def plot_venn(ax, pdata, classes, set_colors = 'default', **kwargs):
     else:
         raise ValueError("Venn diagrams only accept either 2 or 3 sets. For more than 3 sets, use the plot_upset function.")
 
-    return ax
+    if return_contents:
+        return ax, upset_contents
+    else:
+        return ax
 
-def plot_upset(pdata, classes, **kwargs):
+def plot_upset(pdata, classes, return_contents = False, **kwargs):
     # example of further styling
     # upplot.style_subsets(present=["sc"], absent=['5k','10k','20k'],facecolor="black", label="sc only")
     # upplot.style_subsets(absent=["sc"], present=['5k','10k','20k'],facecolor="red", label="in all but sc")
@@ -818,10 +836,13 @@ def plot_upset(pdata, classes, **kwargs):
     # uplot["intersections"].set_ylabel("Subset size")
     # uplot["totals"].set_xlabel("Protein count")
 
-    data_upset = utils.get_upset_contents(pdata, classes = classes)
-    upplot = upsetplot.UpSet(data_upset, subset_size="count", show_counts=True, facecolor = 'black', **kwargs)
+    upset_contents = utils.get_upset_contents(pdata, classes = classes)
+    upplot = upsetplot.UpSet(upset_contents, subset_size="count", show_counts=True, facecolor = 'black', **kwargs)
 
-    return upplot
+    if return_contents:
+        return upplot, upset_contents
+    else:
+        return upplot
 
 
 # TODO: make function work from get_abundance or get_abundance_query, actually plot the protein abundances - refer to graph from tingyu
