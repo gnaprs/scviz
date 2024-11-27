@@ -78,20 +78,21 @@ def get_color(resource_type, n=None):
     else:
         raise ValueError("Invalid resource_type. Options are 'colors', 'cmap', and 'palette'")
 
-def plot_significance(ax, x1, x2, y, h, col, pval):
+def plot_significance(ax, y, h, x1=0, x2=1, col='k', pval='n.s.', fontsize=12):
     """
     Plot significance bars on a given axis.
 
     Parameters:
     ax (matplotlib.axes.Axes): The axis on which to plot the significance bars.
-    x1 (float): The x-coordinate of the first bar.
-    x2 (float): The x-coordinate of the second bar.
     y (float): The y-coordinate of the bars.
     h (float): The height of the bars.
+    x1 (float): The x-coordinate of the first bar.
+    x2 (float): The x-coordinate of the second bar.
     col (str): The color of the bars.
     pval (float or str): The p-value used to determine the significance level of the bars.
                          If a float, it is compared against predefined thresholds to determine the significance level.
                          If a string, it is directly used as the significance level.
+    fontsize (int): The fontsize of the significance level text.
 
     Returns:
     None
@@ -108,7 +109,7 @@ def plot_significance(ax, x1, x2, y, h, col, pval):
         sig = pval
 
     ax.plot([x1, x1, x2, x2], [y, y+h, y+h, y], lw=1, c=col)
-    ax.text((x1+x2)*.5, y+h, sig, ha='center', va='bottom', color=col)
+    ax.text((x1+x2)*.5, y+h, sig, ha='center', va='bottom', color=col, fontsize=fontsize)
 
 def plot_cv(ax, pdata, classes=None, layer = 'X', on = 'protein', order = None, return_df = False, **kwargs):
     """
@@ -798,7 +799,7 @@ def mark_rankquant(plot, pdata, mark_df, class_values, layer = "X", on = 'protei
             plot.scatter(y,x,marker='o',color=color,s=s, alpha=alpha)
     return plot
 
-def plot_venn(ax, pdata, classes, set_colors = 'default', return_contents = False, **kwargs):
+def plot_venn(ax, pdata, classes, set_colors = 'default', return_contents = False, label_order=None, **kwargs):
     upset_contents = utils.get_upset_contents(pdata, classes, upsetForm=False)
 
     num_keys = len(upset_contents)
@@ -807,8 +808,14 @@ def plot_venn(ax, pdata, classes, set_colors = 'default', return_contents = Fals
     elif len(set_colors) != num_keys:
         raise ValueError("The number of colors provided must match the number of sets.")
     
-    set_labels = list(upset_contents.keys())
-    set_list = [set(value) for value in upset_contents.values()]
+    if label_order is not None:
+        if set(label_order) != set(upset_contents.keys()):
+            raise ValueError("`label_order` must contain the same elements as `classes`.")
+        set_labels = label_order
+        set_list = [set(upset_contents[label]) for label in set_labels]
+    else:
+        set_labels = list(upset_contents.keys())
+        set_list = [set(value) for value in upset_contents.values()]
 
     venn_functions = {
         2: lambda: (venn2_unweighted(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, **kwargs),
@@ -1005,11 +1012,14 @@ def plot_raincloud(ax,pdata,classes = None, layer = 'X', on = 'protein', order =
         for i in range(nsample):
             X[i*nprot:(i+1)*nprot] = plot_df.iloc[:, i].values
 
-        X = X[~np.isnan(X)]
+        X = X[~np.isnan(X)] # remove NaN values
+        X = X[X != 0] # remove 0 values
         X = np.log10(X)
 
         data_X.append(X)
-        
+    
+    print('data_X shape: ', len(data_X)) if debug else None
+
     # boxplot
     bp = ax.boxplot(data_X, positions=np.arange(1,len(classes_list)+1)-0.06, widths=0.1, patch_artist = True,
                     flierprops=dict(marker='o', alpha=0.2, markersize=2, markerfacecolor=boxcolor, markeredgecolor=boxcolor),
@@ -1040,7 +1050,10 @@ def plot_raincloud(ax,pdata,classes = None, layer = 'X', on = 'protein', order =
         y = out
         ax.scatter(y, features, s=2., c=color[idx], alpha=0.5)
 
-    return ax
+    if debug:
+        return ax, data_X
+    else:
+        return ax
 
 def mark_raincloud(plot,pdata,mark_df,class_values,layer = "X", on = 'protein',lowest_index=0,color='red',s=10,alpha=1):
     adata = utils.get_adata(pdata, on)
