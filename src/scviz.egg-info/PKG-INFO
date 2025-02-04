@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: scviz
-Version: 0.1.5
+Version: 0.1.6
 Summary: A package to visualize single cell proteomics (and more to come!) data
 Author-email: Marion Pang <sr_pang@hotmail.com>
 Project-URL: Homepage, https://github.com/gnaprs/scviz
@@ -22,6 +22,7 @@ Requires-Dist: umap-learn
 Requires-Dist: adjustText
 Requires-Dist: AnnData
 Requires-Dist: requests
+Requires-Dist: matplotlib_venn
 Provides-Extra: pytest
 Requires-Dist: openpyxl; extra == "pytest"
 

@@ -78,20 +78,21 @@ def get_color(resource_type, n=None):
     else:
         raise ValueError("Invalid resource_type. Options are 'colors', 'cmap', and 'palette'")
 
-def plot_significance(ax, x1, x2, y, h, col, pval):
+def plot_significance(ax, y, h, x1=0, x2=1, col='k', pval='n.s.', fontsize=12):
     """
     Plot significance bars on a given axis.
 
     Parameters:
     ax (matplotlib.axes.Axes): The axis on which to plot the significance bars.
-    x1 (float): The x-coordinate of the first bar.
-    x2 (float): The x-coordinate of the second bar.
     y (float): The y-coordinate of the bars.
     h (float): The height of the bars.
+    x1 (float): The x-coordinate of the first bar.
+    x2 (float): The x-coordinate of the second bar.
     col (str): The color of the bars.
     pval (float or str): The p-value used to determine the significance level of the bars.
                          If a float, it is compared against predefined thresholds to determine the significance level.
                          If a string, it is directly used as the significance level.
+    fontsize (int): The fontsize of the significance level text.
 
     Returns:
     None
@@ -108,7 +109,7 @@ def plot_significance(ax, x1, x2, y, h, col, pval):
         sig = pval
 
     ax.plot([x1, x1, x2, x2], [y, y+h, y+h, y], lw=1, c=col)
-    ax.text((x1+x2)*.5, y+h, sig, ha='center', va='bottom', color=col)
+    ax.text((x1+x2)*.5, y+h, sig, ha='center', va='bottom', color=col, fontsize=fontsize)
 
 def plot_cv(ax, pdata, classes=None, layer = 'X', on = 'protein', order = None, return_df = False, **kwargs):
     """
@@ -217,17 +218,34 @@ def plot_summary(ax, pdata, value='protein_count', classes=None, plot_mean = Tru
 
     return ax
 
+# TODO: WAS WORKING ON THIS
+def plot_abundance(ax, pdata, namelist=None, classes=None, plot_mean = True, layer = 'X', on = 'protein', return_df = False, **kwargs):
+    """
+    Plot the abundance of proteins across different cases.
+
+    Parameters:
+    ax (matplotlib.axes.Axes): The axis on which to plot.
+    pdata (scviz.pAnnData): The input pdata object.
+    namelist (list of str): The list of proteins to plot. If None, all proteins are plotted.
+    classes (str): The class type to use
+
+    Returns:
+    matplotlib.axes.Axes: The axis with the plotted data.
+    """
+
+
+
 # add function to label file name?
 # TODO: implement like pl.umap (sc.pl.umap(pdata.prot, color = ['P62258-1','P12814-1','Q13509', 'type'])) to return list of ax?
 # TODO: if protein_group, then use cbar and cmap to color by protein abundance
-def plot_pca(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, plot_pc=[1,2], pca_params={}, force=False):
+def plot_pca(ax, pdata, color = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, plot_pc=[1,2], pca_params={}, force=False):
     """
     Plot PCA scatter plot.
 
     Parameters:
     - ax (matplotlib.axes.Axes): The axes on which to plot the scatter plot.
     - pdata (scviz.pAnnData): The input pdata object.
-    - color_by (list): List of classes to color by, can be single string or a list of strings.
+    - color (list): List of classes to color by, can be single string or a list of strings.
     - cmap (matplotlib.colors.Colormap, optional): The colormap to use for coloring the scatter plot. Default is 'default', using the scviz plotting default color scheme get_color().
     - s (float, optional): The marker size. Default is 20.
     - alpha (float, optional): The marker transparency. Default is 0.8.
@@ -286,7 +304,7 @@ def plot_pca(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='defa
 
     # TODO: Fix
     # GREY COLOR (color is None)
-    if color_by == None:
+    if color == None:
         color_mapped = ['grey' for i in range(len(X_pca)[0])]
         cmap = 'Greys'
         legend_elements = [mpatches.Patch(color='grey', label='All samples') for i in range(len(X_pca)[0])]
@@ -294,12 +312,12 @@ def plot_pca(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='defa
 
     # TODO: Fix
     # CONTINUOUS COLOR (color is a protein in adata.var_names)
-    if color_by in adata.var_names:
+    if color in adata.var_names:
         pass
 
     # CATEGORICAL COLOR (color is a class/subclass in adata.obs.columns)
-    if color_by in adata.obs.columns:
-        y = utils.get_samplenames(adata, color_by)
+    if color in adata.obs.columns:
+        y = utils.get_samplenames(adata, color)
 
         if cmap == 'default':
             unique_classes = len(set(y))
@@ -315,7 +333,7 @@ def plot_pca(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='defa
             norm = mcolors.Normalize(vmin=min(color_mapped), vmax=max(color_mapped))
             legend_elements = [mpatches.Patch(color=cmap(norm(color_dict[key])), label=key) for key in color_dict]
 
-    # FIX for list of strings (combined color_by)
+    # FIX for list of strings (combined color)
 
     if len(plot_pc) == 2:
         ax.scatter(X_pca[:,pc_x], X_pca[:,pc_y], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
@@ -329,19 +347,19 @@ def plot_pca(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='defa
         ax.set_zlabel('PC'+str(pc_z+1)+' ('+str(round(pca['variance_ratio'][pc_z]*100,2))+'%)')
 
     # legend
-    ax.legend(handles=legend_elements, title = color_by, loc='upper right', bbox_to_anchor=(1.35, 1), frameon=False)
+    ax.legend(handles=legend_elements, title = color, loc='upper right', bbox_to_anchor=(1.35, 1), frameon=False)
 
     return ax, pca
 
 # TODO
-def plot_umap(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False):
+def plot_umap(ax, pdata, color = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False):
     """
     This function plots the Uniform Manifold Approximation and Projection (UMAP) of the protein data.
 
     Parameters:
         ax (matplotlib.axes.Axes): The axes to plot on.
         data (pandas.DataFrame): The protein data to plot.
-        color_by (str): The column in the data to color by.
+        color (str): The column in the data to color by.
         cmap (matplotlib.colors.Colormap, optional): The colormap to use for the plot. Defaults to 'viridis'.
         s (int, optional): The size of the points in the plot. Defaults to 20.
         alpha (float, optional): The transparency of the points in the plot. Defaults to 0.8.
@@ -381,7 +399,7 @@ def plot_umap(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='def
     Xt = adata.obsm['X_umap']
     umap = adata.uns['umap']
 
-    y = utils.get_samplenames(adata, color_by)
+    y = utils.get_samplenames(adata, color)
     color_dict = {class_type: i for i, class_type in enumerate(set(y))}
     color_mapped = [color_dict[val] for val in y]
     if cmap == 'default':  
@@ -405,7 +423,7 @@ def plot_umap(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='def
 
     # legend
     legend_elements = [mpatches.Patch(color=cmap(norm(color_dict[key])), label=key) for key in color_dict]
-    ax.legend(handles=legend_elements, title = color_by, loc='upper right', bbox_to_anchor=(1.3, 1), fontsize=text_size)
+    ax.legend(handles=legend_elements, title = color, loc='upper right', bbox_to_anchor=(1.3, 1), fontsize=text_size)
 
     return ax, umap
 
@@ -467,7 +485,6 @@ def plot_heatmap(ax, heatmap_data, cmap=cm.get_cmap('seismic'), norm_values=[4,5
 
     return ax
 
-# double check
 def plot_volcano(ax, pdata = None, classes = None, values = None, method='ttest', label=5, label_type='Gene', color=None, alpha=0.5, pval=0.05, log2fc=1, linewidth=0.5, fontsize = 8, no_marks=False, de_data = None, return_df = False):
     """
     Plot a volcano plot on the given axes. Calculates DE on pdata across the given class_type and values. Alternatively, can use pre-calculated DE data (see pdata.de() dataframe for example input).
@@ -587,7 +604,6 @@ def plot_volcano(ax, pdata = None, classes = None, values = None, method='ttest'
     else:
         return ax
 
-# double check
 def mark_volcano(ax, volcano_df, label, label_color="black", label_type='Gene', s=10, alpha=1, show_names=True, fontsize=8):
     """
     Mark the volcano plot with specific proteins.
@@ -783,17 +799,23 @@ def mark_rankquant(plot, pdata, mark_df, class_values, layer = "X", on = 'protei
             plot.scatter(y,x,marker='o',color=color,s=s, alpha=alpha)
     return plot
 
-def plot_venn(ax, pdata, classes, set_colors = 'default', **kwargs):
-    set_dict = utils.get_upset_contents(pdata, classes, upsetForm=False)
+def plot_venn(ax, pdata, classes, set_colors = 'default', return_contents = False, label_order=None, **kwargs):
+    upset_contents = utils.get_upset_contents(pdata, classes, upsetForm=False)
 
-    num_keys = len(set_dict)
+    num_keys = len(upset_contents)
     if set_colors == 'default':
         set_colors = get_color('colors', n=num_keys)
     elif len(set_colors) != num_keys:
         raise ValueError("The number of colors provided must match the number of sets.")
     
-    set_labels = list(set_dict.keys())
-    set_list = [set(value) for value in set_dict.values()]
+    if label_order is not None:
+        if set(label_order) != set(upset_contents.keys()):
+            raise ValueError("`label_order` must contain the same elements as `classes`.")
+        set_labels = label_order
+        set_list = [set(upset_contents[label]) for label in set_labels]
+    else:
+        set_labels = list(upset_contents.keys())
+        set_list = [set(value) for value in upset_contents.values()]
 
     venn_functions = {
         2: lambda: (venn2_unweighted(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, **kwargs),
@@ -807,9 +829,12 @@ def plot_venn(ax, pdata, classes, set_colors = 'default', **kwargs):
     else:
         raise ValueError("Venn diagrams only accept either 2 or 3 sets. For more than 3 sets, use the plot_upset function.")
 
-    return ax
+    if return_contents:
+        return ax, upset_contents
+    else:
+        return ax
 
-def plot_upset(pdata, classes, **kwargs):
+def plot_upset(pdata, classes, return_contents = False, **kwargs):
     # example of further styling
     # upplot.style_subsets(present=["sc"], absent=['5k','10k','20k'],facecolor="black", label="sc only")
     # upplot.style_subsets(absent=["sc"], present=['5k','10k','20k'],facecolor="red", label="in all but sc")
@@ -818,10 +843,13 @@ def plot_upset(pdata, classes, **kwargs):
     # uplot["intersections"].set_ylabel("Subset size")
     # uplot["totals"].set_xlabel("Protein count")
 
-    data_upset = utils.get_upset_contents(pdata, classes = classes)
-    upplot = upsetplot.UpSet(data_upset, subset_size="count", show_counts=True, facecolor = 'black', **kwargs)
+    upset_contents = utils.get_upset_contents(pdata, classes = classes)
+    upplot = upsetplot.UpSet(upset_contents, subset_size="count", show_counts=True, facecolor = 'black', **kwargs)
 
-    return upplot
+    if return_contents:
+        return upplot, upset_contents
+    else:
+        return upplot
 
 
 # TODO: make function work from get_abundance or get_abundance_query, actually plot the protein abundances - refer to graph from tingyu
@@ -984,11 +1012,14 @@ def plot_raincloud(ax,pdata,classes = None, layer = 'X', on = 'protein', order =
         for i in range(nsample):
             X[i*nprot:(i+1)*nprot] = plot_df.iloc[:, i].values
 
-        X = X[~np.isnan(X)]
+        X = X[~np.isnan(X)] # remove NaN values
+        X = X[X != 0] # remove 0 values
         X = np.log10(X)
 
         data_X.append(X)
-        
+    
+    print('data_X shape: ', len(data_X)) if debug else None
+
     # boxplot
     bp = ax.boxplot(data_X, positions=np.arange(1,len(classes_list)+1)-0.06, widths=0.1, patch_artist = True,
                     flierprops=dict(marker='o', alpha=0.2, markersize=2, markerfacecolor=boxcolor, markeredgecolor=boxcolor),
@@ -1019,7 +1050,10 @@ def plot_raincloud(ax,pdata,classes = None, layer = 'X', on = 'protein', order =
         y = out
         ax.scatter(y, features, s=2., c=color[idx], alpha=0.5)
 
-    return ax
+    if debug:
+        return ax, data_X
+    else:
+        return ax
 
 def mark_raincloud(plot,pdata,mark_df,class_values,layer = "X", on = 'protein',lowest_index=0,color='red',s=10,alpha=1):
     adata = utils.get_adata(pdata, on)

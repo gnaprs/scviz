@@ -9,6 +9,7 @@ umap-learn
 adjustText
 AnnData
 requests
+matplotlib_venn
 
 [pytest]
 openpyxl

@@ -102,12 +102,21 @@ def get_classlist(adata, classes = None, order = None):
             raise ValueError(f"Invalid value for 'classes'. '{classes}' is not a column in adata.obs.")
         classes_list = adata.obs[classes].unique()
     elif isinstance(classes, list):
+        # check if list has length 1
+        if len(classes) == 1:
+            classes_list = adata.obs[classes[0]].unique()
         # check if all classes are columns of adata.obs
-        if not all([c in adata.obs.columns for c in classes]):
-            raise ValueError(f"Invalid value for 'classes'. Not all elements in '{classes}' are columns in adata.obs.")
-        classes_list = adata.obs[classes].apply(lambda x: '_'.join(x), axis=1).unique()
+        else:
+            if not all([c in adata.obs.columns for c in classes]):
+                raise ValueError(f"Invalid value for 'classes'. Not all elements in '{classes}' are columns in adata.obs.")
+            classes_list = adata.obs[classes].apply(lambda x: '_'.join(x), axis=1).unique()
     else:
         raise ValueError("Invalid value for 'classes'. Must be None, a string or a list of strings.")
+
+    if isinstance(classes_list, str):
+        classes_list = [classes_list]
+    if isinstance(order, str):
+        order = [order]
 
     if order is not None:
         # check if order list matches classes_list
@@ -152,6 +161,10 @@ def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True):
         adata = pdata.pep
     else:
         raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
+
+    # Common error: if classes is a list with only one element, unpack it
+    if isinstance(classes, list) and len(classes) == 1:
+        classes = classes[0]
 
     classes_list = get_classlist(adata, classes)
     upset_dict = {}
@@ -225,12 +238,23 @@ def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = F
         query = f"(adata.obs['{class_type}'] == '{values}')"
         print('DEVELOPMENT: testing for query - ', query)
     elif isinstance(class_type, list):
+        # if values is not wrapped in a list, wrap it
+        if len(values) != 1:
+            values = [values]
+            
         if exact_cases:
-            query = " | ".join([" & ".join(["(adata.obs['{}'] == '{}')".format(cls, val) for cls, val in zip(class_type, vals)]) for vals in values])
-            print('DEVELOPMENT: testing for query - ', query)
+            query = " | ".join([
+                " & ".join(["(adata.obs['{}'] == '{}')".format(cls, val) for cls, val in zip(class_type, (vals if isinstance(vals, list) else [vals]))]) for vals in values
+            ])
+            print('DEVELOPMENT: exact|testing for query - ', query)
         else:
-            query = " & ".join(["({})".format(' | '.join(["(adata.obs['{}'] == '{}')".format(cls, val) for val in vals])) for cls, vals in zip(class_type, values)])
-            print('DEVELOPMENT: testing for query - ', query)
+            # query = " & ".join([
+            #     "({})".format(' | '.join(["(adata.obs['{}'] == '{}')".format(cls, val) for val in vals])) for cls, vals in zip(class_type, values)])
+            query = " & ".join([
+                "({})".format(' | '.join(["(adata.obs['{}'] == '{}')".format(cls, val) for val in (vals if isinstance(vals, list) else [vals])])) for cls, vals in zip(class_type, values)
+            ])
+            print('DEVELOPMENT: non-exact|testing for query - ', query)
+            
     else:
         raise ValueError("Invalid input for 'class_type'. It should be None, a string, or a list of strings.")
     
@@ -251,12 +275,87 @@ def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = F
 
 # ----------------
 # EXPLORATION(?) FUNCTIONS
-def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction']):
-    """ Get data from Uniprot for a list of proteins
+def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction']):
+    """ Worker function to get data from Uniprot for a list of proteins, used by get_uniprot_fields(). Calls to UniProt REST API, and returns batch of maximum 1024 proteins at a time.
 
     Args:
         prot_list (list): list of protein IDs
         search_fields (list): list of fields to search for.
+
+        For more information, see https://www.uniprot.org/help/return_fields for list of search_fields.
+        Current function accepts accession protein list. For more queries, see https://www.uniprot.org/help/query-fields for a list of query fields that can be searched for.
+
+    Returns:
+        pandas.DataFrame: DataFrame with the results
+    """
+
+    base_url = 'https://rest.uniprot.org/uniprotkb/stream'
+    fields = "%2C".join(search_fields)
+    query_parts = ["%28accession%3A" + id + "%29" for id in prot_list]
+    query = "+OR+".join(query_parts)
+    query = "%28" + query + "%29"
+    format_type = 'tsv'
+    
+    print(f"Querying Uniprot for {len(prot_list)} proteins")
+
+    # full url
+    url = f'{base_url}?fields={fields}&format={format_type}&query={query}'
+    
+    results = requests.get(url)
+    results.raise_for_status()
+    
+    df = pd.read_csv(io.StringIO(results.text), sep='\t')
+
+    isoform_prots = set(prot_list) - set(df['Entry'])
+    if isoform_prots:
+        # print statement for missing proteins, saying will now search for isoforms
+        print(f'Searching for isoforms in unmapped accessions: {len(isoform_prots)}')
+        # these are typically isoforms, so we will try to search for them again
+        query_parts = ["%28accession%3A" + id + "%29" for id in isoform_prots]
+        query = "+OR+".join(query_parts)
+        query = "%28" + query + "%29"
+        url = f'{base_url}?fields={fields}&format={format_type}&query={query}'
+        
+        results = requests.get(url)
+        results.raise_for_status()
+        
+        isoform_df = pd.read_csv(io.StringIO(results.text), sep='\t')
+        
+        # now, let's search isoforms by entry name (id) instead
+        isoform_entrynames = isoform_df['Entry Name']
+        query_parts = ["%28id%3A" + id + "%29" for id in isoform_entrynames]
+        query = "+OR+".join(query_parts)
+        query = "%28" + query + "%29"
+        url = f'{base_url}?fields={fields}&format={format_type}&query={query}'
+
+        results = requests.get(url)
+        results.raise_for_status()
+
+        isoform_df2 = pd.read_csv(io.StringIO(results.text), sep='\t')
+        entry_mapping = {entry.split('-')[0]: (entry, protein_name) for entry, protein_name in zip(isoform_df['Entry'], isoform_df['Protein names'])}
+        isoform_df2[['Entry', 'Protein names']] = isoform_df2['Entry'].apply(lambda x: entry_mapping.get(x.split('-')[0], (x, None))).apply(pd.Series)
+        
+        df = pd.concat([df, isoform_df2], axis=0)
+        
+        # what's left is missing proteins
+        missing_prots = set(prot_list) - set(df['Entry'])
+        if missing_prots:
+            print(f"Proteins not found in uniprot database after two attempts: {missing_prots}")
+            missing_df = pd.DataFrame(missing_prots, columns=['Entry'])
+            for col in df.columns:
+                if col != 'Entry':
+                    missing_df[col] = np.nan
+            df = pd.concat([df, missing_df], axis=0)
+    
+    return df
+
+def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], batch_size=1024):
+    """ Get data from Uniprot for a list of proteins. Uses get_uniprot_fields_worker to get data in batches of batch_size.
+
+    Args:
+        prot_list (list): list of protein IDs
+        search_fields (list): list of fields to search for.
+        batch_size (int): number of proteins to search for in each batch. Default (and maximum) is 1024.
 
         For more information, see https://www.uniprot.org/help/return_fields for list of search_fields.
         Current function accepts accession protein list. For more queries, see https://www.uniprot.org/help/query-fields for a list of query fields that can be searched for.
@@ -269,24 +368,22 @@ def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_nam
         >>> df = get_uniprot_fields(uniprot_list)
     """
 
-    base_url = 'https://rest.uniprot.org/uniprotkb/stream'
-    fields = "%2C".join(search_fields)
-    query_parts = ["%28accession%3A" + id + "%29" for id in prot_list]
-    query = "+OR+".join(query_parts)
-    query = "%28" + query + "%29"
-    format_type = 'tsv'
+    # Split the id_list into batches of size batch_size
+    batches = [prot_list[i:i + batch_size] for i in range(0, len(prot_list), batch_size)]
+    # print total number and number of batches
+    print(f"Total number of proteins: {len(prot_list)}, Number of batches: {len(batches)}")
+    print(f"Fields: {search_fields}")
+    # Initialize an empty dataframe to store the results
+    full_method_df = pd.DataFrame()
     
-    print(f"Querying Uniprot for {len(prot_list)} proteins")
-    print(f"Fields: {fields}")
-
-    # full url
-    url = f'{base_url}?fields={fields}&format={format_type}&query={query}'
+    # Loop through each batch and get the uniprot fields
+    for batch in batches:
+        # print progress
+        print(f"Processing batch {batches.index(batch) + 1} of {len(batches)}")
+        batch_df = get_uniprot_fields_worker(batch, search_fields)
+        full_method_df = pd.concat([full_method_df, batch_df], ignore_index=True)
     
-    results = requests.get(url)
-    results.raise_for_status()
-    
-    df = pd.read_csv(io.StringIO(results.text), sep='\t')
-    return df
+    return full_method_df
 
 # ----------------
 # STATISTICAL TEST FUNCTIONS
