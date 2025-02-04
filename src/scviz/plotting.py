@@ -238,14 +238,14 @@ def plot_abundance(ax, pdata, namelist=None, classes=None, plot_mean = True, lay
 # add function to label file name?
 # TODO: implement like pl.umap (sc.pl.umap(pdata.prot, color = ['P62258-1','P12814-1','Q13509', 'type'])) to return list of ax?
 # TODO: if protein_group, then use cbar and cmap to color by protein abundance
-def plot_pca(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, plot_pc=[1,2], pca_params={}, force=False):
+def plot_pca(ax, pdata, color = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, plot_pc=[1,2], pca_params={}, force=False):
     """
     Plot PCA scatter plot.
 
     Parameters:
     - ax (matplotlib.axes.Axes): The axes on which to plot the scatter plot.
     - pdata (scviz.pAnnData): The input pdata object.
-    - color_by (list): List of classes to color by, can be single string or a list of strings.
+    - color (list): List of classes to color by, can be single string or a list of strings.
     - cmap (matplotlib.colors.Colormap, optional): The colormap to use for coloring the scatter plot. Default is 'default', using the scviz plotting default color scheme get_color().
     - s (float, optional): The marker size. Default is 20.
     - alpha (float, optional): The marker transparency. Default is 0.8.
@@ -304,7 +304,7 @@ def plot_pca(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='defa
 
     # TODO: Fix
     # GREY COLOR (color is None)
-    if color_by == None:
+    if color == None:
         color_mapped = ['grey' for i in range(len(X_pca)[0])]
         cmap = 'Greys'
         legend_elements = [mpatches.Patch(color='grey', label='All samples') for i in range(len(X_pca)[0])]
@@ -312,12 +312,12 @@ def plot_pca(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='defa
 
     # TODO: Fix
     # CONTINUOUS COLOR (color is a protein in adata.var_names)
-    if color_by in adata.var_names:
+    if color in adata.var_names:
         pass
 
     # CATEGORICAL COLOR (color is a class/subclass in adata.obs.columns)
-    if color_by in adata.obs.columns:
-        y = utils.get_samplenames(adata, color_by)
+    if color in adata.obs.columns:
+        y = utils.get_samplenames(adata, color)
 
         if cmap == 'default':
             unique_classes = len(set(y))
@@ -333,7 +333,7 @@ def plot_pca(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='defa
             norm = mcolors.Normalize(vmin=min(color_mapped), vmax=max(color_mapped))
             legend_elements = [mpatches.Patch(color=cmap(norm(color_dict[key])), label=key) for key in color_dict]
 
-    # FIX for list of strings (combined color_by)
+    # FIX for list of strings (combined color)
 
     if len(plot_pc) == 2:
         ax.scatter(X_pca[:,pc_x], X_pca[:,pc_y], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
@@ -347,19 +347,19 @@ def plot_pca(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='defa
         ax.set_zlabel('PC'+str(pc_z+1)+' ('+str(round(pca['variance_ratio'][pc_z]*100,2))+'%)')
 
     # legend
-    ax.legend(handles=legend_elements, title = color_by, loc='upper right', bbox_to_anchor=(1.35, 1), frameon=False)
+    ax.legend(handles=legend_elements, title = color, loc='upper right', bbox_to_anchor=(1.35, 1), frameon=False)
 
     return ax, pca
 
 # TODO
-def plot_umap(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False):
+def plot_umap(ax, pdata, color = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False):
     """
     This function plots the Uniform Manifold Approximation and Projection (UMAP) of the protein data.
 
     Parameters:
         ax (matplotlib.axes.Axes): The axes to plot on.
         data (pandas.DataFrame): The protein data to plot.
-        color_by (str): The column in the data to color by.
+        color (str): The column in the data to color by.
         cmap (matplotlib.colors.Colormap, optional): The colormap to use for the plot. Defaults to 'viridis'.
         s (int, optional): The size of the points in the plot. Defaults to 20.
         alpha (float, optional): The transparency of the points in the plot. Defaults to 0.8.
@@ -399,7 +399,7 @@ def plot_umap(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='def
     Xt = adata.obsm['X_umap']
     umap = adata.uns['umap']
 
-    y = utils.get_samplenames(adata, color_by)
+    y = utils.get_samplenames(adata, color)
     color_dict = {class_type: i for i, class_type in enumerate(set(y))}
     color_mapped = [color_dict[val] for val in y]
     if cmap == 'default':  
@@ -423,7 +423,7 @@ def plot_umap(ax, pdata, color_by = None, layer = "X", on = 'protein', cmap='def
 
     # legend
     legend_elements = [mpatches.Patch(color=cmap(norm(color_dict[key])), label=key) for key in color_dict]
-    ax.legend(handles=legend_elements, title = color_by, loc='upper right', bbox_to_anchor=(1.3, 1), fontsize=text_size)
+    ax.legend(handles=legend_elements, title = color, loc='upper right', bbox_to_anchor=(1.3, 1), fontsize=text_size)
 
     return ax, umap
 
