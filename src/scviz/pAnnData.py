@@ -953,11 +953,15 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
 
 def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Translated', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes']):
     if not report_file:
-        raise ValueError("Importing from DIA-NN: report.tsv must be provided")
+        raise ValueError("Importing from DIA-NN: report.tsv or report.parquet must be provided")
     print("--------------------------\nStarting import...\n--------------------------")
 
     print(f"Importing from {report_file}")
-    report_all = pd.read_csv(report_file, sep='\t')
+    # if csv, then use pd.read_csv, if parquet then use pd.read_parquet('example_pa.parquet', engine='pyarrow')
+    if report_file.endswith('.tsv'):
+        report_all = pd.read_csv(report_file, sep='\t')
+    elif report_file.endswith('.parquet'):
+        report_all = pd.read_parquet(report_file, engine='pyarrow')
     report_all['Master.Protein'] = report_all['Protein.Group'].str.split(';')
     report_all = report_all.explode('Master.Protein')
     # -----------------------------
