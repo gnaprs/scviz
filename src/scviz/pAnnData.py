@@ -951,7 +951,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
     print("pAnnData object created. Use `print(pdata)` to view the object.")
     return pdata
 
-def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Translated', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes']):
+def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Normalised', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes']):
     if not report_file:
         raise ValueError("Importing from DIA-NN: report.tsv or report.parquet must be provided")
     print("--------------------------\nStarting import...\n--------------------------")
@@ -968,7 +968,11 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     # PROTEIN DATA
     # prot_X: sparse data matrix
     if prot_value is not 'PG.MaxLFQ':
-        print("INFO: Protein value specified is not PG.MaxLFQ, please check if correct.")
+        if report_file.endswith('.tsv') and prot_value == 'PG.Quantity':
+            # throw an error that DIA-NN version >2.0 does not have PG.quantity
+            raise ValueError("Reports generated with DIA-NN version >2.0 do not contain PG.Quantity values, please use PG.MaxLFQ .")
+        else:
+            print("INFO: Protein value specified is not PG.MaxLFQ, please check if correct.")
     prot_X_pivot = report_all.pivot_table(index='Master.Protein', columns='Run', values=prot_value, aggfunc='first', sort=False)
     prot_X = sparse.csr_matrix(prot_X_pivot.values).T
     # prot_var_names: protein names

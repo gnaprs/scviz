@@ -10,6 +10,7 @@ adjustText
 AnnData
 requests
 matplotlib_venn
+pyarrow
 
 [pytest]
 openpyxl
