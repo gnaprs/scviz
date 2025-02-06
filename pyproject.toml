@@ -6,29 +6,32 @@ build-backend = "setuptools.build_meta"
 name = "scviz"
 version = "0.1.9"
 authors = [
-  { name="Marion Pang", email="sr_pang@hotmail.com" },
+  {name="Marion Pang", email="sr_pang@hotmail.com"},
 ]
 description = "A package to visualize single cell proteomics (and more to come!) data"
 readme = "README.md"
 requires-python = ">=3.8"
+license = "MIT"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
+    "Development Status :: 3 - Alpha"
     "Operating System :: OS Independent",
 ]
 dependencies = [
-  "numpy",
-  "pandas",
-  "matplotlib",
-  "seaborn",
-  "upsetplot",
-  "scikit-learn",
-  "scipy",
-  "umap-learn",
-  "adjustText",
-  "AnnData",
+  "numpy" == 1.26.4,
+  "pandas" == 2.2.2,
+  "matplotlib" == 3.8.4,
+  "seaborn" == 0.13.2,
+  "upsetplot" == 0.9.0,
+  "scikit-learn" == 1.4.2,
+  "scipy" == 1.31.0,
+  "umap-learn" == 0.5.6,
+  "adjustText" == 1.1.1,
+  "anndata" == 0.10.7,
   "requests",
-  "matplotlib_venn"
+  "matplotlib_venn" == 0.11.10,
+  "pyarrow"
 ]
 
 [project.urls]
