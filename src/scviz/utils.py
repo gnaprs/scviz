@@ -199,7 +199,7 @@ def get_upset_query(upset_content, present, absent):
 
     return prot_query_df
 
-# IMPORTANT: move to class function, ensure nothing else breaks
+# TODO: move to class function, ensure nothing else breaks
 def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = False):
     """
     Filters out for the given class(es) type. Returns a copy of the filtered pdata object, does not modify the original object.

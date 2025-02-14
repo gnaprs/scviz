@@ -1,5 +1,5 @@
 from encodings import normalize_encoding
-from re import A
+import re
 import pandas as pd
 import anndata as ad
 import numpy as np
@@ -315,71 +315,139 @@ class pAnnData:
 
             self._history.append(f"{on}: Set X to layer {layer}.")
 
+    def filter_prot(self, condition = None, return_copy = 'True'):
+        """
+        Filters the protein data based on a given condition, with an option to return a copy. Refer to pdata.x.var for protein column names to filter by.
 
-    # this is more of a hardcorded filter function (needs a hardcoded query), util filter function is more general soft-coded filter function
-    # maybe call this filter_query, and leave the other as filter
-    # TODO: in docs, show how both functions can be used for the same filtering task
-    def filter(self, condition = None, return_copy = True, file_list = None):
-        # TODO: add docstring, add example of file_list usage
-        # example usage: pdata.filter("protein_count > 1000")
+        Example:
+        >>> condition_prot1 = "Protein FDR Confidence: Combined == 'High'"
+        >>> pdata.filter_prot(condition_prot1)
+        or
+        >>> condition_prot2 = "Description includes 'p97'"
+        >>> pdata.filter_prot(condition_prot2)
+        """
+        if not self._check_data('protein'):
+            raise ValueError(f"No protein data found. Check that protein data was imported.")
+
+        # Determine whether to operate on a copy or in-place
+        pdata = self.copy() if return_copy else self
+        action = "Returning a copy of" if return_copy else "Filtered and modified"
+        # num_prot_og = pdata.prot.shape[1]
+
+        # Define the filtering logic
+        if condition is not None:
+            formatted_condition = self._filter_helper_formatquery(condition, pdata.prot.var)
+            print(formatted_condition)
+            filtered_proteins = pdata.prot.var[pdata.prot.var.eval(formatted_condition)]
+            index_filter = filtered_proteins.index
+            pdata.prot = pdata.prot[:, index_filter]
+
+            message = f"{action} data based on protein condition: {condition}. Number of proteins kept: {pdata.prot.shape[1]}."
+
+            # if pdata.pep is not None:
+            # need to filter out peptides that belonged only to the filtered proteins, need to use rs matrix for this
+            # can start from pdata.prot.var.eval(formatted_condition) to get the rows that we're keeping
+            #     pdata.pep = pdata.pep[filtered_queries.index]
+
+        # Logging and history updates
+        print(message)
+        pdata._append_history(message)
+        pdata._update_summary()
+
+        return pdata if return_copy else None
+
+    def filter_sample(self, condition = None, return_copy = True, file_list=None):
+        """
+        Filters the data (obs, observed samples) based on a given sample condition or file list, with an option to return a copy. Refer to pdata.summary or pdata.x.obs for sample column names to filter by.
+        
+        Example:
+        >>> pdata.filter_sample("protein_count > 1000")
+        or
+        >>> pdata.filter_sample(file_list = ['fileA', 'fileB'])
+        """
         if not self._has_data():
             pass
 
         if self._summary is None:
             self._update_summary()
+        
+        # Determine whether to operate on a copy or in-place
+        pdata = self.copy() if return_copy else self
+        action = "Returning a copy of" if return_copy else "Filtered and modified"
 
-        if return_copy:
-            pdata = self.copy()
-
-            if condition is not None:
-                filtered_queries = pdata._summary.query(condition)
-
-                if pdata.prot is not None:
-                    pdata.prot = pdata.prot[filtered_queries.index]
-                
-                if pdata.pep is not None:
-                    pdata.pep = pdata.pep[filtered_queries.index]
-
-                print(f"Returning a copy of filtered data based on condition: {condition}. Number of samples dropped: {len(pdata._summary) - len(filtered_queries)}.")
-                pdata._append_history(f"Filtered data based on condition: {condition}")
-                pdata._update_summary()
-
-                return pdata
-            elif file_list is not None:
-                if pdata.prot is not None:
-                    pdata.prot = pdata.prot[pdata.prot.obs_names.isin(file_list)]
-                
-                if pdata.pep is not None:
-                    pdata.pep = pdata.pep[pdata.pep.obs_names.isin(file_list)]
-
-                print(f"Returning a copy of filtered data based on file list. Number of samples dropped: {len(pdata._summary) - len(file_list)}.")
-                pdata._append_history(f"Filtered data based on file list.")
-                pdata._update_summary()
-
-                return pdata
+        # Define the filtering logic
+        if condition is not None:
+            formatted_condition = self._filter_helper_formatquery(condition, pdata._summary)
+            print(formatted_condition)
+            # filtered_queries = pdata._summary.eval(formatted_condition)
+            filtered_samples = pdata._summary[pdata._summary.eval(formatted_condition)]
+            index_filter = filtered_samples.index
+            message = f"{action} data based on sample condition: {condition}. Number of samples kept: {len(filtered_samples)}."
+            # Number of samples dropped: {len(pdata._summary) - len(filtered_samples)}
+        elif file_list is not None:
+            index_filter = file_list
+            message = f"{action} data based on sample file list. Number of samples kept: {len(file_list)}."
+            # Number of samples dropped: {len(pdata._summary) - len(file_list)}
         else:
-            if condition is not None:
-                filtered_queries = self._summary.query(condition)
+            # No filtering applied
+            message = "No filtering applied. Returning original data."
+            return pdata if return_copy else None
 
-                if self.prot is not None:
-                    self.prot = self.prot[filtered_queries.index]
+        # Filter out selected samples from prot and pep
+        if pdata.prot is not None:
+            pdata.prot = pdata.prot[pdata.prot.obs_names.isin(index_filter)]
+        
+        if pdata.pep is not None:
+            pdata.pep = pdata.pep[pdata.pep.obs_names.isin(index_filter)]
 
-                if self.pep is not None:
-                    self.pep = self.pep[filtered_queries.index]
+        # Logging and history updates
+        print(message)
+        pdata._append_history(message)
+        pdata._update_summary()
 
-                print(f"Filtered and modified data based on condition: {condition}. Number of samples dropped: {len(self._summary) - len(filtered_queries)}.")
-                self._append_history(f"Filtered data based on condition: {condition}")
-                self._update_summary()
-            elif file_list is not None:
-                if self.prot is not None:
-                    self.prot = self.prot[self.prot.obs_names.isin(file_list)]
-                
-                if self.pep is not None:
-                    self.pep = self.pep[self.pep.obs_names.isin(file_list)]
+        return pdata if return_copy else None
+    
+    def _filter_helper_formatquery(self, condition, dataframe):
+        """
+        Converts a query condition string by enclosing column names with spaces or special characters in backticks.
+        Also supports substring searches using `.str.contains()`.
+        """
+        column_names = dataframe.columns.tolist()
+        
+        # Sort column names by length (longest first) to avoid partial replacements
+        column_names.sort(key=len, reverse=True)
+        
+        for col in column_names:
+            if re.search(r'[^\\w]', col):  # Matches any non-word character (spaces, special characters)
+                condition = re.sub(fr'(?<!`)({re.escape(col)})(?!`)', f'`{col}`', condition)
 
-                print(f"Filtered and modified data based on file list. Number of samples dropped: {len(self._summary) - len(file_list)}.")
-                self._append_history(f"Filtered data based on file list.")
-                self._update_summary()
+        # Handle "includes" for substring search (converting it to .str.contains())
+        match = re.search(r'`?(\w[\w\s:.-]*)`?\s+includes\s+[\'"]([^\'"]+)[\'"]', condition)
+        if match:
+            col_name = match.group(1)
+            substring = match.group(2)
+            condition = f"{col_name}.str.contains('{substring}', case=False, na=False)"
+
+        return condition
+
+    def export(self, filename, format = 'csv'):
+        # export data, each layer as a separate file
+        
+        # if filename not specified, use current date and time
+        if filename is None:
+            filename = setup.get_datetime()
+
+        if not self._has_data():
+            raise ValueError("No data found in pAnnData object.")
+        
+        # export summary
+        self._summary.to_csv(f"{filename}_summary.csv")
+
+        if self.prot is not None:
+            self.prot.to_df().to_csv(f"{filename}_protein.csv")
+            for layer in self.prot.layers:
+                self.prot.layers[layer].toarray().to_csv(f"{filename}_protein_{layer}.csv")
+
 
     # -----------------------------
     # PROCESSING FUNCTIONS
