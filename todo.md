@@ -7,14 +7,17 @@
 3. Double-check peptide export format: (i) Gene Name (ii) Peptide name (iii) Peptide amino acid sequence start and end in the protein (iv) Charge, etc. if any (v) and then columns with the sample names where the intensities are reported
 4. Update umap with uncertainty and also subset coloring
 Implement dot plot: expression of the indicated genes in the three clusters (dot size is percentage of cells per cluster; color is cluster average normalized expression)
-5. implement directLFQ () for normalization
-6. implement correlation visualization
+5. implement directLFQ () for normalization, double check normalization (median?) from 240731_cbr
+6. implement correlation visualization (protein corr module)
+7. implement peptide sequence characteristics (hydrophobicity, etc.)
 
 # FIX/BUGS
 1. get_query()
 2. get_abundance_query()
-3. sync get_uniprot_fields() with convert_identifiers()
-4. sync get_uniprot_fields() with get_string_... functions - make one combined function for all 3
+3. fix up naming/usage of panndata.filter() and also scutils.filter()
+4. sync get_uniprot_fields() with convert_identifiers() and get_string_... functions - make one combined function for all 3
+5. housekeeping csvs not installed with package - find a way to fix this
+6. get_pca_importance just needs to accept pdata input (and prot/pep) - can get uns['pca'] and var_names from it. Keep n
 
 # MAINTENANCE
 1. Tests for imports - new+old DIANN format, new PD DIA format
