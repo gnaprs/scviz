@@ -38,6 +38,7 @@ import upsetplot
 from adjustText import adjust_text
 import umap.umap_ as umap
 import scanpy as sc
+import warnings
 
 from scviz import utils
 
@@ -49,32 +50,45 @@ def get_color(resource_type, n=None):
 
     Parameters:
     - resource_type (str): The type of resource to generate. Options are 'colors', 'cmap', and 'palette'.
-    - n (int, optional): The number of colors to generate. Only used if resource_type is 'colors'.
+    - n (int, optional): The number of colors or colormaps to generate. Required for 'colors' and 'cmap'.
 
     Returns:
-    - list of str or matplotlib.colors.Colormap or seaborn.color_palette: A list of colors, a colormap, or a palette.
+    - list of str: If resource_type is 'colors'
+    - list of matplotlib.colors.LinearSegmentedColormap: If resource_type is 'cmap'
+    - seaborn.color_palette: If resource_type is 'palette'
 
     Example:
-    >>> colors = get_color_resources('colors', 5)
+    >>> colors = get_color('colors', 5)
     >>> cmap = get_color('cmap')
     >>> palette = get_color('palette')
     """
 
     # --- 
     # Create a list of colors
-    colors = ['#FC9744', '#00AEE8', '#9D9D9D', '#6EDC00', '#F4D03F', '#FF0000', '#A454C7']
-    cmap = mcolors.LinearSegmentedColormap.from_list('my_cmap', colors)
-    palette = sns.color_palette(colors)
+    base_colors = ['#FC9744', '#00AEE8', '#9D9D9D', '#6EDC00', '#F4D03F', '#FF0000', '#A454C7']
     # ---
 
     if resource_type == 'colors':
         if n is None:
             raise ValueError("Parameter 'n' must be specified when resource_type is 'colors'")
-        return colors[:n]
+        if n > len(base_colors):
+            warnings.warn(f"Requested {n} colors, but only {len(base_colors)} available. Reusing from the start.")
+        return [base_colors[i % len(base_colors)] for i in range(n)]
+    
     elif resource_type == 'cmap':
-        return cmap
+        if n is None:
+            raise ValueError("Parameter 'n' must be specified when resource_type is 'cmap'")
+        if n > len(base_colors):
+            warnings.warn(f"Requested {n} colormaps, but only {len(base_colors)} base colors. Reusing from the start.")
+        cmaps = []
+        for i in range(n):
+            color = base_colors[i % len(base_colors)]
+            cmap = mcolors.LinearSegmentedColormap.from_list(f'cmap_{i}', ['white', color])
+            cmaps.append(cmap)
+        return cmaps
+    
     elif resource_type == 'palette':
-        return palette
+        return sns.color_palette(base_colors)
     else:
         raise ValueError("Invalid resource_type. Options are 'colors', 'cmap', and 'palette'")
 
@@ -707,21 +721,19 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
     >>> ax = scplt.plot_rankquant(ax, pdata_filter, classes = 'size', order = ['sc', '5k','10k', '20k'], cmap = cmaps, color=colors, calpha = 1, alpha = 0.005)
     
     """
-    
+    # all the plot_dfs should now be stored in pdata.var
+    pdata.rank(classes, on, layer)
+
     adata = utils.get_adata(pdata, on)
     classes_list = utils.get_classlist(adata, classes = classes, order = order)
 
+    # Ensure colormap and color list match number of classes
+    cmap = cmap if cmap and len(cmap) == len(classes_list) else get_color('cmap', n=len(classes_list))
+    color = color if color and len(color) == len(classes_list) else get_color('colors', n=len(classes_list))
+
     for j, class_value in enumerate(classes_list):
-        if classes is None:
-            values = class_value.split('_')
-            # print(f'Classes: {classes}, Values: {values}') if debug else None
-            rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
-        elif isinstance(classes, str):
-            # print(f'Class: {classes}, Value: {class_value}') if debug else None
-            rank_data = utils.filter(adata, classes, class_value, suppress_warnings=True)
-        elif isinstance(classes, list):
-            values = class_value.split('_')
-            # print(f'Classes: {classes}, Values: {values}') if debug else None
+        if classes is None or isinstance(classes, (str, list)):
+            values = class_value.split('_') if classes is not str else class_value
             rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
 
         plot_df = rank_data.to_df().transpose()
@@ -737,38 +749,57 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
         adata.var['Rank: ' + class_value] = plot_df['Rank: ' + class_value]
         plot_df = plot_df.reindex(sorted_indices)
 
+        # if taking from pdata.var, can continue from here
+        # problem is that we need rank_data, the data consisting of samples from this class to make
+        # stats df should have 3 column, average stdev and rank
+        # plot_df should only have the abundance 
         stats_df = plot_df.filter(regex = 'Average: |Stdev: |Rank: ', axis=1)
         plot_df = plot_df.drop(stats_df.columns, axis=1)
+        print(stats_df.shape) if debug else None
+        print(plot_df.shape) if debug else None
 
         nsample = plot_df.shape[1]
         nprot = plot_df.shape[0]
 
-        # merge all abundance columns into one column
-        X = np.zeros((nsample*nprot))
-        Y = np.zeros((nsample*nprot))
-        Z = np.zeros((nsample*nprot)) # pdf value based on average abundance
-        for i in range(nsample):
-            X[i*nprot:(i+1)*nprot] = plot_df.iloc[:, i].values
-            Y[i*nprot:(i+1)*nprot] = stats_df['Rank: '+class_value].values
-            mu = np.log10(stats_df['Average: '+class_value].values)
-            std = np.log10(stats_df['Stdev: '+class_value].values)
-            z = (np.log10(X[i*nprot:(i+1)*nprot]) - mu)/std
-            z = np.power(z,2)
-            Z[i*nprot:(i+1)*nprot] = np.exp(-z*exp_alpha)
-
-        # remove NaN values
-        Z = Z[~np.isnan(X)]
-        Y = Y[~np.isnan(X)]
-        X = X[~np.isnan(X)]
+        # Abundance matrix: shape (nprot, nsample)
+        X_matrix = plot_df.values  # shape: (nprot, nsample)
+        ranks = stats_df['Rank: ' + class_value].values  # shape: (nprot,)
+        mu = np.log10(np.clip(stats_df['Average: ' + class_value].values, 1e-6, None))
+        std = np.log10(np.clip(stats_df['Stdev: ' + class_value].values, 1e-6, None))
+        # Flatten abundance data (X) and repeat ranks (Y)
+        X = X_matrix.flatten(order='F')  # Fortran order stacks column-wise, matching your loop
+        Y = np.tile(ranks, nsample)
+        # Compute Z-values
+        logX = np.log10(np.clip(X, 1e-6, None))
+        z = ((logX - np.tile(mu, nsample)) / np.tile(std, nsample)) ** 2
+        Z = np.exp(-z * exp_alpha)
+        # Remove NaNs
+        mask = ~np.isnan(X)
+        X = X[mask]
+        Y = Y[mask]
+        Z = Z[mask]
 
         print(f'nsample: {nsample}, nprot: {np.max(Y)}') if debug else None
 
         ax.scatter(Y, X, c=Z, marker='.',cmap=cmap[j], s=s,alpha=alpha)
-        ax.scatter(stats_df['Rank: '+class_value], stats_df['Average: '+class_value], marker='.', color=color[j], alpha=calpha)
+        ax.scatter(stats_df['Rank: '+class_value], 
+                   stats_df['Average: '+class_value], 
+                   marker='.', 
+                   color=color[j], 
+                   alpha=calpha,
+                   label=class_value)
         ax.set_yscale('log')
         ax.set_xlabel('Rank')
         ax.set_ylabel('Abundance')
 
+    # format the argument string classes to be first letter capitalized
+    legend_title = (
+        "/".join(cls.capitalize() for cls in classes)
+        if isinstance(classes, list)
+        else classes.capitalize() if isinstance(classes, str)
+        else None)
+
+    ax.legend(title=legend_title, loc='best', frameon=True, fontsize='small')
     return ax
 
 def mark_rankquant(plot, pdata, mark_df, class_values, layer = "X", on = 'protein', color='red', s=10,alpha=1, show_label=True, label_type='accession'):
