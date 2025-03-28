@@ -184,72 +184,178 @@ class pAnnData:
     def _has_data(self):
         return self.prot is not None or self.pep is not None
 
-    def _update_summary(self):
-        if self.prot is not None:
-            # note: missing values is 1-protein_quant
-            self.prot.obs['protein_quant'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1) / self.prot.X.shape[1]
-            self.prot.obs['protein_count'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1)
-            self.prot.obs['protein_abundance_sum'] = np.nansum(self.prot.X.toarray(), axis=1)
+    # def _update_summary(self):
+    #     if self.prot is not None:
+    #         # note: missing values is 1-protein_quant
+    #         self.prot.obs['protein_quant'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1) / self.prot.X.shape[1]
+    #         self.prot.obs['protein_count'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1)
+    #         self.prot.obs['protein_abundance_sum'] = np.nansum(self.prot.X.toarray(), axis=1)
             
+    #         if 'X_mbr' in self.prot.layers:
+    #             self.prot.obs['mbr_count'] = (self.prot.layers['X_mbr'] == 'Peak Found').sum(axis=1)
+    #             self.prot.obs['high_count'] = (self.prot.layers['X_mbr'] == 'High').sum(axis=1)
+
+    #     if self.pep is not None:
+    #         # note: missing values is 1-peptide_quant
+    #         self.pep.obs['peptide_quant'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1) / self.pep.X.shape[1]
+    #         self.pep.obs['peptide_count'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1)
+    #         self.pep.obs['peptide_abundance_sum'] = np.nansum(self.pep.X.toarray(), axis=1)
+
+    #         if 'X_mbr' in self.pep.layers:
+    #             self.pep.obs['mbr_count'] = (self.pep.layers['X_mbr'] == 'Peak Found').sum(axis=1)
+    #             self.pep.obs['high_count'] = (self.pep.layers['X_mbr'] == 'High').sum(axis=1)
+        
+    #     if self.prot is not None:
+    #         self._summary = self.prot.obs.copy()
+    #         if self.pep is not None:
+    #             for col in self.pep.obs.columns:
+    #                 if col not in self._summary.columns:
+    #                     self._summary[col] = self.pep.obs[col]
+    #     else:
+    #         self._summary = self.pep.obs.copy()
+
+    #     self._previous_summary = self._summary.copy()
+        
+    # def _update_obs(self):
+    #     # function to update obs with summary data (if user edited summary data)
+    #     if not self._has_data():
+    #         return
+
+    #     def update_obs_with_summary(obs, summary, ignore_keyword):
+    #         ignored_columns = []
+    #         for col in summary.columns:
+    #             if ignore_keyword in col:
+    #                 ignored_columns.append(col)
+    #                 continue
+    #             obs[col] = summary[col]
+    #         return ignored_columns
+            
+
+    #     if self.prot is not None:
+    #         if not self.prot.obs.index.equals(self._summary.index):
+    #             raise ValueError("Index of summary does not match index of prot.obs")
+    #         ignored_columns_prot = update_obs_with_summary(self.prot.obs, self._summary, "pep")
+    #     else:
+    #         ignored_columns_prot = None
+    #     if self.pep is not None:
+    #         if not self.pep.obs.index.equals(self._summary.index):
+    #             raise ValueError("Index of summary does not match index of pep.obs")
+    #         ignored_columns_pep = update_obs_with_summary(self.pep.obs, self._summary, "prot")
+    #     else:
+    #         ignored_columns_pep = None
+
+    #     history_statement = "Updated obs with summary data. "
+    #     if ignored_columns_prot:
+    #         history_statement += f"Ignored columns in prot.obs: {', '.join(ignored_columns_prot)}. "
+    #     if ignored_columns_pep:
+    #         history_statement += f"Ignored columns in pep.obs: {', '.join(ignored_columns_pep)}. "
+    #     self._history.append(history_statement)
+
+    def _update_metrics(self):
+        """Compute per-sample metrics (quant, count, abundance) for prot and pep data."""
+        if self.prot is not None:
+            X = self.prot.X.toarray()
+            self.prot.obs['protein_quant'] = np.sum(~np.isnan(X), axis=1) / X.shape[1]
+            self.prot.obs['protein_count'] = np.sum(~np.isnan(X), axis=1)
+            self.prot.obs['protein_abundance_sum'] = np.nansum(X, axis=1)
+
             if 'X_mbr' in self.prot.layers:
                 self.prot.obs['mbr_count'] = (self.prot.layers['X_mbr'] == 'Peak Found').sum(axis=1)
                 self.prot.obs['high_count'] = (self.prot.layers['X_mbr'] == 'High').sum(axis=1)
 
         if self.pep is not None:
-            # note: missing values is 1-peptide_quant
-            self.pep.obs['peptide_quant'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1) / self.pep.X.shape[1]
-            self.pep.obs['peptide_count'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1)
-            self.pep.obs['peptide_abundance_sum'] = np.nansum(self.pep.X.toarray(), axis=1)
+            X = self.pep.X.toarray()
+            self.pep.obs['peptide_quant'] = np.sum(~np.isnan(X), axis=1) / X.shape[1]
+            self.pep.obs['peptide_count'] = np.sum(~np.isnan(X), axis=1)
+            self.pep.obs['peptide_abundance_sum'] = np.nansum(X, axis=1)
 
             if 'X_mbr' in self.pep.layers:
                 self.pep.obs['mbr_count'] = (self.pep.layers['X_mbr'] == 'Peak Found').sum(axis=1)
                 self.pep.obs['high_count'] = (self.pep.layers['X_mbr'] == 'High').sum(axis=1)
-        
+
+    def _merge_obs(self):
+        """
+        Merge .prot.obs and .pep.obs into a single summary DataFrame.
+        Shared columns (e.g. 'gradient', 'condition') are kept from .prot by default.
+        """
         if self.prot is not None:
-            self._summary = self.prot.obs.copy()
+            summary = self.prot.obs.copy()
             if self.pep is not None:
                 for col in self.pep.obs.columns:
-                    if col not in self._summary.columns:
-                        self._summary[col] = self.pep.obs[col]
+                    if col not in summary.columns:
+                        summary[col] = self.pep.obs[col]
+        elif self.pep is not None:
+            summary = self.pep.obs.copy()
         else:
-            self._summary = self.pep.obs.copy()
+            summary = pd.DataFrame()
 
-        self._previous_summary = self._summary.copy()
-        
-    def _update_obs(self):
-        # function to update obs with summary data (if user edited summary data)
+        self._summary = summary
+        self._previous_summary = summary.copy()
+
+    def _push_summary_to_obs(self, skip_if_contains='pep', verbose=True):
+        """
+        Push changes from .summary back into .prot.obs and .pep.obs.
+        Columns containing `skip_if_contains` are ignored for .prot; same for 'prot' in .pep.
+        """
         if not self._has_data():
             return
 
-        def update_obs_with_summary(obs, summary, ignore_keyword):
-            ignored_columns = []
+        def update_obs_with_summary(obs, summary, skip_if_contains):
+            skipped = []
             for col in summary.columns:
-                if ignore_keyword in col:
-                    ignored_columns.append(col)
+                if skip_if_contains in col:
+                    skipped.append(col)
                     continue
                 obs[col] = summary[col]
-            return ignored_columns
-            
+            return skipped
 
         if self.prot is not None:
             if not self.prot.obs.index.equals(self._summary.index):
-                raise ValueError("Index of summary does not match index of prot.obs")
-            ignored_columns_prot = update_obs_with_summary(self.prot.obs, self._summary, "pep")
+                raise ValueError("Mismatch: .summary and .prot.obs have different sample indices.")
+            skipped_prot = update_obs_with_summary(self.prot.obs, self._summary, skip_if_contains)
         else:
-            ignored_columns_prot = None
+            skipped_prot = None
+
         if self.pep is not None:
             if not self.pep.obs.index.equals(self._summary.index):
-                raise ValueError("Index of summary does not match index of pep.obs")
-            ignored_columns_pep = update_obs_with_summary(self.pep.obs, self._summary, "prot")
+                raise ValueError("Mismatch: .summary and .pep.obs have different sample indices.")
+            skipped_pep = update_obs_with_summary(self.pep.obs, self._summary, skip_if_contains='prot')
         else:
-            ignored_columns_pep = None
+            skipped_pep = None
 
-        history_statement = "Updated obs with summary data. "
-        if ignored_columns_prot:
-            history_statement += f"Ignored columns in prot.obs: {', '.join(ignored_columns_prot)}. "
-        if ignored_columns_pep:
-            history_statement += f"Ignored columns in pep.obs: {', '.join(ignored_columns_pep)}. "
-        self._history.append(history_statement)
+        msg = "Pushed summary values back to obs. "
+        if skipped_prot:
+            msg += f"Skipped for prot: {', '.join(skipped_prot)}. "
+        if skipped_pep:
+            msg += f"Skipped for pep: {', '.join(skipped_pep)}. "
+
+        self._append_history(msg)
+        if verbose:
+            print(msg)
+
+    def update_summary(self, recompute=True, sync_back=False, verbose=True):
+        """
+        Update the .summary dataframe from .obs (and optionally push changes back down).
+
+        Parameters:
+        - recompute (bool): If True, re-calculate protein/peptide stats.
+        - sync_back (bool): If True, push edited .summary values back to .prot.obs / .pep.obs. False by default, as .summary is dervied.
+        - verbose (bool): If True, print action messages.
+        """
+        if recompute:
+            self._update_metrics()
+        self._merge_obs()
+        if sync_back:
+            self._push_summary_to_obs(verbose=verbose)
+        elif verbose:
+            mode = []
+            if recompute: mode.append("recompute")
+            if sync_back: mode.append("sync_back")
+            print(f"[update_summary] → Mode: {', '.join(mode) or 'noop'}")
+
+    def _update_summary(self):
+        print("⚠️  Legacy _update_summary() called — consider switching to update_summary()")
+        self.update_summary(recompute=True, sync_back=False, verbose=False)
 
     def _append_history(self, action):
         self._history.append(action)
@@ -315,15 +421,17 @@ class pAnnData:
 
             self._history.append(f"{on}: Set X to layer {layer}.")
 
-    def filter_prot(self, condition = None, return_copy = 'True'):
+    def filter_prot(self, condition = None, accessions=None, return_copy = 'True', debug=False):
         """
-        Filters the protein data based on a protein metadata condition. It supports both exact value comparisons and substring matching with the keyword `includes`. Refer to pdata.x.var for protein column names to filter by.
+        Filters the protein data based on a protein metadata condition or a list of accession numbers.
 
         Parameters:
         - condition (str): A condition string to filter protein metadata. Can include:
             - Standard comparisons (e.g. `"Protein FDR Confidence: Combined == 'High'"`)
             - Substring search using `includes` (e.g. `"Description includes 'p97'"`)
-        - return_copy (bool): If True, returns a filtered copy. If False, modifies the object in place.
+        - accessions (list of str): List of accession numbers (var_names) to keep.
+        - return_copy (bool): If True, returns a filtered copy. If False, modifies in place.
+        - debug (bool): If True, prints debugging information.
 
         Returns:
         - Filtered pAnnData object if `return_copy=True`, else modifies in place and returns None.
@@ -344,31 +452,141 @@ class pAnnData:
 
         pdata = self.copy() if return_copy else self
         action = "Returning a copy of" if return_copy else "Filtered and modified"
-        # num_prot_og = pdata.prot.shape[1]
 
+        message_parts = []
+
+        # Filter by condition
         if condition is not None:
             formatted_condition = self._format_filter_query(condition, pdata.prot.var)
-            print(formatted_condition)
+            if debug:
+                print(f"Formatted condition: {formatted_condition}")
             filtered_proteins = pdata.prot.var[pdata.prot.var.eval(formatted_condition)]
-            index_filter = filtered_proteins.index
             pdata.prot = pdata.prot[:, filtered_proteins.index]
+            message_parts.append(f"condition: {condition} ({pdata.prot.shape[1]} proteins kept)")
 
-            message = f"{action} data based on protein condition: {condition}. Number of proteins kept: {pdata.prot.shape[1]}."
-            print(message)
+        # Filter by accession list
+        if accessions is not None:
+            existing = pdata.prot.var_names
+            present = [acc for acc in accessions if acc in existing]
+            missing = [acc for acc in accessions if acc not in existing]
 
+            if missing:
+                warnings.warn(f"The following accession(s) were not found and will be ignored: {missing}")
+
+            pdata.prot = pdata.prot[:, pdata.prot.var_names.isin(present)]
+            message_parts.append(f"accessions: {len(present)} found / {len(accessions)} requested")
+
+        if not message_parts:
+            message = f"{action} protein data. No filters applied."
+        else:
+            message = f"{action} protein data based on {' and '.join(message_parts)}."
+
+            # TODO: also filter out peptides that belong to the filtered proteins
             # if pdata.pep is not None:
             # need to filter out peptides that belonged only to the filtered proteins, need to use rs matrix for this
             # can start from pdata.prot.var.eval(formatted_condition) to get the rows that we're keeping
             #     pdata.pep = pdata.pep[filtered_queries.index]
 
+        print(message)
         pdata._append_history(message)
-        pdata._update_summary()
+        pdata.update_summary(recompute=True)
         return pdata if return_copy else None
 
-    def filter_sample_metadata(self, condition = None, return_copy = True, file_list=None):
+    def filter_sample(self, values=None, exact_cases=False, condition=None, file_list=None, return_copy=True, debug=False, query_mode=False):
         """
-        Filters the data (obs, observed samples) based on a given summary condition or file list, with an option to return a copy. Refer to pdata.summary or pdata.x.obs for sample column names to filter by.
+        Unified method to filter samples in a pAnnData object.
+
+        This function supports three types of filtering input. You must provide **exactly one** of the following:
         
+        - `values` (dict or list of dict): For filtering samples based on categorical metadata.
+            - Example: `{'treatment': ['kd', 'sc'], 'cellline': 'AS'}`
+            - Matches rows in `.summary` or `.obs` with those field values.
+
+        - `condition` (str): A condition string to evaluate against sample-level numeric metadata (summary).
+            - Example: `"protein_count > 1000"`
+            - This should reference columns in `pdata.summary`.
+
+        - `file_list` (list): A list of sample names or file identifiers to keep.
+            - Example: `['Sample_1', 'Sample_2']`
+            - Filters to only those samples (must match obs_names).
+
+        Parameters:
+        - values (dict or list of dict): Categorical value filter (if used).
+        - exact_cases (bool): Use exact combination matching when `values` is provided.
+        - condition (str): Summary-level numeric filter condition.
+        - file_list (list): List of sample identifiers to keep.
+        - return_copy (bool): If True, returns a filtered copy. Otherwise modifies in place.
+        - debug (bool): If True, print filter queries/messages.
+
+        Returns:
+        - Filtered pAnnData object (if `return_copy=True`), otherwise modifies in place and returns None.
+
+        Raises:
+        - ValueError if more than one or none of `values`, `condition`, or `file_list` are specified.
+
+        Examples:
+        ---------
+        >>> pdata.filter_sample(values={'treatment': 'kd', 'cellline': 'AS'})
+        >>> pdata.filter_sample(values=[{'treatment': 'kd', 'cellline': 'AS'}, {'treatment': 'sc', 'cellline': 'BE'}], exact_cases=True)
+        >>> pdata.filter_sample(condition="protein_count > 1000")
+        >>> pdata.filter_sample(file_list=['Sample_001', 'Sample_007'])
+        """
+
+        # Ensure exactly one of the filter modes is specified
+        provided = [values, condition, file_list]
+        if sum(arg is not None for arg in provided) != 1:
+            raise ValueError(
+                "Invalid filter input. You must specify exactly one of the following keyword arguments:\n"
+                "- `values=...` for categorical metadata filtering,\n"
+                "- `condition=...` for summary-level condition filtering, or\n"
+                "- `file_list=...` to filter by sample IDs.\n\n"
+                "Example:\n"
+                "  pdata.filter_sample(condition='protein_quant > 0.2')"
+            )
+
+        if values is not None:
+            return self.filter_sample_values(
+                values=values,
+                exact_cases=exact_cases,
+                debug=debug,
+                return_copy=return_copy
+            )
+
+        if condition is not None or file_list is not None:
+            return self.filter_sample_metadata(
+                condition=condition,
+                file_list=file_list,
+                return_copy=return_copy,
+                debug=debug
+            )
+        
+        if values is not None and query_mode:
+            return self.filter_sample_query(query_string=values, source='obs', return_copy=return_copy, debug=debug)
+
+        if condition is not None and query_mode:
+            return self.filter_sample_query(query_string=condition, source='summary', return_copy=return_copy, debug=debug)
+
+    def filter_sample_metadata(self, condition = None, return_copy = True, file_list=None, debug=False):
+        """
+        Filter samples in a pAnnData object based on numeric summary conditions or a file/sample list.
+
+        This method allows filtering using:
+        - A string condition referencing columns in `.summary` (e.g. "protein_count > 1000"), or
+        - A list of sample identifiers to retain (e.g. filenames or obs_names).
+
+        Parameters:
+        - condition (str): A filter condition string evaluated on `pdata.summary`.
+        - file_list (list): A list of sample identifiers to retain.
+        - return_copy (bool): Return a filtered copy (True) or modify in place (False).
+        - debug (bool): Print the query string or summary info.
+
+        Returns:
+        - Filtered pAnnData object (or None if in-place).
+
+        Note:
+        This method is used internally by `filter_sample()`. For general-purpose filtering, it's recommended
+        to use `filter_sample()` and pass either `condition=...` or `file_list=...`.
+
         Example:
         >>> pdata.filter_sample_metadata("protein_count > 1000")
         or
@@ -378,7 +596,7 @@ class pAnnData:
             pass
 
         if self._summary is None:
-            self._update_summary()
+            self.update_summary(recompute=True)
         
         # Determine whether to operate on a copy or in-place
         pdata = self.copy() if return_copy else self
@@ -387,7 +605,7 @@ class pAnnData:
         # Define the filtering logic
         if condition is not None:
             formatted_condition = self._format_filter_query(condition, pdata._summary)
-            print(formatted_condition)
+            print(formatted_condition) if debug else None
             # filtered_queries = pdata._summary.eval(formatted_condition)
             filtered_samples = pdata._summary[pdata._summary.eval(formatted_condition)]
             index_filter = filtered_samples.index
@@ -396,6 +614,9 @@ class pAnnData:
         elif file_list is not None:
             index_filter = file_list
             message = f"{action} data based on sample file list. Number of samples kept: {len(file_list)}."
+            missing = [f for f in file_list if f not in pdata.prot.obs_names]
+            if missing:
+                warnings.warn(f"Some sample IDs not found: {missing}")
             # Number of samples dropped: {len(pdata._summary) - len(file_list)}
         else:
             # No filtering applied
@@ -412,13 +633,16 @@ class pAnnData:
         # Logging and history updates
         print(message)
         pdata._append_history(message)
-        pdata._update_summary()
+        pdata.update_summary(recompute=False)
 
         return pdata if return_copy else None
     
     def filter_sample_values(self, values, exact_cases, debug=False, return_copy=True):
         """
-        Filter samples in a pAnnData object using dictionary-style field/value matching.
+        Filter samples in a pAnnData object using dictionary-style categorical matching.
+
+        This method allows filtering based on class-like annotations (e.g. treatment, cellline)
+        using either simple OR logic within fields, or exact AND combinations across fields.
 
         Parameters:
         - pdata (AnnData): Input AnnData object
@@ -432,6 +656,10 @@ class pAnnData:
         Returns:
         - AnnData: Filtered view of input data
 
+        Note:
+        This method is used internally by `filter_sample()`. For most use cases, calling `filter_sample()`
+        directly is preferred.
+        
         Examples:
         ---------
         >>> pdata.filter_sample_values(values={'treatment': ['kd', 'sc'], 'cellline': 'AS'})
@@ -480,7 +708,7 @@ class pAnnData:
                 query_parts.append(f"({part})")
             query = " & ".join(query_parts)
 
-        if not debug:
+        if debug:
                 print(f"Filter query: {query}")
 
         if pdata.prot is not None:
@@ -496,15 +724,62 @@ class pAnnData:
             if exact_cases else
             f"Filtered by loose match on: {', '.join(f'{k}: {v}' for k, v in values.items())}."
         )
-        copy_note = " Copy of the filtered AnnData object returned." if return_copy else ""
+        copy_note = " Copy of the filtered AnnData object returned." if return_copy else "Filtered and modified in-place."
         history_msg = f"{filter_desc} Number of samples kept: {n_samples}.{copy_note}"
         pdata._append_history(history_msg)  
         print(history_msg)
         if n_samples == 0:
             print("Warning: No samples matched the filter criteria.")
-        pdata._update_summary()
+        pdata.update_summary(recompute=False)
 
         return pdata
+
+    def filter_sample_query(self, query_string, source='obs', return_copy=True, debug=False):
+        """
+        Filters samples using a raw pandas-style query string on either obs or summary.
+
+        Parameters:
+        - query_string (str): A pandas-style query string (e.g., "cellline == 'AS' and treatment in ['kd', 'sc']")
+        - source (str): Either 'obs' or 'summary' — the dataframe to evaluate the query against.
+        - return_copy (bool): Return a new filtered object or modify in place.
+        - debug (bool): Print debug messages.
+
+        Returns:
+        - Filtered pAnnData object or modifies in place.
+        """
+        pdata = self.copy() if return_copy else self
+        action = "Returning a copy of" if return_copy else "Filtered and modified"
+
+        print("⚠️  Advanced query mode enabled — interpreting string as a pandas-style expression.")
+
+        if source == 'obs':
+            df = pdata.prot.obs
+        elif source == 'summary':
+            if self._summary is None:
+                self.update_summary(recompute=True)
+            df = pdata._summary
+        else:
+            raise ValueError("source must be 'obs' or 'summary'")
+
+        try:
+            filtered_df = df.query(query_string)
+        except Exception as e:
+            raise ValueError(f"Failed to parse query string:\n  {query_string}\nError: {e}")
+
+        index_filter = filtered_df.index
+
+        if pdata.prot is not None:
+            pdata.prot = pdata.prot[pdata.prot.obs_names.isin(index_filter)]
+        if pdata.pep is not None:
+            pdata.pep = pdata.pep[pdata.pep.obs_names.isin(index_filter)]
+
+        message = f"{action} samples based on query string. Samples kept: {len(index_filter)}."
+        print(message)
+        pdata._append_history(message)
+        pdata._update_summary(recompute=False)
+
+        return pdata if return_copy else None
+
 
     def export(self, filename, format = 'csv'):
         # export data, each layer as a separate file
@@ -531,6 +806,7 @@ class pAnnData:
         - Wraps column names containing spaces/special characters in backticks for `pandas.eval()`.
         - Supports custom `includes` syntax for substring matching, e.g.:
             "Description includes 'p97'" → `Description.str.contains('p97', case=False, na=False)`
+        - Auto-quotes unquoted string values when column dtype is object or category.
 
         Parameters:
         - condition (str): The condition string to parse.
@@ -539,6 +815,8 @@ class pAnnData:
         Returns:
         - str: A condition string formatted for pandas `.eval()`
         """
+
+        # Wrap column names with backticks if needed
         column_names = dataframe.columns.tolist()
         column_names.sort(key=len, reverse=True) # Avoid partial matches
         
@@ -553,6 +831,16 @@ class pAnnData:
             substring = match.group(2)
             condition = f"{col_name}.str.contains('{substring}', case=False, na=False)"
 
+        # Auto-quote string values for categorical/text columns
+        for col in dataframe.columns:
+            if dataframe[col].dtype.name in ["object", "category"]:
+                for op in ["==", "!="]:
+                    pattern = fr"(?<![><=!])\b{re.escape(col)}\s*{op}\s*([^\s'\"()]+)"
+                    matches = re.findall(pattern, condition)
+                    for match_val in matches:
+                        quoted_val = f'"{match_val}"'
+                        condition = re.sub(fr"({re.escape(col)}\s*{op}\s*){match_val}\b", r"\1" + quoted_val, condition)
+
         return condition
 
     # -----------------------------
@@ -565,17 +853,7 @@ class pAnnData:
         classes_list = utils.get_classlist(adata, classes)
 
         for j, class_value in enumerate(classes_list):
-            if classes is None:
-                values = class_value.split('_')
-                print(f'Classes: {classes}, Values: {values}') if debug else None
-                data_filtered = utils.filter(adata, classes, values, suppress_warnings=True)
-            elif isinstance(classes, str):
-                print(f'Class: {classes}, Value: {class_value}') if debug else None
-                data_filtered = utils.filter(adata, classes, class_value, suppress_warnings=True)
-            elif isinstance(classes, list):
-                values = class_value.split('_')
-                print(f'Classes: {classes}, Values: {values}') if debug else None
-                data_filtered = utils.filter(adata, classes, values, suppress_warnings=True)
+            data_filtered = utils.resolve_class_filter(adata, classes, class_value, debug=True)
 
             cv_data = data_filtered.X.toarray() if layer == "X" else data_filtered.layers[layer].toarray() if layer in data_filtered.layers else None
             if cv_data is None:
@@ -689,17 +967,7 @@ class pAnnData:
         classes_list = utils.get_classlist(adata, classes)
         
         for j, class_value in enumerate(classes_list):
-            if classes is None:
-                values = class_value.split('_')
-                print(f'Classes: {classes}, Values: {values}')
-                rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
-            elif isinstance(classes, str):
-                print(f'Class: {classes}, Value: {class_value}')
-                rank_data = utils.filter(adata, classes, class_value, suppress_warnings=True)
-            elif isinstance(classes, list):
-                values = class_value.split('_')
-                print(f'Classes: {classes}, Values: {values}')
-                rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
+            rank_data = utils.resolve_class_filter(adata, classes, class_value, debug=True)
 
             rank_df = rank_data.to_df().transpose()
             rank_df['Average: '+class_value] = np.nanmean(rank_data.X.toarray(), axis=0)
@@ -949,6 +1217,7 @@ class pAnnData:
         if set_X:
             self.set_X(layer = layer_name, on = on)
 
+# TODO: move to class function
 def _normalize_helper(data, method, **kwargs):
     if method == 'sum':
         # norm by sum: scale each row s.t. sum of each row is the same as the max sum
@@ -1120,7 +1389,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         pdata.pep.obs.columns = obs_columns if obs_columns else list(range(len(pep_obs.columns)))
         pdata._append_history(f"Imported peptide data from {pep_file}")
 
-    pdata._update_summary()
+    pdata.update_summary()
 
     print("pAnnData object created. Use `print(pdata)` to view the object.")
     return pdata
@@ -1257,7 +1526,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     pdata.pep.obs.columns = obs_columns if obs_columns else list(range(len(pep_obs.columns)))
     pdata.pep.layers['X_raw'] = pep_X
 
-    pdata._update_summary()
+    pdata.update_summary()
     pdata._append_history(f"Imported protein data from {report_file}, using {prot_value} as protein value and {pep_value} as peptide value.")
     print("pAnnData object created. Use `print(pdata)` to view the object.")
 

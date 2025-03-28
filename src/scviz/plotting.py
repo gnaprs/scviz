@@ -734,7 +734,7 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
     for j, class_value in enumerate(classes_list):
         if classes is None or isinstance(classes, (str, list)):
             values = class_value.split('_') if classes is not str else class_value
-            rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
+            rank_data = utils.filter(adata, classes, values, debug=False)
 
         plot_df = rank_data.to_df().transpose()
         plot_df['Average: '+class_value] = np.nanmean(rank_data.X.toarray(), axis=0)
@@ -1006,17 +1006,7 @@ def plot_raincloud(ax,pdata,classes = None, layer = 'X', on = 'protein', order =
     data_X = []
 
     for j, class_value in enumerate(classes_list):
-        if classes is None:
-            values = class_value.split('_')
-            print(f'Classes: {classes}, Values: {values}') if debug else None
-            rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
-        elif isinstance(classes, str):
-            print(f'Class: {classes}, Value: {class_value}') if debug else None
-            rank_data = utils.filter(adata, classes, class_value, suppress_warnings=True)
-        elif isinstance(classes, list):
-            values = class_value.split('_')
-            print(f'Classes: {classes}, Values: {values}') if debug else None
-            rank_data = utils.filter(adata, classes, values, suppress_warnings=True)
+        rank_data = utils.resolve_class_filter(adata, classes, class_value, debug=True)
 
         plot_df = rank_data.to_df().transpose()
         plot_df['Average: '+class_value] = np.nanmean(rank_data.X.toarray(), axis=0)

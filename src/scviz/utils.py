@@ -145,7 +145,7 @@ def get_adata(pdata, on = 'protein'):
     else:
         raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
-def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True):
+def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True, debug=False):
     """
     Get the contents for an UpSet plot based on the specified case list. Helper function for UpSet plots.
 
@@ -173,20 +173,10 @@ def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True):
     upset_dict = {}
 
     for j, class_value in enumerate(classes_list):
-        if classes is None:
-            values = class_value.split('_')
-            # print(f'Classes: {classes}, Values: {values}') if debug else None
-            data_filter = filter(adata, classes, values, suppress_warnings=True)
-        elif isinstance(classes, str):
-            # print(f'Class: {classes}, Value: {class_value}') if debug else None
-            data_filter = filter(adata, classes, class_value, suppress_warnings=True)
-        elif isinstance(classes, list):
-            values = class_value.split('_')
-            # print(f'Classes: {classes}, Values: {values}') if debug else None
-            data_filter = filter(adata, classes, values, suppress_warnings=True)
+        data_filtered = resolve_class_filter(adata, classes, class_value, debug=True)
 
         # get proteins that are present in the filtered data (at least one value is not NaN)
-        prot_present = data_filter.var_names[(~np.isnan(data_filter.X.toarray())).sum(axis=0) > 0]
+        prot_present = data_filtered.var_names[(~np.isnan(data_filtered.X.toarray())).sum(axis=0) > 0]
         upset_dict[class_value] = prot_present.tolist()
 
     if upsetForm:
@@ -203,101 +193,103 @@ def get_upset_query(upset_content, present, absent):
     return prot_query_df
 
 # TODO: check through all code and migrate to new filter_dict()
-def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = True):
+def filter(pdata, class_type, values, exact_cases = False, debug = False):
     """
-    [LEGACY] Filters samples using the old-style (class_type + values) interface.
+    Filters samples from either a pAnnData or AnnData object using legacy-style
+    (class_type + values) input.
 
-    This function is kept for backward compatibility. It internally converts inputs
-    to the new dictionary-style format using `format_class_filter()` and delegates
-    to `pAnnData.filter_sample_values()`. It is recommended to use the new dictionary-based
-    method directly.
+    This function converts the input to the new dictionary-style format internally.
+    - If `pdata` is a pAnnData object, this delegates to the class method `filter_sample_values()`.
+    - If `pdata` is an AnnData object, filtering is performed directly on `.obs`.
+
+    Note:
+    For pAnnData users, it is recommended to use the class method `.filter_sample_values()`
+    with dictionary-style input for cleaner and more consistent filtering.
 
     Parameters:
-    - pdata (pAnnData): The pAnnData object containing the samples.
+    - pdata (pAnnData or AnnData): The data object to filter.
     - class_type (str or list of str): Class labels to filter on (e.g. 'treatment' or ['treatment', 'cellline'])
     - values (list of str or list of list of str): Value(s) to match. For multiple class_types, this should be a list of values or a list of value-combinations. E.g. for cell_type: ['wt', 'kd'], or for a list of class_type [['wt', 'kd'],['control', 'treatment']].
     - exact_cases (bool): If True, treat values as exact combinations (AND across class types); otherwise allow OR logic within each class type.
-    - suppress_warnings (bool): If True, suppress debug printing.
+    - debug (bool): If True, prints filter query.
     
     Returns:
-    - pAnnData: Returns a copy of the filtered pdata object (same as `filter_dict()`)
+    - Filtered object of the same type (pAnnData or AnnData).
 
     Example:
-    >>> samples = get_samples(adata, class_type = ['cell_type', 'treatment'], values = [['wt', 'kd'], ['control', 'treatment']])
+    >>> samples = filter(pdata, class_type="treatment", values="kd")
+
+    >>> samples = utils.filter(adata, class_type = ['cell_type', 'treatment'], values = [['wt', 'kd'], ['control', 'treatment']])
     # returns samples where cell_type is either 'wt' or 'kd' and treatment is either 'control' or 'treatment'
 
-    >>> samples = get_samples(adata, exact_cases = True, class_type = ['cell_type', 'treatment'], values = [['wt', 'control'], ['kd', 'treatment']])
+    >>> samples = utils.filter(adata, exact_cases = True, class_type = ['cell_type', 'treatment'], values = [['wt', 'control'], ['kd', 'treatment']])
     # returns samples where cell_type is 'wt' and treatment is 'kd', or cell_type is 'control' and treatment is 'treatment'
     """
-    # pdata = pdata.copy()
-
-    # is_anndata = False
-    # if isinstance(pdata, ad.AnnData):
-    #     if not suppress_warnings:
-    #         print("Warning: The provided object is an AnnData object, not a pAnnData object. Proceeding with the filter.")
-    #     is_anndata = True
-    # elif not isinstance(pdata, pAnnData.pAnnData):
-    #     raise ValueError("Invalid input for 'pdata'. It should be a pAnnData object.")
-
-    # if isinstance(class_type, str):
-    #     query = f"(adata.obs['{class_type}'] == '{values}')"
-    # elif isinstance(class_type, list):
-    #     # if values is not wrapped in a list, wrap it
-    #     if len(values) != 1:
-    #         values = [values]
-            
-    #     if exact_cases:
-    #         # values = list of combinations, e.g. [['kd', 'AS'], ['sc', 'BE']]
-    #         query = " | ".join([
-    #             " & ".join(["(adata.obs['{}'] == '{}')".format(cls, val) for cls, val in zip(class_type, (vals if isinstance(vals, list) else [vals]))]) for vals in values
-    #         ])
-    #     else:
-    #         # values = list of lists, OR within each class, AND between classes
-    #         # query = " & ".join([
-    #         #     "({})".format(' | '.join(["(adata.obs['{}'] == '{}')".format(cls, val) for val in vals])) for cls, vals in zip(class_type, values)])
-    #         # query = " & ".join([
-    #         #     "({})".format(' | '.join(["(adata.obs['{}'] == '{}')".format(cls, val) for val in (vals if isinstance(vals, list) else [vals])])) for cls, vals in zip(class_type, values)
-    #         # ])
-    #         query = " & ".join([
-    #             "(" + " | ".join([
-    #                 f"(adata.obs['{cls}'] == '{val}')" 
-    #                 for val in (vals if isinstance(vals, list) else [vals])
-    #             ]) + ")"
-    #             for cls, vals in zip(class_type, values)
-    #         ])
-    # else:
-    #     raise ValueError("Invalid input for 'class_type'. Must be a string or a list of strings.")
     
-    # if not suppress_warnings:
-    #         print(f"Filter query: {query}")
-
-    # if is_anndata:
-    #     adata = pdata
-    #     pdata = adata[eval(query)]
-    # else:
-    #     if pdata.prot is not None:
-    #         adata = pdata.prot
-    #         pdata.prot = adata[eval(query)]
-    #     if pdata.pep is not None:
-    #         adata = pdata.pep
-    #         pdata.pep = adata[eval(query)]
-    #     pdata._update_summary()
-    #     pdata._append_history(f"Filtered by class type: {class_type}, values: {values}, exact_cases: {exact_cases}. Copy of the filtered pAnnData object returned.")    
-
-    warnings.warn(
-    "`filter()` is deprecated and will be removed in a future version. "
-    "Use the pAnnData class function `filter_sample_values()` with dictionary-style input instead.",
-    DeprecationWarning)
-
-    print("Warning: The function `filter()` is deprecated and will be removed in a future version. ")
+    if hasattr(pdata, "filter_sample_values"):
+        warnings.warn(
+            "You passed a pAnnData object to `filter()`. "
+            "It is recommended to use `pdata.filter_sample_values()` directly.",
+            UserWarning)
+        
+        print("UserWarning: It is recommended to use the class method `.filter_sample_values()` with dictionary-style input for cleaner and more consistent filtering.")
 
     formatted_values = format_class_filter(class_type, values, exact_cases)
-    return pdata.filter_sample_values(
-        values=formatted_values,
-        exact_cases=exact_cases,
-        debug=not suppress_warnings,
-        return_copy=True
-    )
+    
+    # pAnnData input
+    if hasattr(pdata, "filter_sample_values"):
+        return pdata.filter_sample_values(
+            values=formatted_values,
+            exact_cases=exact_cases,
+            debug=debug,
+            return_copy=True
+        )
+
+    # plain AnnData input
+    elif isinstance(pdata, ad.AnnData):
+        adata = pdata
+        obs_keys = adata.obs.columns
+
+        if exact_cases:
+            if not isinstance(formatted_values, list) or not all(isinstance(v, dict) for v in formatted_values):
+                raise ValueError("When exact_cases=True, `values` must be a list of dictionaries.")
+
+            for case in formatted_values:
+                if not case:
+                    raise ValueError("Empty dictionary found in values.")
+                for key in case:
+                    if key not in obs_keys:
+                        raise ValueError(f"Field '{key}' not found in adata.obs.")
+
+            query = " | ".join([
+                " & ".join([
+                    f"(adata.obs['{k}'] == '{v}')" for k, v in case.items()
+                ])
+                for case in formatted_values
+            ])
+
+        else:
+            if not isinstance(formatted_values, dict):
+                raise ValueError("When exact_cases=False, `values` must be a dictionary.")
+
+            for key in formatted_values:
+                if key not in obs_keys:
+                    raise ValueError(f"Field '{key}' not found in adata.obs.")
+
+            query_parts = []
+            for k, v in formatted_values.items():
+                v_list = v if isinstance(v, list) else [v]
+                part = " | ".join([f"(adata.obs['{k}'] == '{val}')" for val in v_list])
+                query_parts.append(f"({part})")
+            query = " & ".join(query_parts)
+
+        if debug:
+            print(f"Filter query: {query}")
+
+        return adata[eval(query)]
+
+    else:
+        raise ValueError("Input must be a pAnnData or AnnData object.")
 
 def format_class_filter(classes, class_value, exact_cases=False):
     """
@@ -350,6 +342,36 @@ def format_class_filter(classes, class_value, exact_cases=False):
 
     else:
         raise ValueError("Invalid input: `classes` should be a string or list of strings.")
+
+def resolve_class_filter(adata, classes, class_value, debug=False, *, filter_func=None):
+    """
+    Helper to resolve (classes, class_value) inputs and apply filtering.
+
+    Parameters:
+    - adata (AnnData or pAnnData): The data object to filter.
+    - classes (str, list, or None): Class label(s) for filtering.
+    - class_value (str or list): Corresponding value(s) to filter.
+    - debug (bool): Print resolved class/value pairs.
+    - filter_func (callable): Filtering function to use (default: `utils.filter`).
+
+    Returns:
+    - Filtered data object (same type as input).
+    """
+
+    from scviz import utils  # safe to do here in case of circular import
+
+    if isinstance(classes, str):
+        values = class_value
+    else:
+        values = class_value.split('_')
+
+    if debug:
+        print(f"Classes: {classes}, Values: {values}")
+
+    if filter_func is None:
+        filter_func = utils.filter
+
+    return filter_func(adata, classes, values, debug=debug)
 
 # ----------------
 # EXPLORATION(?) FUNCTIONS
