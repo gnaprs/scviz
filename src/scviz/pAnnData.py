@@ -317,53 +317,62 @@ class pAnnData:
 
     def filter_prot(self, condition = None, return_copy = 'True'):
         """
-        Filters the protein data based on a given condition, with an option to return a copy. Refer to pdata.x.var for protein column names to filter by.
+        Filters the protein data based on a protein metadata condition. It supports both exact value comparisons and substring matching with the keyword `includes`. Refer to pdata.x.var for protein column names to filter by.
+
+        Parameters:
+        - condition (str): A condition string to filter protein metadata. Can include:
+            - Standard comparisons (e.g. `"Protein FDR Confidence: Combined == 'High'"`)
+            - Substring search using `includes` (e.g. `"Description includes 'p97'"`)
+        - return_copy (bool): If True, returns a filtered copy. If False, modifies the object in place.
+
+        Returns:
+        - Filtered pAnnData object if `return_copy=True`, else modifies in place and returns None.
 
         Example:
-        >>> condition_prot1 = "Protein FDR Confidence: Combined == 'High'"
-        >>> pdata.filter_prot(condition_prot1)
-        or
-        >>> condition_prot2 = "Description includes 'p97'"
-        >>> pdata.filter_prot(condition_prot2)
+        >>> condition = "Protein FDR Confidence: Combined == 'High'"
+        >>> pdata.filter_prot(condition)
+        
+        >>> condition = "Description includes 'p97'"
+        >>> pdata.filter_prot(condition)
+
+        >>> condition = "Score > 0.75"
+        >>> pdata.filter_prot(condition)
         """
+
         if not self._check_data('protein'):
             raise ValueError(f"No protein data found. Check that protein data was imported.")
 
-        # Determine whether to operate on a copy or in-place
         pdata = self.copy() if return_copy else self
         action = "Returning a copy of" if return_copy else "Filtered and modified"
         # num_prot_og = pdata.prot.shape[1]
 
-        # Define the filtering logic
         if condition is not None:
-            formatted_condition = self._filter_helper_formatquery(condition, pdata.prot.var)
+            formatted_condition = self._format_filter_query(condition, pdata.prot.var)
             print(formatted_condition)
             filtered_proteins = pdata.prot.var[pdata.prot.var.eval(formatted_condition)]
             index_filter = filtered_proteins.index
-            pdata.prot = pdata.prot[:, index_filter]
+            pdata.prot = pdata.prot[:, filtered_proteins.index]
 
             message = f"{action} data based on protein condition: {condition}. Number of proteins kept: {pdata.prot.shape[1]}."
+            print(message)
 
             # if pdata.pep is not None:
             # need to filter out peptides that belonged only to the filtered proteins, need to use rs matrix for this
             # can start from pdata.prot.var.eval(formatted_condition) to get the rows that we're keeping
             #     pdata.pep = pdata.pep[filtered_queries.index]
 
-        # Logging and history updates
-        print(message)
         pdata._append_history(message)
         pdata._update_summary()
-
         return pdata if return_copy else None
 
-    def filter_sample(self, condition = None, return_copy = True, file_list=None):
+    def filter_sample_metadata(self, condition = None, return_copy = True, file_list=None):
         """
-        Filters the data (obs, observed samples) based on a given sample condition or file list, with an option to return a copy. Refer to pdata.summary or pdata.x.obs for sample column names to filter by.
+        Filters the data (obs, observed samples) based on a given summary condition or file list, with an option to return a copy. Refer to pdata.summary or pdata.x.obs for sample column names to filter by.
         
         Example:
-        >>> pdata.filter_sample("protein_count > 1000")
+        >>> pdata.filter_sample_metadata("protein_count > 1000")
         or
-        >>> pdata.filter_sample(file_list = ['fileA', 'fileB'])
+        >>> pdata.filter_sample_metadata(file_list = ['fileA', 'fileB'])
         """
         if not self._has_data():
             pass
@@ -377,7 +386,7 @@ class pAnnData:
 
         # Define the filtering logic
         if condition is not None:
-            formatted_condition = self._filter_helper_formatquery(condition, pdata._summary)
+            formatted_condition = self._format_filter_query(condition, pdata._summary)
             print(formatted_condition)
             # filtered_queries = pdata._summary.eval(formatted_condition)
             filtered_samples = pdata._summary[pdata._summary.eval(formatted_condition)]
@@ -407,28 +416,95 @@ class pAnnData:
 
         return pdata if return_copy else None
     
-    def _filter_helper_formatquery(self, condition, dataframe):
+    def filter_sample_values(self, values, exact_cases, debug=False, return_copy=True):
         """
-        Converts a query condition string by enclosing column names with spaces or special characters in backticks.
-        Also supports substring searches using `.str.contains()`.
+        Filter samples in a pAnnData object using dictionary-style field/value matching.
+
+        Parameters:
+        - pdata (AnnData): Input AnnData object
+        - values (dict or list of dict): Filtering conditions
+            - If `exact_cases=False`: dictionary of field: values (OR within field, AND across fields)
+            - If `exact_cases=True`: list of dictionaries, each defining an exact match case
+        - exact_cases (bool): Enable exact combination matching
+        - debug (bool): Suppress query printing
+        - return_copy (bool): Return a copy of the filtered object
+
+        Returns:
+        - AnnData: Filtered view of input data
+
+        Examples:
+        ---------
+        >>> pdata.filter_sample_values(values={'treatment': ['kd', 'sc'], 'cellline': 'AS'})
+        # History: Filtered by loose match on: treatment: ['kd', 'sc'], cellline: AS. Number of samples kept: 42. Copy of the filtered AnnData object returned.
+
+        >>> pdata.filter_sample_values(pdatvalues=[
+        ...     {'treatment': 'kd', 'cellline': 'AS'},
+        ...     {'treatment': 'sc', 'cellline': 'BE'}
+        ... ], exact_cases=True)
+        # History: Filtered by exact match on: {'treatment': 'kd', 'cellline': 'AS'}; {'treatment': 'sc', 'cellline': 'BE'}. Number of samples kept: 17.
         """
-        column_names = dataframe.columns.tolist()
-        
-        # Sort column names by length (longest first) to avoid partial replacements
-        column_names.sort(key=len, reverse=True)
-        
-        for col in column_names:
-            if re.search(r'[^\\w]', col):  # Matches any non-word character (spaces, special characters)
-                condition = re.sub(fr'(?<!`)({re.escape(col)})(?!`)', f'`{col}`', condition)
 
-        # Handle "includes" for substring search (converting it to .str.contains())
-        match = re.search(r'`?(\w[\w\s:.-]*)`?\s+includes\s+[\'"]([^\'"]+)[\'"]', condition)
-        if match:
-            col_name = match.group(1)
-            substring = match.group(2)
-            condition = f"{col_name}.str.contains('{substring}', case=False, na=False)"
+        pdata = self.copy() if return_copy else self
+        obs_keys = pdata.summary.columns
 
-        return condition
+        if exact_cases:
+            if not isinstance(values, list) or not all(isinstance(v, dict) for v in values):
+                raise ValueError("When exact_cases=True, `values` must be a list of dictionaries.")
+
+            for case in values:
+                if not case:
+                    raise ValueError("Empty dictionary found in values.")
+                for key in case:
+                    if key not in obs_keys:
+                        raise ValueError(f"Field '{key}' not found in adata.obs.")
+
+            query = " | ".join([
+                " & ".join([
+                    f"(adata.obs['{k}'] == '{v}')" for k, v in case.items()
+                ])
+                for case in values
+            ])
+
+        else:
+            if not isinstance(values, dict):
+                raise ValueError("When exact_cases=False, `values` must be a dictionary.")
+
+            for key in values:
+                if key not in obs_keys:
+                    raise ValueError(f"Field '{key}' not found in adata.obs.")
+
+            query_parts = []
+            for k, v in values.items():
+                v_list = v if isinstance(v, list) else [v]
+                part = " | ".join([f"(adata.obs['{k}'] == '{val}')" for val in v_list])
+                query_parts.append(f"({part})")
+            query = " & ".join(query_parts)
+
+        if not debug:
+                print(f"Filter query: {query}")
+
+        if pdata.prot is not None:
+            adata = pdata.prot
+            pdata.prot = adata[eval(query)]
+        if pdata.pep is not None:
+            adata = pdata.pep
+            pdata.pep = adata[eval(query)]
+
+        n_samples = len(pdata.prot)
+        filter_desc = (
+            f"Filtered by exact match on: {'; '.join(map(str, values))}."
+            if exact_cases else
+            f"Filtered by loose match on: {', '.join(f'{k}: {v}' for k, v in values.items())}."
+        )
+        copy_note = " Copy of the filtered AnnData object returned." if return_copy else ""
+        history_msg = f"{filter_desc} Number of samples kept: {n_samples}.{copy_note}"
+        pdata._append_history(history_msg)  
+        print(history_msg)
+        if n_samples == 0:
+            print("Warning: No samples matched the filter criteria.")
+        pdata._update_summary()
+
+        return pdata
 
     def export(self, filename, format = 'csv'):
         # export data, each layer as a separate file
@@ -448,6 +524,36 @@ class pAnnData:
             for layer in self.prot.layers:
                 self.prot.layers[layer].toarray().to_csv(f"{filename}_protein_{layer}.csv")
 
+    def _format_filter_query(self, condition, dataframe):
+        """
+        Formats a query string for filtering a DataFrame with potentially complex column names. Used in `filter_sample_metadata()` and `filter_prot()`.
+
+        - Wraps column names containing spaces/special characters in backticks for `pandas.eval()`.
+        - Supports custom `includes` syntax for substring matching, e.g.:
+            "Description includes 'p97'" → `Description.str.contains('p97', case=False, na=False)`
+
+        Parameters:
+        - condition (str): The condition string to parse.
+        - dataframe (pd.DataFrame): DataFrame whose columns will be used for parsing.
+
+        Returns:
+        - str: A condition string formatted for pandas `.eval()`
+        """
+        column_names = dataframe.columns.tolist()
+        column_names.sort(key=len, reverse=True) # Avoid partial matches
+        
+        for col in column_names:
+            if re.search(r'[^\\w]', col):  # Non-alphanumeric characters
+                condition = re.sub(fr'(?<!`)({re.escape(col)})(?!`)', f'`{col}`', condition)
+
+        # Handle 'includes' syntax for substring matching
+        match = re.search(r'`?(\w[\w\s:.-]*)`?\s+includes\s+[\'"]([^\'"]+)[\'"]', condition)
+        if match:
+            col_name = match.group(1)
+            substring = match.group(2)
+            condition = f"{col_name}.str.contains('{substring}', case=False, na=False)"
+
+        return condition
 
     # -----------------------------
     # PROCESSING FUNCTIONS
@@ -608,10 +714,10 @@ class pAnnData:
             adata.var['Stdev: ' + class_value] = rank_df['Stdev: ' + class_value]
             adata.var['Rank: ' + class_value] = rank_df['Rank: ' + class_value]
             rank_df = rank_df.reindex(sorted_indices)
-            
 
         self._history.append(f"{on}: Ranked {layer} data. Ranking, average and stdev stored in var.")
 
+    # TODO: imputation between samples - need to figure out how to split the data into classes before running imputation, and then splicing back together
     def impute(self, classes = None, layer = "X", method = 'min', on = 'protein', set_X = True, **kwargs):
         '''Function for imputation, imputes data across samples and stores it in the pdata layer X_impute_method.
         Unfortunately, the imputers in scikit-learn only impute columns, not rows, which means ColumnTransformer+SimpleImputers won't work.
@@ -1037,8 +1143,9 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     # prot_X: sparse data matrix
     if prot_value is not 'PG.MaxLFQ':
         if report_file.endswith('.tsv') and prot_value == 'PG.Quantity':
-            # throw an error that DIA-NN version >2.0 does not have PG.quantity
-            raise ValueError("Reports generated with DIA-NN version >2.0 do not contain PG.Quantity values, please use PG.MaxLFQ .")
+            # check if 'PG.Quantity' is in the columns, if yes then pass, if not then throw an error that DIA-NN version >2.0 does not have PG.quantity
+            if 'PG.Quantity' not in report_all.columns:
+                raise ValueError("Reports generated with DIA-NN version >2.0 do not contain PG.Quantity values, please use PG.MaxLFQ .")
         else:
             print("INFO: Protein value specified is not PG.MaxLFQ, please check if correct.")
     prot_X_pivot = report_all.pivot_table(index='Master.Protein', columns='Run', values=prot_value, aggfunc='first', sort=False)

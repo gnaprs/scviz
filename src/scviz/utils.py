@@ -34,6 +34,7 @@ from os import access
 import re
 import io
 import requests
+import warnings
 
 import pandas as pd
 import numpy as np
@@ -49,13 +50,14 @@ from scviz import pAnnData
 
 # ----------------
 # DATA PROCESSING FUNCTIONS
-def get_samplenames(adata, class_type):
+# TODO: get_samplenames and get_classlist are very similar, may want to consider combining at some point
+def get_samplenames(adata, classes):
     """
     Gets the sample names for the given class(es) type. Helper function for plot functions. 
 
     Parameters:
     - adata (anndata.AnnData): The AnnData object containing the sample names.
-    - class_type (str or list of str): The classes to use for selecting samples. E.g. 'cell_type' or ['cell_type', 'treatment'].
+    - classes (str or list of str): The classes to use for selecting samples. E.g. 'cell_type' or ['cell_type', 'treatment'].
 
     Returns:
     - list of str: The sample names.
@@ -64,14 +66,14 @@ def get_samplenames(adata, class_type):
     >>> samples = get_samplenames(adata, 'cell_type')
     """
 
-    if class_type is None:
+    if classes is None:
         return None
-    elif isinstance(class_type, str):
-        return adata.obs[class_type].values.tolist()
-    elif isinstance(class_type, list):
-        return adata.obs[class_type].apply(lambda row: ', '.join(row.values.astype(str)), axis=1).values.tolist()
+    elif isinstance(classes, str):
+        return adata.obs[classes].values.tolist()
+    elif isinstance(classes, list):
+        return adata.obs[classes].apply(lambda row: ', '.join(row.values.astype(str)), axis=1).values.tolist()
     else:
-        raise ValueError("Invalid input for 'class_type'. It should be None, a string, or a list of strings.")
+        raise ValueError("Invalid input for 'classes'. It should be None, a string, or a list of strings.")
     
 def get_classlist(adata, classes = None, order = None):
     """
@@ -134,6 +136,7 @@ def get_classlist(adata, classes = None, order = None):
 
     return classes_list
 
+# NOTE: not sure if needed?
 def get_adata(pdata, on = 'protein'):
     if on == 'protein':
         return pdata.prot
@@ -199,19 +202,25 @@ def get_upset_query(upset_content, present, absent):
 
     return prot_query_df
 
-# TODO: move to class function, ensure nothing else breaks
-def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = False):
+# TODO: check through all code and migrate to new filter_dict()
+def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = True):
     """
-    Filters out for the given class(es) type. Returns a copy of the filtered pdata object, does not modify the original object.
+    [LEGACY] Filters samples using the old-style (class_type + values) interface.
+
+    This function is kept for backward compatibility. It internally converts inputs
+    to the new dictionary-style format using `format_class_filter()` and delegates
+    to `pAnnData.filter_sample_values()`. It is recommended to use the new dictionary-based
+    method directly.
 
     Parameters:
     - pdata (pAnnData): The pAnnData object containing the samples.
-    - class_type (str or list of str): The classes to use for selecting samples. E.g. 'cell_type' or ['cell_type', 'treatment'].
-    - values (list of str or list of list of str): The values to select for within the class_type. E.g. for cell_type: ['wt', 'kd'], or for a list of class_type [['wt', 'kd'],['control', 'treatment']].
-    - exact_cases (bool): Whether to match the exact cases specified by the user. Default is False.
+    - class_type (str or list of str): Class labels to filter on (e.g. 'treatment' or ['treatment', 'cellline'])
+    - values (list of str or list of list of str): Value(s) to match. For multiple class_types, this should be a list of values or a list of value-combinations. E.g. for cell_type: ['wt', 'kd'], or for a list of class_type [['wt', 'kd'],['control', 'treatment']].
+    - exact_cases (bool): If True, treat values as exact combinations (AND across class types); otherwise allow OR logic within each class type.
+    - suppress_warnings (bool): If True, suppress debug printing.
     
     Returns:
-    - pAnnData: Returns a copy of the filtered pdata object. Does not modify the original object.
+    - pAnnData: Returns a copy of the filtered pdata object (same as `filter_dict()`)
 
     Example:
     >>> samples = get_samples(adata, class_type = ['cell_type', 'treatment'], values = [['wt', 'kd'], ['control', 'treatment']])
@@ -220,58 +229,127 @@ def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = F
     >>> samples = get_samples(adata, exact_cases = True, class_type = ['cell_type', 'treatment'], values = [['wt', 'control'], ['kd', 'treatment']])
     # returns samples where cell_type is 'wt' and treatment is 'kd', or cell_type is 'control' and treatment is 'treatment'
     """
-    pdata = pdata.copy()
+    # pdata = pdata.copy()
 
-    is_anndata = False
-    if isinstance(pdata, ad.AnnData):
-        if not suppress_warnings:
-            print("Warning: The provided object is an AnnData object, not a pAnnData object. Proceeding with the filter.")
-        is_anndata = True
-    elif not isinstance(pdata, pAnnData.pAnnData):
-        raise ValueError("Invalid input for 'pdata'. It should be a pAnnData object.")
+    # is_anndata = False
+    # if isinstance(pdata, ad.AnnData):
+    #     if not suppress_warnings:
+    #         print("Warning: The provided object is an AnnData object, not a pAnnData object. Proceeding with the filter.")
+    #     is_anndata = True
+    # elif not isinstance(pdata, pAnnData.pAnnData):
+    #     raise ValueError("Invalid input for 'pdata'. It should be a pAnnData object.")
 
-    if class_type is None:
-        print("No class type specified. Returning unmodified pAnnData object.")
-        return pdata
-    
-    if isinstance(class_type, str):
-        query = f"(adata.obs['{class_type}'] == '{values}')"
-        print('DEVELOPMENT: testing for query - ', query)
-    elif isinstance(class_type, list):
-        # if values is not wrapped in a list, wrap it
-        if len(values) != 1:
-            values = [values]
+    # if isinstance(class_type, str):
+    #     query = f"(adata.obs['{class_type}'] == '{values}')"
+    # elif isinstance(class_type, list):
+    #     # if values is not wrapped in a list, wrap it
+    #     if len(values) != 1:
+    #         values = [values]
             
-        if exact_cases:
-            query = " | ".join([
-                " & ".join(["(adata.obs['{}'] == '{}')".format(cls, val) for cls, val in zip(class_type, (vals if isinstance(vals, list) else [vals]))]) for vals in values
-            ])
-            print('DEVELOPMENT: exact|testing for query - ', query)
+    #     if exact_cases:
+    #         # values = list of combinations, e.g. [['kd', 'AS'], ['sc', 'BE']]
+    #         query = " | ".join([
+    #             " & ".join(["(adata.obs['{}'] == '{}')".format(cls, val) for cls, val in zip(class_type, (vals if isinstance(vals, list) else [vals]))]) for vals in values
+    #         ])
+    #     else:
+    #         # values = list of lists, OR within each class, AND between classes
+    #         # query = " & ".join([
+    #         #     "({})".format(' | '.join(["(adata.obs['{}'] == '{}')".format(cls, val) for val in vals])) for cls, vals in zip(class_type, values)])
+    #         # query = " & ".join([
+    #         #     "({})".format(' | '.join(["(adata.obs['{}'] == '{}')".format(cls, val) for val in (vals if isinstance(vals, list) else [vals])])) for cls, vals in zip(class_type, values)
+    #         # ])
+    #         query = " & ".join([
+    #             "(" + " | ".join([
+    #                 f"(adata.obs['{cls}'] == '{val}')" 
+    #                 for val in (vals if isinstance(vals, list) else [vals])
+    #             ]) + ")"
+    #             for cls, vals in zip(class_type, values)
+    #         ])
+    # else:
+    #     raise ValueError("Invalid input for 'class_type'. Must be a string or a list of strings.")
+    
+    # if not suppress_warnings:
+    #         print(f"Filter query: {query}")
+
+    # if is_anndata:
+    #     adata = pdata
+    #     pdata = adata[eval(query)]
+    # else:
+    #     if pdata.prot is not None:
+    #         adata = pdata.prot
+    #         pdata.prot = adata[eval(query)]
+    #     if pdata.pep is not None:
+    #         adata = pdata.pep
+    #         pdata.pep = adata[eval(query)]
+    #     pdata._update_summary()
+    #     pdata._append_history(f"Filtered by class type: {class_type}, values: {values}, exact_cases: {exact_cases}. Copy of the filtered pAnnData object returned.")    
+
+    warnings.warn(
+    "`filter()` is deprecated and will be removed in a future version. "
+    "Use the pAnnData class function `filter_sample_values()` with dictionary-style input instead.",
+    DeprecationWarning)
+
+    print("Warning: The function `filter()` is deprecated and will be removed in a future version. ")
+
+    formatted_values = format_class_filter(class_type, values, exact_cases)
+    return pdata.filter_sample_values(
+        values=formatted_values,
+        exact_cases=exact_cases,
+        debug=not suppress_warnings,
+        return_copy=True
+    )
+
+def format_class_filter(classes, class_value, exact_cases=False):
+    """
+    Converts legacy `classes` and `class_value` input into the new dictionary-style filter format.
+
+    Parameters:
+    - classes (str or list of str): Field name(s) used for filtering (e.g. 'treatment' or ['treatment', 'cellline']).
+    - class_value (str, list of str, or list of list): The value(s) corresponding to the class(es).
+        If a string, it may be underscore-joined (e.g. 'kd_AS').
+        If a list of strings (e.g. ['kd_AS', 'sc_BE']), and exact_cases=True, each will be split and zipped with classes.
+    - exact_cases (bool): Whether to return a list of exact match dictionaries or a combined OR filter.
+
+    Returns:
+    - dict or list of dicts: Formatted for dictionary-style filter input.
+    """
+
+    if isinstance(classes, str):
+        # Simple case: one class
+        if isinstance(class_value, list) and exact_cases:
+            return [{classes: val} for val in class_value]
         else:
-            # query = " & ".join([
-            #     "({})".format(' | '.join(["(adata.obs['{}'] == '{}')".format(cls, val) for val in vals])) for cls, vals in zip(class_type, values)])
-            query = " & ".join([
-                "({})".format(' | '.join(["(adata.obs['{}'] == '{}')".format(cls, val) for val in (vals if isinstance(vals, list) else [vals])])) for cls, vals in zip(class_type, values)
-            ])
-            print('DEVELOPMENT: non-exact|testing for query - ', query)
-            
-    else:
-        raise ValueError("Invalid input for 'class_type'. It should be None, a string, or a list of strings.")
-    
-    if is_anndata:
-        adata = pdata
-        pdata = adata[eval(query)]
-    else:
-        if pdata.prot is not None:
-            adata = pdata.prot
-            pdata.prot = adata[eval(query)]
-        if pdata.pep is not None:
-            adata = pdata.pep
-            pdata.pep = adata[eval(query)]
-        pdata._update_summary()
-        pdata._append_history(f"Filtered by class type: {class_type}, values: {values}, exact_cases: {exact_cases}. Copy of the filtered pAnnData object returned.")    
+            return {classes: class_value}
 
-    return pdata
+    elif isinstance(classes, list):
+        if exact_cases:
+            # exact_cases + list of combos
+            if isinstance(class_value, str):
+                class_value = [class_value]
+
+            formatted = []
+            for entry in class_value:
+                if isinstance(entry, str):
+                    values = entry.split('_')
+                else:
+                    values = entry
+                if len(values) != len(classes):
+                    raise ValueError("Each class_value entry must match the number of classes.")
+                formatted.append({cls: val for cls, val in zip(classes, values)})
+            return formatted
+
+        else:
+            # loose match — OR within each class
+            if isinstance(class_value, str):
+                values = class_value.split('_')
+            else:
+                values = class_value
+            if len(values) != len(classes):
+                raise ValueError("class_value must align with the number of classes.")
+            return {cls: val for cls, val in zip(classes, values)}
+
+    else:
+        raise ValueError("Invalid input: `classes` should be a string or list of strings.")
 
 # ----------------
 # EXPLORATION(?) FUNCTIONS
@@ -350,15 +428,13 @@ def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'prot
     return df
 
 def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], batch_size=1024):
-    """ Get data from Uniprot for a list of proteins. Uses get_uniprot_fields_worker to get data in batches of batch_size.
+    """ Get data from Uniprot for a list of proteins. Uses get_uniprot_fields_worker to get data in batches of batch_size. For more information, see https://www.uniprot.org/help/return_fields for list of search_fields.
+        Current function accepts accession protein list. For more queries, see https://www.uniprot.org/help/query-fields for a list of query fields that can be searched for.
 
     Args:
         prot_list (list): list of protein IDs
         search_fields (list): list of fields to search for.
         batch_size (int): number of proteins to search for in each batch. Default (and maximum) is 1024.
-
-        For more information, see https://www.uniprot.org/help/return_fields for list of search_fields.
-        Current function accepts accession protein list. For more queries, see https://www.uniprot.org/help/query-fields for a list of query fields that can be searched for.
 
     Returns:
         pandas.DataFrame: DataFrame with the results
@@ -368,6 +444,12 @@ def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_nam
         >>> df = get_uniprot_fields(uniprot_list)
     """
 
+    # BUGFIX: accession should be first in the list of search fields, otherwise error thrown in worker function
+    if 'accession' not in search_fields:
+        search_fields = ['accession'] + search_fields
+    elif search_fields[0] != 'accession':
+        search_fields.remove('accession')
+        search_fields = ['accession'] + search_fields
     # Split the id_list into batches of size batch_size
     batches = [prot_list[i:i + batch_size] for i in range(0, len(prot_list), batch_size)]
     # print total number and number of batches
