@@ -4,6 +4,7 @@ import pandas as pd
 import anndata as ad
 import numpy as np
 import scanpy as sc
+import datetime
 
 import copy
 import warnings
@@ -108,6 +109,14 @@ class pAnnData:
     @property
     def stats(self):
         return self._stats
+    
+    @property
+    def metadata(self):
+        if self.prot is not None and 'metadata' in self.prot.uns:
+            return self.prot.uns['metadata']
+        elif self.pep is not None and 'metadata' in self.pep.uns:
+            return self.pep.uns['metadata']
+        return {}
 
     @prot.setter
     def prot(self, value: ad.AnnData):
@@ -363,6 +372,66 @@ class pAnnData:
     def print_history(self):
         formatted_history = "\n".join(f"{i}: {action}" for i, action in enumerate(self._history, 1))
         print("-------------------------------\nHistory:\n-------------------------------\n"+formatted_history)
+
+    def validate(self, verbose=True):
+        """
+        Checks internal consistency of the pAnnData object.
+        
+        Returns:
+            bool: True if all checks pass, False otherwise.
+        """
+        issues = []
+
+        # --- Check prot and pep dimensions ---
+        for label, ad in [('prot', self.prot), ('pep', self.pep)]:
+            if ad is not None:
+                if ad.obs.shape[0] != ad.X.shape[0]:
+                    issues.append(f"{label}.obs rows ({ad.obs.shape[0]}) != {label}.X rows ({ad.X.shape[0]})")
+                if ad.var.shape[0] != ad.X.shape[1]:
+                    issues.append(f"{label}.var rows ({ad.var.shape[0]}) != {label}.X cols ({ad.X.shape[1]})")
+                if ad.obs.index.duplicated().any():
+                    issues.append(f"{label}.obs has duplicated index values")
+                if ad.var.index.duplicated().any():
+                    issues.append(f"{label}.var has duplicated index values")
+
+        # --- Check obs name overlap between prot and pep ---
+        if self.prot is not None and self.pep is not None:
+            prot_names = set(self.prot.obs_names)
+            pep_names = set(self.pep.obs_names)
+            if prot_names != pep_names:
+                missing_in_pep = prot_names - pep_names
+                missing_in_prot = pep_names - prot_names
+                issues.append("prot and pep obs_names do not match")
+                if missing_in_pep:
+                    issues.append(f"  - {len(missing_in_pep)} samples in prot but not in pep")
+                if missing_in_prot:
+                    issues.append(f"  - {len(missing_in_prot)} samples in pep but not in prot")
+
+        # --- Check .summary alignment ---
+        if self._summary is not None:
+            for label, ad in [('prot', self.prot), ('pep', self.pep)]:
+                if ad is not None:
+                    if not ad.obs.index.equals(self._summary.index):
+                        issues.append(f"{label}.obs index does not match .summary index")
+
+        # --- Check RS matrix shape ---
+        if self.rs is not None and self.prot is not None and self.pep is not None:
+            rs_shape = self.rs.shape
+            expected_shape = (self.pep.shape[1], self.prot.shape[1])
+            if rs_shape != expected_shape:
+                issues.append(f"RS shape mismatch: got {rs_shape}, expected {expected_shape} (peptides × proteins)")
+
+        # --- Summary of results ---
+        if issues:
+            if verbose:
+                print("❌ Validation failed with the following issues:")
+                for issue in issues:
+                    print(" -", issue)
+            return False
+        else:
+            if verbose:
+                print("✅ pAnnData object is valid.")
+            return True
 
     # -----------------------------
     # TESTS FUNCTIONS
@@ -1262,6 +1331,39 @@ def _normalize_helper(data, method, **kwargs):
 
     return data_norm
 
+def import_data(source: str, **kwargs):
+    """
+    Unified wrapper for importing data into a pAnnData object.
+    
+    Parameters:
+    - source (str): The tool or data source. Options:
+        - 'diann' or 'dia-nn' → calls import_diann()
+        - 'pd', 'proteomeDiscoverer', 'pd13', 'pd24' → calls import_proteomeDiscoverer()
+        - 'fragpipe', 'fp' → Not implemented yet
+        - 'spectronaut', 'sn' → Not implemented yet
+    - **kwargs: Arguments passed directly to the corresponding import function
+
+    Returns:
+    - pAnnData object
+    """
+    source = source.lower()
+
+    if source in ['diann', 'dia-nn']:
+        return import_diann(**kwargs)
+
+    elif source in ['pd', 'proteomediscoverer', 'proteome_discoverer', 'pd2.5', 'pd24']:
+        return import_proteomeDiscoverer(**kwargs)
+
+    elif source in ['fragpipe', 'fp']:
+        raise NotImplementedError("FragPipe import is not yet implemented. Stay tuned!")
+
+    elif source in ['spectronaut', 'sn']:
+        raise NotImplementedError("Spectronaut import is not yet implemented. Stay tuned!")
+
+    else:
+        raise ValueError(f"❌ Unsupported import source: '{source}'. "
+                         "Valid options: 'diann', 'proteomeDiscoverer', 'fragpipe', 'spectronaut'.")
+
 def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample']):
     if not prot_file and not pep_file:
         raise ValueError("At least one of prot_file or pep_file must be provided")
@@ -1331,7 +1433,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         print(f"Number of files: {len(pep_obs_names)}")
         print(f"Number of peptides: {len(pep_var)}")
     else:
-        pep_X = pep_layers_mbr = pep_var_names = pep_obs_names = pep_var = None
+        pep_X = pep_layers_mbr = pep_var_names = pep_var = pep_obs_names = pep_obs = None
 
     if prot_file and pep_file:
         # -----------------------------
@@ -1350,10 +1452,6 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
 
     # ASSERTIONS
     # -----------------------------
-    # check that all files overlap, and that the order is the same
-    if prot_obs_names is not None and pep_obs_names is not None:
-        assert set(pep_obs_names) == set(prot_obs_names), "The files in peptide and protein data must be the same"
-    # -----------------------------
     # check if mlb.classes_ has overlap with prot_var
     if prot_file and pep_file:
         mlb_classes_set = set(mlb.classes_)
@@ -1365,31 +1463,20 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
             print(f"Unique to peptide data: {mlb_classes_set - prot_var_set}")
             print(f"Unique to protein data: {prot_var_set - mlb_classes_set}")
 
-    # pAnnData OBJECT - should be the same for all imports
-    # -----------------------------
-    pdata = pAnnData(prot_X, pep_X, rs)
-
-    if prot_file:
-        pdata.prot.obs = pd.DataFrame(prot_obs)
-        pdata.prot.layers['X_mbr'] = prot_layers_mbr
-        pdata.prot.layers['X_raw'] = prot_X
-        pdata.prot.var = pd.DataFrame(prot_var)
-        pdata.prot.obs_names = list(prot_obs_names)
-        pdata.prot.var_names = list(prot_var_names)
-        pdata.prot.obs.columns = obs_columns if obs_columns else list(range(len(prot_obs.columns)))
-        pdata._append_history(f"Imported protein data from {prot_file}")
-
-    if pep_file:
-        pdata.pep.obs = pd.DataFrame(pep_obs)
-        pdata.pep.layers['X_mbr'] = pep_layers_mbr
-        pdata.pep.layers['X_raw'] = pep_X
-        pdata.pep.var = pd.DataFrame(pep_var)
-        pdata.pep.obs_names = list(pep_obs_names)
-        pdata.pep.var_names = list(pep_var_names)
-        pdata.pep.obs.columns = obs_columns if obs_columns else list(range(len(pep_obs.columns)))
-        pdata._append_history(f"Imported peptide data from {pep_file}")
-
-    pdata.update_summary()
+    pdata = _create_pAnnData_from_parts(
+        prot_X, pep_X, rs,
+        prot_obs, prot_var, prot_obs_names, prot_var_names,
+        pep_obs, pep_var, pep_obs_names, pep_var_names,
+        obs_columns=obs_columns,
+        X_mbr_prot=prot_layers_mbr,
+        X_mbr_pep=pep_layers_mbr,
+        metadata={
+            "source": "proteomeDiscoverer",
+            "prot_file": prot_file,
+            "pep_file": pep_file
+        },
+        history_msg="Imported protein and/or peptide data from Proteome Discoverer."
+    )
 
     print("pAnnData object created. Use `print(pdata)` to view the object.")
     return pdata
@@ -1482,7 +1569,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     rs = mlb.fit_transform(pep_prot_list)
     index_dict = {protein: index for index, protein in enumerate(mlb.classes_)}
     reorder_indices = [index_dict[protein] for protein in prot_var_names]
-    rs = rs[:, reorder_indices]
+    rs = rs[:, reorder_indices].T
     print("RS matrix successfully computed")
 
     # TO ADD: number of peptides per protein
@@ -1493,10 +1580,6 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     # -----------------------------
     # ASSERTIONS
     # -----------------------------
-    # check that all files overlap, and that the order is the same
-    if prot_obs_names is not None and pep_obs_names is not None:
-        assert set(pep_obs_names) == set(prot_obs_names), "The files in peptide and protein data must be the same"
-    # -----------------------------
     # check if mlb.classes_ has overlap with prot_var
     mlb_classes_set = set(mlb.classes_)
     prot_var_set = set(prot_var_names)
@@ -1506,28 +1589,92 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
         print(f"Overlap: {len(mlb_classes_set & prot_var_set)}")
         print(f"Unique to peptide data: {mlb_classes_set - prot_var_set}")
         print(f"Unique to protein data: {prot_var_set - mlb_classes_set}")
-
-    # pAnnData OBJECT - should be the same for all imports
-    # -----------------------------
-
-    pdata = pAnnData(prot_X, pep_X, rs)
-
-    pdata.prot.obs = pd.DataFrame(prot_obs)
-    pdata.prot.var = pd.DataFrame(prot_var)
-    pdata.prot.obs_names = list(prot_obs_names)
-    pdata.prot.var_names = list(prot_var_names)
-    pdata.prot.obs.columns = obs_columns if obs_columns else list(range(len(prot_obs.columns)))
-    pdata.prot.layers['X_raw'] = prot_X
-
-    pdata.pep.obs = pd.DataFrame(pep_obs)
-    pdata.pep.var = pd.DataFrame(pep_var)
-    pdata.pep.obs_names = list(pep_obs_names)
-    pdata.pep.var_names = list(pep_var_names)
-    pdata.pep.obs.columns = obs_columns if obs_columns else list(range(len(pep_obs.columns)))
-    pdata.pep.layers['X_raw'] = pep_X
-
-    pdata.update_summary()
+    
+    pdata = _create_pAnnData_from_parts(
+        prot_X, pep_X, rs,
+        prot_obs, prot_var, prot_obs_names, prot_var_names,
+        pep_obs, pep_var, pep_obs_names, pep_var_names,
+        obs_columns=obs_columns,
+        metadata={
+            "source": "diann",
+            "file": report_file,
+            "protein_metric": prot_value,
+            "peptide_metric": pep_value
+        },
+        history_msg=f"Imported DIA-NN report from {report_file} using {prot_value} (protein) and {pep_value} (peptide)."
+    )
+    
     pdata._append_history(f"Imported protein data from {report_file}, using {prot_value} as protein value and {pep_value} as peptide value.")
     print("pAnnData object created. Use `print(pdata)` to view the object.")
+
+    return pdata
+
+def _create_pAnnData_from_parts(
+    prot_X, pep_X, rs,
+    prot_obs, prot_var, prot_obs_names, prot_var_names,
+    pep_obs=None, pep_var=None, pep_obs_names=None, pep_var_names=None,
+    obs_columns=None,
+    X_mbr_prot=None,
+    X_mbr_pep=None,
+    metadata=None,
+    history_msg=""
+):
+    """
+    Assemble a pAnnData object from processed matrices and metadata.
+
+    Parameters:
+    - prot_X, pep_X: csr_matrix (observations × features); one may be None
+    - rs: peptide-to-protein relational matrix (or None if not applicable)
+    - *_obs, *_var: pandas DataFrames for sample and feature metadata
+    - *_obs_names, *_var_names: list-like of sample/protein/peptide names
+    - obs_columns: optional list of column names to assign to .obs
+    - X_mbr_prot, X_mbr_pep: optional MBR identification layers
+    - metadata: optional dict of metadata tags (e.g. {'source': 'diann'})
+    - history_msg: string to append to the object's history
+
+    Returns:
+    - pAnnData object with summary updated and validated
+    """
+    pdata = pAnnData(prot_X, pep_X, rs)
+
+    # --- PROTEIN ---
+    if prot_X is not None:
+        pdata.prot.obs = pd.DataFrame(prot_obs)
+        pdata.prot.var = pd.DataFrame(prot_var)
+        pdata.prot.obs_names = list(prot_obs_names)
+        pdata.prot.var_names = list(prot_var_names)
+        pdata.prot.obs.columns = obs_columns if obs_columns else list(range(pdata.prot.obs.shape[1]))
+        pdata.prot.layers['X_raw'] = prot_X
+        if X_mbr_prot is not None:
+            pdata.prot.layers['X_mbr'] = X_mbr_prot
+
+    # --- PEPTIDE ---
+    if pep_X is not None:
+        pdata.pep.obs = pd.DataFrame(pep_obs)
+        pdata.pep.var = pd.DataFrame(pep_var)
+        pdata.pep.obs_names = list(pep_obs_names)
+        pdata.pep.var_names = list(pep_var_names)
+        pdata.pep.obs.columns = obs_columns if obs_columns else list(range(pdata.pep.obs.shape[1]))
+        pdata.pep.layers['X_raw'] = pep_X
+        if X_mbr_pep is not None:
+            pdata.pep.layers['X_mbr'] = X_mbr_pep
+
+    # --- Metadata ---
+    metadata = metadata or {}
+    metadata.setdefault("imported_at", datetime.datetime.now().isoformat())
+
+    if pdata.prot is not None:
+        pdata.prot.uns['metadata'] = metadata
+    if pdata.pep is not None:
+        pdata.pep.uns['metadata'] = metadata
+
+    # --- Summary + Validation ---
+    pdata.update_summary(recompute=True)
+
+    if not pdata.validate():
+        print("⚠️ Warning: Validation issues found. Use `pdata.validate()` to inspect.")
+
+    if history_msg:
+        pdata._append_history(history_msg)
 
     return pdata
