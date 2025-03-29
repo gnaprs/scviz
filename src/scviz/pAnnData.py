@@ -145,19 +145,50 @@ class pAnnData:
 
     # -----------------------------
     # UTILITY FUNCTIONS
-    def _set_RS(self, rs):
-        # print rs shape, as well as protein and peptide shape if available
-        print(f"Setting rs matrix with dimensions {rs.shape}")
-        # assert that the dimensions of rs match either protein x peptide or peptide x protein
-        assert ((self.prot is None or rs.shape[0] == self.prot.shape[1]) and (self.pep is None or rs.shape[1] == self.pep.shape[1])) or \
-            ((self.prot is None or rs.shape[1] == self.prot.shape[1]) and (self.pep is None or rs.shape[0] == self.pep.shape[1])), \
-            f"The dimensions of rs ({rs.shape}) must match either protein x peptide ({self.prot.shape[1] if self.prot is not None else None} x {self.pep.shape[1] if self.pep is not None else None}) or peptide x protein ({self.pep.shape[1] if self.pep is not None else None} x {self.prot.shape[1] if self.prot is not None else None})"
+    def _set_RS(self, rs, debug=False, validate=True):
+        """
+        Internal method to set the RS (protein × peptide) mapping matrix.
+        Transposes the input if it's in peptide × protein format.
 
-        # check dimensions of rs, make sure protein (row) x peptide (column) format
-        if self.prot is not None and rs.shape[0] != self.prot.shape[1]:
-            print("Transposing rs matrix to protein x peptide format")
-            rs = rs.T
+        Parameters:
+        - rs (array or sparse matrix): The new RS matrix
+        - debug (bool): Print debug info
+        - validate (bool): If True (default), check that RS shape matches .prot and .pep
+        """
+        if debug:
+            print(f"Setting rs matrix with dimensions {rs.shape}")
+
+        # Only validate if requested (e.g. for external .rs = ... use)
+        if validate:
+            prot_n = self.prot.shape[1] if self.prot is not None else None
+            pep_n = self.pep.shape[1] if self.pep is not None else None
+            rs_shape = rs.shape
+
+            valid_prot_pep = (prot_n is None or rs_shape[0] == prot_n) and (pep_n is None or rs_shape[1] == pep_n)
+            valid_pep_prot = (prot_n is None or rs_shape[1] == prot_n) and (pep_n is None or rs_shape[0] == pep_n)
+
+            if not (valid_prot_pep or valid_pep_prot):
+                raise ValueError(
+                    f"❌ RS shape {rs_shape} does not match expected protein × peptide "
+                    f"({prot_n} × {pep_n}) or peptide × protein ({pep_n} × {prot_n})."
+                )
+
+            # Transpose if necessary
+            if self.prot is not None and rs_shape[0] != prot_n:
+                if debug:
+                    print("↔️  Transposing RS matrix to match protein × peptide format")
+                rs = rs.T
+
+        # Always store as sparse
         self._rs = sparse.csr_matrix(rs)
+
+        if debug:
+            nnz = self._rs.nnz
+            total = self._rs.shape[0] * self._rs.shape[1]
+            sparsity = 100 * (1 - nnz / total)
+            print(f"✅ RS matrix set: {self._rs.shape} (proteins × peptides), sparsity: {sparsity:.2f}%")
+
+
 
     def __repr__(self):
         if self.prot is not None:
@@ -261,7 +292,8 @@ class pAnnData:
     #     self._history.append(history_statement)
 
     def _update_metrics(self):
-        """Compute per-sample metrics (quant, count, abundance) for prot and pep data."""
+        """Compute per-sample and RS-derived metrics for prot and pep data."""
+        
         if self.prot is not None:
             X = self.prot.X.toarray()
             self.prot.obs['protein_quant'] = np.sum(~np.isnan(X), axis=1) / X.shape[1]
@@ -281,6 +313,32 @@ class pAnnData:
             if 'X_mbr' in self.pep.layers:
                 self.pep.obs['mbr_count'] = (self.pep.layers['X_mbr'] == 'Peak Found').sum(axis=1)
                 self.pep.obs['high_count'] = (self.pep.layers['X_mbr'] == 'High').sum(axis=1)
+
+        # RS metrics for prot.var
+        if self.rs is not None and self.prot is not None:
+            rs = self.rs.toarray() if sparse.issparse(self.rs) else self.rs
+            peptides_per_protein = rs.sum(axis=1).astype(int)
+            unique_mask = rs.sum(axis=0) == 1
+            unique_counts = rs[:, unique_mask].sum(axis=1).astype(int)
+            self.prot.var['peptides_per_protein'] = peptides_per_protein
+            self.prot.var['unique_peptides'] = unique_counts
+
+    def _update_summary_metrics(self, unique_peptide_thresh=2):
+        """
+        Add RS-derived per-sample metrics to ._summary.
+        Currently adds 'unique_protein_count' (e.g., ≥2 unique peptides per protein).
+        """
+        if (
+            self.rs is not None and
+            self.prot is not None and
+            hasattr(self, '_summary') and
+            'unique_peptides' in self.prot.var.columns
+        ):
+            unique_mask = self.prot.var['unique_peptides'] >= unique_peptide_thresh
+            quant_matrix = self.prot.X.toarray()
+            high_conf_matrix = quant_matrix[:, unique_mask]
+            high_conf_count = np.sum(~np.isnan(high_conf_matrix), axis=1)
+            self._summary['unique_pep2_protein_count'] = high_conf_count
 
     def _merge_obs(self):
         """
@@ -348,12 +406,13 @@ class pAnnData:
 
         Parameters:
         - recompute (bool): If True, re-calculate protein/peptide stats.
-        - sync_back (bool): If True, push edited .summary values back to .prot.obs / .pep.obs. False by default, as .summary is dervied.
+        - sync_back (bool): If True, push edited .summary values back to .prot.obs / .pep.obs. False by default, as .summary is derived.
         - verbose (bool): If True, print action messages.
         """
         if recompute:
             self._update_metrics()
         self._merge_obs()
+        self._update_summary_metrics()
         if sync_back:
             self._push_summary_to_obs(verbose=verbose)
         elif verbose:
@@ -414,12 +473,26 @@ class pAnnData:
                     if not ad.obs.index.equals(self._summary.index):
                         issues.append(f"{label}.obs index does not match .summary index")
 
-        # --- Check RS matrix shape ---
+        # --- Check RS matrix shape + stats ---
         if self.rs is not None and self.prot is not None and self.pep is not None:
             rs_shape = self.rs.shape
-            expected_shape = (self.pep.shape[1], self.prot.shape[1])
+            expected_shape = (self.prot.shape[1], self.pep.shape[1])
             if rs_shape != expected_shape:
-                issues.append(f"RS shape mismatch: got {rs_shape}, expected {expected_shape} (peptides × proteins)")
+                issues.append(f"RS shape mismatch: got {rs_shape}, expected {expected_shape} (proteins × peptides)")
+            elif verbose:
+                nnz = self.rs.nnz if sparse.issparse(self.rs) else np.count_nonzero(self.rs)
+                total = self.rs.shape[0] * self.rs.shape[1]
+                sparsity = 100 * (1 - nnz / total)
+                print(f"ℹ️  RS matrix: {rs_shape} (proteins × peptides), sparsity: {sparsity:.2f}%")
+
+                # Summary stats (works for dense or sparse)
+                rs_dense = self.rs.toarray() if sparse.issparse(self.rs) else self.rs
+                row_links = rs_dense.sum(axis=1)
+                col_links = rs_dense.sum(axis=0)
+                print(f"   - Proteins with ≥1 linked peptides: {(row_links > 0).sum()}/{rs_shape[0]}")
+                print(f"   - Peptides with ≥1 linked proteins: {(col_links > 0).sum()}/{rs_shape[1]}")
+                print(f"   - Mean peptides per protein: {row_links.mean():.2f}")
+                print(f"   - Mean proteins per peptide: {col_links.mean():.2f}")
 
         # --- Summary of results ---
         if issues:
@@ -432,6 +505,194 @@ class pAnnData:
             if verbose:
                 print("✅ pAnnData object is valid.")
             return True
+
+    def describe_rs(self):
+        """
+        Returns a DataFrame summarizing RS (protein × peptide) connectivity:
+        - One row per protein
+        - Columns: total peptides, unique peptides, etc.
+        """
+        if self.rs is None:
+            print("⚠️ No RS matrix set.")
+            return None
+
+        rs = self.rs.toarray() if sparse.issparse(self.rs) else self.rs
+
+        # peptides per protein
+        peptides_per_protein = rs.sum(axis=1).astype(int)
+        # unique peptides per protein (those mapped only to this protein)
+        unique_peptides = (rs.sum(axis=0) == 1)
+        unique_counts = rs[:, unique_peptides].sum(axis=1).astype(int)
+
+        summary_df = pd.DataFrame({
+            "peptides_per_protein": peptides_per_protein,
+            "unique_peptides": unique_counts
+        }, index=self.prot.var_names if self.prot is not None else range(rs.shape[0]))
+
+        return summary_df
+
+
+    def plot_rs(self, figsize=(10, 4)):
+        """
+        Shows barplots of:
+        - Peptides per protein
+        - Proteins per peptide
+        """
+        if self.rs is None:
+            print("⚠️ No RS matrix to plot.")
+            return
+
+        rs_dense = self.rs.toarray() if sparse.issparse(self.rs) else self.rs
+        prot_links = rs_dense.sum(axis=1)
+        pep_links = rs_dense.sum(axis=0)
+
+        fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+        axes[0].hist(prot_links, bins=50, color='gray')
+        axes[0].set_title("Peptides per Protein")
+        axes[0].set_xlabel("Peptide Count")
+        axes[0].set_ylabel("Protein Frequency")
+
+        axes[1].hist(pep_links, bins=50, color='gray')
+        axes[1].set_title("Proteins per Peptide")
+        axes[1].set_xlabel("Protein Count")
+        axes[1].set_ylabel("Peptide Frequency")
+
+        plt.tight_layout()
+        plt.show()
+
+    def filter_rs(
+        self,
+        min_peptides_per_protein=None,
+        min_unique_peptides_per_protein=2,
+        max_proteins_per_peptide=None,
+        return_copy=True,
+        preset=None,
+        validate_after=True
+    ):
+        """
+        Filters the RS matrix and associated .prot and .pep data.
+
+        Parameters:
+        - min_peptides_per_protein (int, optional): Keep proteins with ≥ this many total peptides
+        - min_unique_peptides_per_protein (int, optional): Keep proteins with ≥ this many unique peptides (default: 2)
+        - max_proteins_per_peptide (int, optional): Remove peptides mapped to > this many proteins
+        - return_copy (bool): Return a filtered copy if True (default), otherwise modify in place
+        - preset (str or dict, optional): Use a predefined filtering strategy:
+            * "default" → unique_peptides ≥ 2
+            * "lenient" → total peptides ≥ 2
+            * dict → custom filter dictionary (same keys as above)
+        - validate_after (bool): If True (default), run self.validate() after filtering
+
+        Returns:
+        - pAnnData: Filtered copy (if return_copy=True), or None
+
+        Side effects:
+        - Adds `.prot.uns['filter_rs']` dictionary with protein/peptide indices kept and summary
+        """
+        if self.rs is None:
+            print("⚠️ No RS matrix to filter.")
+            return self if return_copy else None
+
+        # --- Apply preset if given ---
+        if preset:
+            if preset == "default":
+                min_peptides_per_protein = None
+                min_unique_peptides_per_protein = 2
+                max_proteins_per_peptide = None
+            elif preset == "lenient":
+                min_peptides_per_protein = 2
+                min_unique_peptides_per_protein = None
+                max_proteins_per_peptide = None
+            elif isinstance(preset, dict):
+                min_peptides_per_protein = preset.get("min_peptides_per_protein", min_peptides_per_protein)
+                min_unique_peptides_per_protein = preset.get("min_unique_peptides_per_protein", min_unique_peptides_per_protein)
+                max_proteins_per_peptide = preset.get("max_proteins_per_peptide", max_proteins_per_peptide)
+            else:
+                raise ValueError(f"Unknown RS filtering preset: {preset}")
+
+        pdata = self.copy() if return_copy else self
+
+        rs = pdata.rs.toarray() if sparse.issparse(pdata.rs) else pdata.rs
+
+        # --- Step 1: Peptide filter (max proteins per peptide) ---
+        if max_proteins_per_peptide is not None:
+            peptide_links = rs.sum(axis=0)
+            keep_peptides = peptide_links <= max_proteins_per_peptide
+            rs = rs[:, keep_peptides]
+        else:
+            keep_peptides = np.ones(rs.shape[1], dtype=bool)
+
+        # --- Step 2: Protein filters ---
+        is_unique = rs.sum(axis=0) == 1
+        unique_counts = rs[:, is_unique].sum(axis=1)
+        peptide_counts = rs.sum(axis=1)
+
+        keep_proteins = np.ones(rs.shape[0], dtype=bool)
+        if min_peptides_per_protein is not None:
+            keep_proteins &= (peptide_counts >= min_peptides_per_protein)
+        if min_unique_peptides_per_protein is not None:
+            keep_proteins &= (unique_counts >= min_unique_peptides_per_protein)
+
+        rs_filtered = rs[keep_proteins, :]
+
+        # --- Step 3: Re-filter peptides now unmapped ---
+        keep_peptides_final = rs_filtered.sum(axis=0) > 0
+        rs_filtered = rs_filtered[:, keep_peptides_final]
+
+        # --- Apply filtered RS ---
+        pdata._set_RS(rs_filtered, validate=False)
+
+        # --- Filter .prot and .pep ---
+        if pdata.prot is not None:
+            pdata.prot = pdata.prot[:, keep_proteins]
+        if pdata.pep is not None:
+            original_peptides = keep_peptides.nonzero()[0]
+            final_peptides = original_peptides[keep_peptides_final]
+            pdata.pep = pdata.pep[:, final_peptides]
+
+        # --- History and summary ---
+        n_prot_before = self.prot.shape[1] if self.prot is not None else rs.shape[0]
+        n_pep_before = self.pep.shape[1] if self.pep is not None else rs.shape[1]
+        n_prot_after = rs_filtered.shape[0]
+        n_pep_after = rs_filtered.shape[1]
+
+        n_prot_dropped = n_prot_before - n_prot_after
+        n_pep_dropped = n_pep_before - n_pep_after
+        
+        msg = "🧪 Filtered RS"
+        if preset:
+            msg += f" using preset '{preset}'"
+        if min_peptides_per_protein is not None:
+            msg += f", min peptides per protein: {min_peptides_per_protein}"
+        if min_unique_peptides_per_protein is not None:
+            msg += f", min unique peptides: {min_unique_peptides_per_protein}"
+        if max_proteins_per_peptide is not None:
+            msg += f", max proteins per peptide: {max_proteins_per_peptide}"
+        msg += (
+            f". Proteins: {n_prot_before} → {n_prot_after} (dropped {n_prot_dropped}), "
+            f"Peptides: {n_pep_before} → {n_pep_after} (dropped {n_pep_dropped})."
+        )
+
+        pdata._append_history(msg)
+        print(msg)
+        pdata.update_summary()
+
+        # --- Save filter indices to .uns ---
+        protein_indices = list(pdata.prot.var_names) if pdata.prot is not None else []
+        peptide_indices = list(pdata.pep.var_names) if pdata.pep is not None else []
+        pdata.prot.uns['filter_rs'] = {
+            "kept_proteins": protein_indices,
+            "kept_peptides": peptide_indices,
+            "n_proteins": len(protein_indices),
+            "n_peptides": len(peptide_indices),
+            "description": msg
+        }
+
+        if validate_after:
+            pdata.validate(verbose=True)
+
+        return pdata if return_copy else None
 
     # -----------------------------
     # TESTS FUNCTIONS
@@ -1569,10 +1830,10 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     rs = mlb.fit_transform(pep_prot_list)
     index_dict = {protein: index for index, protein in enumerate(mlb.classes_)}
     reorder_indices = [index_dict[protein] for protein in prot_var_names]
-    rs = rs[:, reorder_indices].T
-    print("RS matrix successfully computed")
+    rs = rs[:, reorder_indices]
+    # print("RS matrix successfully computed")
 
-    # TO ADD: number of peptides per protein
+    # TODO: number of peptides per protein
     # number of proteins per peptide
     # make columns isUnique for peptide
     sum_values = np.sum(rs, axis=1)
