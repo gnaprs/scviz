@@ -232,22 +232,162 @@ def plot_summary(ax, pdata, value='protein_count', classes=None, plot_mean = Tru
 
     return ax
 
-# TODO: WAS WORKING ON THIS
-def plot_abundance(ax, pdata, namelist=None, classes=None, plot_mean = True, layer = 'X', on = 'protein', return_df = False, **kwargs):
+def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
+                   classes=None, return_df=False, order=None, palette=None,
+                   log=True, facet=None, height=4, aspect=1.5,
+                   plot_points=True, x_label='gene', kind='auto', **kwargs):
     """
-    Plot the abundance of proteins across different cases.
+    Plot abundance of proteins/peptides using violin + box (inner="box") + strip.
 
     Parameters:
-    ax (matplotlib.axes.Axes): The axis on which to plot.
-    pdata (scviz.pAnnData): The input pdata object.
-    namelist (list of str): The list of proteins to plot. If None, all proteins are plotted.
-    classes (str): The class type to use
+    ax (matplotlib.axes.Axes): Axis to plot on (ignored if facet is used).
+    pdata (pAnnData): Your pAnnData object.
+    namelist (list of str): Accessions or gene names to plot.
+    layer (str): Data layer name.
+    on (str): 'protein' or 'peptide'.
+    classes (str or list): obs column(s) to group by (used for color).
+    return_df (bool): If True, return DataFrame with replicate + summary values.
+    order (list): Custom order of classes.
+    palette (list or dict): Color palette.
+    log (bool): Plot log2(abundance).
+    facet (str or None): obs column to facet by.
+    height, aspect (float): For facet layout.
+    plot_points (bool): Show stripplot of individual samples.
+    x_label (str): Label x-axis as 'gene' or 'accession'.
+    kind (str): 'auto' (default), 'violin', or 'bar'. If 'auto', switches to barplot if all groups ≤ 3 samples.
+    **kwargs: Extra args passed to violinplot or barplot depending on kind.
 
     Returns:
-    matplotlib.axes.Axes: The axis with the plotted data.
+    matplotlib.Axes or sns.FacetGrid or pd.DataFrame
     """
+    import numpy as np
+    import pandas as pd
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    import warnings
 
+    adata = utils.get_adata(pdata, on)
 
+    if namelist:
+        gene_to_accession = {}
+        if "Genes" in adata.var.columns:
+            for acc, gene in zip(adata.var_names, adata.var["Genes"]):
+                if pd.notna(gene):
+                    gene_to_accession[str(gene)] = acc
+        resolved, unmatched = [], []
+        for name in namelist:
+            if name in adata.var_names:
+                resolved.append(name)
+            elif name in gene_to_accession:
+                resolved.append(gene_to_accession[name])
+            else:
+                unmatched.append(name)
+        if not resolved:
+            raise ValueError("No valid names in `namelist`.")
+        if unmatched:
+            print("[plot_abundance] Warning: Unmatched names:")
+            for u in unmatched:
+                print(f"  - {u}")
+        adata = adata[:, resolved]
+
+    X = adata.layers[layer] if layer in adata.layers else adata.X
+    if hasattr(X, "toarray"):
+        X = X.toarray()
+
+    df = pd.DataFrame(X, columns=adata.var_names, index=adata.obs_names).reset_index()
+    df = df.melt(id_vars="index", var_name="accession", value_name="abundance")
+    df = df.rename(columns={"index": "cell"})
+    df = df.merge(adata.obs.reset_index(), left_on="cell", right_on="index")
+
+    df['facet'] = df[facet] if facet else 'all'
+    if classes:
+        df['class'] = df[classes] if isinstance(classes, str) else df[classes].astype(str).agg('_'.join, axis=1)
+    else:
+        df['class'] = 'all'
+
+    if facet and classes and facet == classes:
+        raise ValueError("`facet` and `classes` must be different.")
+
+    gene_map = adata.var["Genes"].to_dict() if "Genes" in adata.var else {}
+    df['gene'] = df['accession'].map(gene_map)
+    df['x_label_name'] = df['gene'].fillna(df['accession']) if x_label == 'gene' else df['accession']
+
+    if log:
+        df['log2_abundance'] = np.log2(np.clip(df['abundance'], 1e-6, None))
+
+    if return_df:
+        return df
+
+    if palette is None:
+        palette = get_color('palette')
+
+    x_col = 'x_label_name'
+    y_col = 'log2_abundance' if log else 'abundance'
+
+    if kind == 'auto':
+        sample_counts = df.groupby([x_col, 'class', 'facet']).size()
+        kind = 'bar' if sample_counts.min() <= 3 else 'violin'
+
+    def _plot_bar(df):
+        bar_kwargs = dict(
+            ci='sd',
+            capsize=0.2,
+            errwidth=1.5,
+            palette=palette
+        )
+        bar_kwargs.update(kwargs)
+        if facet and df['facet'].nunique() > 1:
+            g = sns.FacetGrid(df, col='facet', height=height, aspect=aspect, sharey=True)
+            g.map_dataframe(sns.barplot, x=x_col, y=y_col, hue='class', **bar_kwargs)
+            g.set_axis_labels("Gene" if x_label == 'gene' else "Accession", "log2(Abundance)" if log else "Abundance")
+            g.set_titles("{col_name}")
+            g.add_legend(title='Class', frameon=True)
+            return g
+        else:
+            if ax is None:
+                fig, _ax = plt.subplots(figsize=(6, 4))
+            else:
+                _ax = ax
+            sns.barplot(data=df, x=x_col, y=y_col, hue='class', ax=_ax, **bar_kwargs)
+            handles, labels = _ax.get_legend_handles_labels()
+            by_label = dict(zip(labels, handles))
+            _ax.legend(by_label.values(), by_label.keys(), title='Class', frameon=True)
+            _ax.set_ylabel("log2(Abundance)" if log else "Abundance")
+            _ax.set_xlabel("Gene" if x_label == 'gene' else "Accession")
+            return _ax
+
+    def _plot_violin(df):
+        violin_kwargs = dict(inner="box", linewidth=1, cut=0, alpha=0.5, scale="width")
+        violin_kwargs.update(kwargs)
+        if facet and df['facet'].nunique() > 1:
+            g = sns.FacetGrid(df, col='facet', height=height, aspect=aspect, sharey=True)
+            g.map_dataframe(sns.violinplot, x=x_col, y=y_col, hue='class', palette=palette, **violin_kwargs)
+            if plot_points:
+                def _strip(data, color, **kwargs_inner):
+                    sns.stripplot(data=data, x=x_col, y=y_col, hue='class', dodge=True, jitter=True,
+                                  color='black', size=3, alpha=0.5, legend=False, **kwargs_inner)
+                g.map_dataframe(_strip)
+            g.set_axis_labels("Gene" if x_label == 'gene' else "Accession", "log2(Abundance)" if log else "Abundance")
+            g.set_titles("{col_name}")
+            g.add_legend(title='Class', frameon=True)
+            return g
+        else:
+            if ax is None:
+                fig, _ax = plt.subplots(figsize=(6, 4))
+            else:
+                _ax = ax
+            sns.violinplot(data=df, x=x_col, y=y_col, hue='class', palette=palette, ax=_ax, **violin_kwargs)
+            if plot_points:
+                sns.stripplot(data=df, x=x_col, y=y_col, hue='class', dodge=True, jitter=True,
+                              color='black', size=3, alpha=0.5, legend=False, ax=_ax)
+            handles, labels = _ax.get_legend_handles_labels()
+            by_label = dict(zip(labels, handles))
+            _ax.legend(by_label.values(), by_label.keys(), title='Class', frameon=True)
+            _ax.set_ylabel("log2(Abundance)" if log else "Abundance")
+            _ax.set_xlabel("Gene" if x_label == 'gene' else "Accession")
+            return _ax
+
+    return _plot_bar(df) if kind == 'bar' else _plot_violin(df)
 
 # add function to label file name?
 # TODO: implement like pl.umap (sc.pl.umap(pdata.prot, color = ['P62258-1','P12814-1','Q13509', 'type'])) to return list of ax?
@@ -881,52 +1021,6 @@ def plot_upset(pdata, classes, return_contents = False, **kwargs):
         return upplot, upset_contents
     else:
         return upplot
-
-
-# TODO: make function work from get_abundance or get_abundance_query, actually plot the protein abundances - refer to graph from tingyu
-def plot_abundance(ax, prot_data, classes, genelist, cmap='Blues', color=['blue'], s=20, alpha=0.2, calpha=1):
-    """
-    Plot the abundance of proteins across different cases.
-
-    Parameters:
-    ax (matplotlib.axes.Axes): The axis on which to plot.
-    prot_data (pandas.DataFrame): The protein data to plot.
-    cases (list of list of str): A list of cases to plot. Each case is a list of strings that are used to select the columns from the data.
-    cmap (str, optional): The colormap to use for the scatter plot. Default is 'Blues'.
-    color (list of str, optional): A list of colors for the scatter plots of each case. If not provided, all plots will be blue.
-    s (float, optional): The marker size. Default is 20.
-    alpha (float, optional): The marker transparency. Default is 0.2.
-    calpha (float, optional): The marker transparency for the case average. Default is 1.
-
-    Returns:
-    matplotlib.axes.Axes: The axis with the plotted data.
-
-    Example:
-    >>> import matplotlib.pyplot as plt
-    >>> import pandas as pd
-    >>> cases = [['a','50g'],['b','50g'],['a','30g'],['b','30g']]
-    >>> fig, ax = plt.subplots()
-    >>> plot_abundance(ax, prot_data, cases, cmap='Blues', color = ['blue','red','green','orange'])
-    """
-
-    for j in range(len(cases)):
-        vars = ['Abundance: '] + cases[j]
-        append_string = '_'.join(vars[1:])
-
-        cols = [col for col in prot_data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-
-        # average abundance of proteins across these columns, ignoring NaN values
-        prot_data['Average: '+append_string] = prot_data[cols].mean(axis=1, skipna=True)
-        prot_data['Stdev: '+append_string] = prot_data[cols].std(axis=1, skipna=True)
-
-        nsample = len(cols)
-
-        # merge all abundance columns into one column
-        X = np.zeros((nsample*len(prot_data)))
-        Y = np.zeros((nsample*len(prot_data)))
-        Z = np.zeros((nsample*len(prot_data))) # pdf value based on average abundance
-        for i in range(nsample):
-            X[i*len(prot_data):(i+1)*len(prot_data)] = prot_data[cols[i]].values
 
 def plot_abundance_2D(ax,data,cases,genes='all', cmap='Blues',color=['blue'],s=20,alpha=[0.2,1],calpha=1):
     
