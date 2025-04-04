@@ -419,7 +419,7 @@ class pAnnData:
             mode = []
             if recompute: mode.append("recompute")
             if sync_back: mode.append("sync_back")
-            print(f"[update_summary] → Mode: {', '.join(mode) or 'noop'}")
+            print(f"[update_summary] → Mode: {', '.join(mode) or 'norm'}")
 
     def _update_summary(self):
         print("⚠️  Legacy _update_summary() called — consider switching to update_summary()")
@@ -431,6 +431,55 @@ class pAnnData:
     def print_history(self):
         formatted_history = "\n".join(f"{i}: {action}" for i, action in enumerate(self._history, 1))
         print("-------------------------------\nHistory:\n-------------------------------\n"+formatted_history)
+
+    def update_missing_genes(self, gene_col="Genes", verbose=True):
+        """
+        Fills missing gene names in .prot.var[gene_col] using UniProt API.
+        If UniProt returns no match, fills with 'UNKNOWN_<accession>'.
+        """
+        var = self.prot.var
+
+        if gene_col not in var.columns:
+            if verbose:
+                print(f"⚠️ Column '{gene_col}' not found in .prot.var.")
+            return
+
+        missing_mask = var[gene_col].isna()
+        if not missing_mask.any():
+            if verbose:
+                print("✅ No missing gene names found.")
+            return
+
+        accessions = var.index[missing_mask].tolist()
+        if verbose:
+            print(f"🔍 {len(accessions)} proteins with missing gene names. Querying UniProt...")
+
+        try:
+            df = utils.get_uniprot_fields(
+                accessions,
+                search_fields=["accession", "gene_primary"]
+            )
+        except Exception as e:
+            print(f"❌ UniProt query failed: {e}")
+            return
+
+        gene_map = dict(zip(df["Entry"], df["Gene Names (primary)"]))
+        filled = self.prot.var.loc[missing_mask].index.map(lambda acc: gene_map.get(acc))
+        final_genes = [
+            gene if pd.notna(gene) else f"UNKNOWN_{acc}"
+            for acc, gene in zip(self.prot.var.loc[missing_mask].index, filled)
+        ]
+        self.prot.var.loc[missing_mask, gene_col] = final_genes
+
+        found = sum(pd.notna(filled))
+        unknown = len(final_genes) - found
+        if verbose:
+            if found:
+                print(f"✅ Recovered {found} gene names from UniProt.")
+            if unknown:
+                missing_ids = self.prot.var.loc[missing_mask].index[pd.isna(filled)]
+                print(f"⚠️ {unknown} gene names still missing. Assigned as 'UNKNOWN_<accession>' for:")
+                print("   ", ", ".join(missing_ids[:5]) + ("..." if unknown > 5 else ""))
 
     def validate(self, verbose=True):
         """
@@ -485,12 +534,19 @@ class pAnnData:
                 sparsity = 100 * (1 - nnz / total)
                 print(f"ℹ️  RS matrix: {rs_shape} (proteins × peptides), sparsity: {sparsity:.2f}%")
 
-                # Summary stats (works for dense or sparse)
+                # Work with dense binary matrix (RS is always binary)
                 rs_dense = self.rs.toarray() if sparse.issparse(self.rs) else self.rs
-                row_links = rs_dense.sum(axis=1)
-                col_links = rs_dense.sum(axis=0)
-                print(f"   - Proteins with ≥1 linked peptides: {(row_links > 0).sum()}/{rs_shape[0]}")
-                print(f"   - Peptides with ≥1 linked proteins: {(col_links > 0).sum()}/{rs_shape[1]}")
+
+                row_links = rs_dense.sum(axis=1)  # peptides per protein
+                col_links = rs_dense.sum(axis=0)  # proteins per peptide
+
+                # Unique peptides (linked to only 1 protein)
+                unique_peptides_mask = col_links == 1
+                unique_counts = rs_dense[:, unique_peptides_mask].sum(axis=1)  # unique peptides per protein
+
+                # Summary stats
+                print(f"   - Proteins with ≥2 *unique* linked peptides: {(unique_counts >= 2).sum()}/{rs_shape[0]}")
+                print(f"   - Peptides with ≥2 linked proteins: {(col_links >= 2).sum()}/{rs_shape[1]}")
                 print(f"   - Mean peptides per protein: {row_links.mean():.2f}")
                 print(f"   - Mean proteins per peptide: {col_links.mean():.2f}")
 
@@ -821,6 +877,68 @@ class pAnnData:
         pdata._append_history(message)
         pdata.update_summary(recompute=True)
         return pdata if return_copy else None
+
+    def filter_prot_found(self, group, min_ratio=None, min_count=None, on='protein', return_copy=True, debug=False):
+        """
+        Filters proteins or peptides based on the 'Found In' ratio for a given class grouping.
+
+        Parameters:
+        - group (str): Group label as used in 'Found In: {group} ratio' (e.g. 'HCT116_DMSO').
+        - min_ratio (float): Minimum proportion of samples (0.0 - 1.0) in which the feature must be found.
+        - min_count (int): Minimum number of samples the feature must be found in (alternative to ratio).
+        - on (str): 'protein' or 'peptide'
+        - return_copy (bool): Return a filtered copy (default=True)
+        - debug (bool): If True, prints verbose info
+
+        Returns:
+        - Filtered pAnnData object (if `return_copy=True`), else modifies in place.
+        """
+        if not self._check_data(on):
+            return
+
+        if min_ratio is None and min_count is None:
+            raise ValueError("You must specify either `min_ratio` or `min_count`.")
+
+        adata = self.prot if on == 'protein' else self.pep
+        var = adata.var
+
+        ratio_col = f"Found In: {group} ratio"
+        if ratio_col not in var.columns:
+            raise ValueError(f"{ratio_col} not found. Did you run `annotate_found(classes=...)` first?")
+
+        # Parse ratio strings like '4/6' → (4, 6)
+        ratio_split = var[ratio_col].str.split("/", expand=True).astype(float)
+        var["_found_count"] = ratio_split[0]
+        var["_total_count"] = ratio_split[1]
+        var["_found_ratio"] = var["_found_count"] / var["_total_count"]
+
+        if min_ratio is not None:
+            mask = var["_found_ratio"] >= min_ratio
+        else:
+            mask = var["_found_count"] >= min_count
+
+        kept = mask.sum()
+        total = len(mask)
+        if debug:
+            print(f"Keeping {kept} / {total} {on}s based on group '{group}' and threshold.")
+
+        filtered = self.copy() if return_copy else self
+        adata_filtered = adata[:, mask.values]
+        if on == 'protein':
+            filtered.prot = adata_filtered
+        else:
+            filtered.pep = adata_filtered
+
+        # Clean up temp columns
+        var.drop(columns=["_found_count", "_total_count", "_found_ratio"], inplace=True)
+
+        filtered._append_history(
+            f"{on}: Filtered by detection in group '{group}' using {'min_ratio=' + str(min_ratio) if min_ratio else 'min_count=' + str(min_count)}."
+        )
+        filtered.update_summary(recompute=True)
+
+        return filtered if return_copy else None
+
 
     def filter_sample(self, values=None, exact_cases=False, condition=None, file_list=None, return_copy=True, debug=False, query_mode=False):
         """
@@ -1173,6 +1291,88 @@ class pAnnData:
 
         return condition
 
+    def _annotate_found_samples(self, threshold=0.0, layer='X'):
+        """
+        Internal method. Adds per-sample 'Found In' flags to .prot.var and .pep.var.
+
+        Parameters:
+        - threshold (float): Minimum value to consider as 'found'.
+        - layer (str): Data layer to use.
+        """
+        for level in ['prot', 'pep']:
+            adata = getattr(self, level)
+            # Skip if the level doesn't exist
+            if adata is None:
+                continue
+
+            # Handle layer selection
+            if layer == 'X':
+                data = pd.DataFrame(adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X,
+                                    index=adata.obs_names,
+                                    columns=adata.var_names).T
+            elif layer in adata.layers:
+                data = pd.DataFrame(adata.layers[layer].toarray() if hasattr(adata.layers[layer], 'toarray') else adata.layers[layer],
+                                    index=adata.obs_names,
+                                    columns=adata.var_names).T
+            else:
+                raise KeyError(f"Layer '{layer}' not found in {level}.layers and is not 'X'.")
+
+            found = data > threshold
+            for sample in found.columns:
+                adata.var[f"Found In: {sample}"] = found[sample]
+
+    def annotate_found(self, classes=None, on='protein', layer='X', threshold=0.0):
+        """
+        Adds group-level 'Found In' annotations for proteins or peptides.
+
+        Parameters:
+        - classes (str or list): Sample-level class/grouping column(s) in .sample.obs.
+        - on (str): 'protein' or 'peptide'.
+        - layer (str): Layer to use (default='X').
+        - threshold (float): Minimum intensity to be considered 'found'.
+        """
+        if not self._check_data(on):
+            return
+
+        adata = self.prot if on == 'protein' else self.pep
+        var = adata.var
+
+        # Handle layer correctly (supports 'X' or adata.layers keys)
+        if layer == 'X':
+            data = pd.DataFrame(adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X,
+                                index=adata.obs_names,
+                                columns=adata.var_names).T
+        elif layer in adata.layers:
+            raw = adata.layers[layer]
+            data = pd.DataFrame(raw.toarray() if hasattr(raw, 'toarray') else raw,
+                                index=adata.obs_names,
+                                columns=adata.var_names).T
+        else:
+            raise KeyError(f"Layer '{layer}' not found in {on}.layers and is not 'X'.")
+
+        found_df = data > threshold
+
+        if classes is not None:
+            classes_list = utils.get_classlist(adata, classes=classes)
+
+            for class_value in classes_list:
+                class_data = utils.resolve_class_filter(adata, classes, class_value)
+                class_samples = class_data.obs_names
+
+                if len(class_samples) == 0:
+                    continue
+
+                sub_found = found_df[class_samples]
+                var[f"Found In: {class_value}"] = sub_found.any(axis=1)
+                var[f"Found In: {class_value} ratio"] = sub_found.sum(axis=1).astype(str) + "/" + str(len(class_samples))
+
+        self._history.append(
+            f"{on}: Annotated features 'found in' class combinations {classes} using threshold {threshold}."
+        )
+        print(
+            f"Annotated features 'found in' class combinations {classes} using threshold {threshold}.")
+
+
     # -----------------------------
     # PROCESSING FUNCTIONS
     def cv(self, classes = None, on = 'protein', layer = "X", debug = False):
@@ -1193,99 +1393,143 @@ class pAnnData:
 
         self._history.append(f"{on}: Coefficient of Variation (CV) calculated for {layer} data by {classes}. E.g. CV stored in var['CV: {class_value}'].")
 
-    # FC method: specify mean, prot pairwise median, or pep pairwise median
-    # TODO: implement layer support
-    def de(self, class_type, values, method = 'ttest', layer = "X", pval=0.05, log2fc=1):
+    # TODO: implement methods for calculdating fold change, 1. mean, 2. prot pairwise median, or 3. pep pairwise median (will need to refer to RS)
+    def de(self, values=None, class_type=None, method='ttest', layer='X', pval=0.05, log2fc=1.0, fold_change_mode='mean'):
         """
         Calculate differential expression (DE) of proteins across different groups.
 
         This function calculates the DE of proteins across different groups. The cases to compare can be specified, and the method to use for DE can be specified as well.
+        Supports legacy (class_type + values) or new dictionary-style filtering.
 
-        Args:
-            self (pAnnData): The pAnnData object containing the protein data.
-            class_type (str): The class type to use for selecting samples. E.g. 'cell_type'.
-            values (list of list of str): The values to select for within the class_type. E.g. [['wt', 'kd'], ['control', 'treatment']].
-            method (str, optional): The method to use for DE. Default is 'ttest'. Other methods include 'mannwhitneyu', 'wilcoxon', 'chi2', and 'fisher'. !TODO: implement pairwise prot median, pairwise pep median.
+        Parameters:
+        values : list of dict or list of list
+            Two sample group filters to compare. Each group should be either:
+            - A dictionary of {class: value} (e.g., {'cellline': 'HCT116', 'treatment': 'DMSO'})
+            - A list of values (legacy-style) if `class_type` is provided
+        class_type : str or list of str, optional
+            Legacy-style class label(s). Used only if values is a list of value combinations.
+        method : str
+            Statistical test to use. Options: 'ttest', 'mannwhitneyu', 'wilcoxon'.
+        layer : str
+            Data layer to use for DE (e.g., "X", "X_raw", "X_mbr").
+        pval : float
+            P-value cutoff for significance labeling.
+        log2fc : float
+            Log2 fold change threshold for labeling.
+        fold_change_mode : str
+            Method for computing fold change. Options:
+            - 'mean' : log2(mean(group1) / mean(group2))
+            - 'pairwise_median' : median of all pairwise log2 ratios
 
         Returns:
-            df_stats (pandas.DataFrame): A DataFrame containing the DE statistics for each protein.
+        df_stats : pandas.DataFrame
+            A DataFrame containing log2 fold change, p-values, and significance labels for each protein.
 
-        Raises:
-            ValueError: If the number of cases is not exactly two.
+        Examples:
+        # ✅ Legacy-style usage
+        >>> pdata.de(class_type=['cellline', 'treatment'],
+        ...          values=[['HCT116', 'DMSO'], ['HCT116', 'DrugX']])
 
-        Example:
-            >>> from scviz import utils as scutils
-            >>> stats_sc_20000 = pdata.de(['cell_type','size'], [['cortex', 'sc'], ['cortex', '20000']])
+        # ✅ Dictionary-style usage (recommended)
+        >>> pdata.de(values=[
+        ...     {'cellline': 'HCT116', 'treatment': 'DMSO'},
+        ...     {'cellline': 'HCT116', 'treatment': 'DrugX'}
+        ... ])
         """
 
-        # this is for case 1/case 2 comparison!
-        # make sure only two cases are given
-        if len(values) != 2:
-            raise ValueError('Please provide exactly two cases to compare.')
+        # --- Handle legacy input ---
+        if values is None:
+            raise ValueError("Please provide `values` (new format) or both `class_type` and `values` (legacy format).")
 
-        pdata_case1 = utils.filter(self, class_type, values[0], exact_cases=True)
-        pdata_case2 = utils.filter(self, class_type, values[1], exact_cases=True)
+        if isinstance(values, list) and all(isinstance(v, list) for v in values) and class_type is not None:
+            values = utils.format_class_filter(class_type, values, exact_cases=True)
 
-        # TODO: Need to implement pairwise differential expression...
-        # if on == 'protein':
-        #     abundance_case1 = pdata_case1.prot
-        #     abundance_case2 = pdata_case2.prot
-        # elif on == 'peptide':
-        #     abundance_case1 = pdata_case1.pep
-        #     abundance_case2 = pdata_case2.pep
+        if not isinstance(values, list) or len(values) != 2:
+            raise ValueError("`values` must be a list of two group dictionaries (or legacy value pairs).")
 
-        abundance_case1 = pdata_case1.prot
-        abundance_case2 = pdata_case2.prot
+        group1_dict, group2_dict = (
+            [values[0]] if not isinstance(values[0], list) else values[0],
+            [values[1]] if not isinstance(values[1], list) else values[1]
+        )
 
-        n1 = abundance_case1.shape[0]
-        n2 = abundance_case2.shape[0]
 
-        group1_string = '_'.join(values[0]) if isinstance(values[0], list) else values[0]
-        group2_string = '_'.join(values[1]) if isinstance(values[1], list) else values[1]
+        # --- Sample filtering ---
+        pdata_case1 = self.filter_sample_values(values=group1_dict, exact_cases=True, return_copy=True)
+        pdata_case2 = self.filter_sample_values(values=group2_dict, exact_cases=True, return_copy=True)
 
+        def _label(d):
+            if isinstance(d, dict):
+                return '_'.join(str(v) for v in d.values())
+            return str(d)
+
+        group1_string = _label(group1_dict)
+        group2_string = _label(group2_dict)
         comparison_string = f'{group1_string} vs {group2_string}'
 
-        # create a dataframe for stats
-        df_stats = pd.DataFrame(index=abundance_case1.var_names, columns=[group1_string,group2_string,'log2fc', 'p_value', 'test_statistic'])
-        df_stats['Genes'] = abundance_case1.var['Genes']
-        df_stats[group1_string] = np.mean(abundance_case1.X.toarray(), axis=0)
-        df_stats[group2_string] = np.mean(abundance_case2.X.toarray(), axis=0)
-        df_stats['log2fc'] = np.log2(np.divide(np.mean(abundance_case1.X.toarray(), axis=0), np.mean(abundance_case2.X.toarray(), axis=0)))
+        # --- Get layer data ---
+        data1 = utils.get_adata_layer(pdata_case1.prot, layer)
+        data2 = utils.get_adata_layer(pdata_case2.prot, layer)
 
-        if method == 'ttest':
-            for protein in range(0, abundance_case1.shape[1]):
-                t_test = ttest_ind(abundance_case1.X.toarray()[:,protein], abundance_case2.X.toarray()[:,protein])
-                df_stats['p_value'].iloc[protein] = t_test.pvalue
-                df_stats['test_statistic'].iloc[protein] = t_test.statistic
-        elif method == 'mannwhitneyu':
-            for row in range(0, len(abundance_case1)):
-                mwu = mannwhitneyu(abundance_case1.iloc[row,0:n1-1].dropna().values, abundance_case2.iloc[row,0:n2-1].dropna().values)
-                df_stats['p_value'].iloc[row] = mwu.pvalue
-                df_stats['test_statistic'].iloc[row] = mwu.statistic
-        elif method == 'wilcoxon':
-            for row in range(0, len(abundance_case1)):
-                w, p = wilcoxon(abundance_case1.iloc[row,0:n1-1].dropna().values, abundance_case2.iloc[row,0:n2-1].dropna().values)
-                df_stats['p_value'].iloc[row] = p
-                df_stats['test_statistic'].iloc[row] = w
+        # Shape: (samples, features)
+        data1 = np.asarray(data1)
+        data2 = np.asarray(data2)
 
-        df_stats['p_value'] = df_stats['p_value'].replace([np.inf, -np.inf], np.nan)
-        non_nan_mask = df_stats['p_value'].notna()
+        # --- Compute fold change ---
+        if fold_change_mode == 'mean':
+            group1_mean = np.nanmean(data1, axis=0)
+            group2_mean = np.nanmean(data2, axis=0)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                log2fc_vals = np.log2(group1_mean / group2_mean)
+        elif fold_change_mode == 'pairwise_median':
+            log2fc_vals = utils.pairwise_log2fc(data1, data2)
+        else:
+            raise ValueError(f"Unsupported fold_change_mode: {fold_change_mode}")
 
-        df_stats.loc[non_nan_mask, '-log10(p_value)'] = -np.log10(df_stats.loc[non_nan_mask, 'p_value'])
-        df_stats.loc[non_nan_mask, 'significance_score'] = df_stats.loc[non_nan_mask, '-log10(p_value)'] * df_stats.loc[non_nan_mask, 'log2fc']
+        # --- Statistical test ---
+        pvals = []
+        stats = []
+        for i in range(data1.shape[1]):
+            x1, x2 = data1[:, i], data2[:, i]
+            try:
+                if method == 'ttest':
+                    res = ttest_ind(x1, x2, nan_policy='omit')
+                elif method == 'mannwhitneyu':
+                    res = mannwhitneyu(x1, x2, alternative='two-sided')
+                elif method == 'wilcoxon':
+                    res = wilcoxon(x1, x2)
+                else:
+                    raise ValueError(f"Unsupported test method: {method}")
+                pvals.append(res.pvalue)
+                stats.append(res.statistic)
+            except Exception as e:
+                pvals.append(np.nan)
+                stats.append(np.nan)
 
-        df_stats.loc[non_nan_mask, 'significance'] = 'not significant'
-        df_stats.loc[non_nan_mask & (df_stats['p_value'] < pval) & (df_stats['log2fc'] > log2fc), 'significance'] = 'upregulated'
-        df_stats.loc[non_nan_mask & (df_stats['p_value'] < pval) & (df_stats['log2fc'] < -log2fc), 'significance'] = 'downregulated'
+        # --- Compile results ---
+        var = self.prot.var.copy()
+        df_stats = pd.DataFrame(index=self.prot.var_names)
+        df_stats['Genes'] = var['Genes'] if 'Genes' in var.columns else var.index
+        df_stats[group1_string] = np.nanmean(data1, axis=0)
+        df_stats[group2_string] = np.nanmean(data2, axis=0)
+        df_stats['log2fc'] = log2fc_vals
+        df_stats['p_value'] = pvals
+        df_stats['test_statistic'] = stats
+
+        df_stats['-log10(p_value)'] = -np.log10(df_stats['p_value'].replace(0, np.nan))
+        df_stats['significance_score'] = df_stats['-log10(p_value)'] * df_stats['log2fc']
+        df_stats['significance'] = 'not significant'
+        df_stats.loc[(df_stats['p_value'] < pval) & (df_stats['log2fc'] > log2fc), 'significance'] = 'upregulated'
+        df_stats.loc[(df_stats['p_value'] < pval) & (df_stats['log2fc'] < -log2fc), 'significance'] = 'downregulated'
+        df_stats['significance'] = pd.Categorical(df_stats['significance'], categories=['upregulated', 'downregulated', 'not significant'], ordered=True)
 
         df_stats = df_stats.dropna(subset=['p_value', 'log2fc', 'significance'])
-        df_stats['significance'] = pd.Categorical(df_stats['significance'], categories=['upregulated', 'downregulated', 'not significant'], ordered=True)
         df_stats = df_stats.sort_values(by='significance')
 
+        # --- Store and return ---
         self._stats[comparison_string] = df_stats
-        print(f'Differential expression calculated for {class_type} {values} using {method}. DE statistics stored in .stats["{comparison_string}"].')
-        self._append_history(f"prot: Differential expression calculated for {class_type} {values} using {method}. DE statistics stored in .stats['{comparison_string}'].")
+        self._append_history(f"prot: DE for {class_type} {values} using {method} and fold_change_mode='{fold_change_mode}'. Stored in .stats['{comparison_string}'].")
 
+        print(f"✅ Differential expression complete: {comparison_string} | Method: {method}, FC: {fold_change_mode}")
         return df_stats
 
     # TODO: Need to figure out how to make this interface with plot functions, probably do reordering by each class_value within the loop?
@@ -1627,18 +1871,18 @@ def import_data(source: str, **kwargs):
 
 def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample']):
     if not prot_file and not pep_file:
-        raise ValueError("At least one of prot_file or pep_file must be provided")
+        raise ValueError("❌ At least one of prot_file or pep_file must be provided")
     print("--------------------------\nStarting import...\n--------------------------")
     
     if prot_file:
         # -----------------------------
-        print(f"Importing from {prot_file}")
+        print(f"Source file: {prot_file}")
         # PROTEIN DATA
         # check file format, if '.txt' then use read_csv, if '.xlsx' then use read_excel
         if prot_file.endswith('.txt') or prot_file.endswith('.tsv'):
             prot_all = pd.read_csv(prot_file, sep='\t')
         elif prot_file.endswith('.xlsx'):
-            print("WARNING: The read_excel function is slower compared to reading .tsv or .txt files. For improved performance, consider converting your data to .tsv or .txt format.")
+            print("⚠️ The read_excel function is slower compared to reading .tsv or .txt files. For improved performance, consider converting your data to .tsv or .txt format.")
             prot_all = pd.read_excel(prot_file)
         # prot_X: sparse data matrix
         prot_X = sparse.csr_matrix(prot_all.filter(regex='Abundance: F', axis=1).values).transpose()
@@ -1655,12 +1899,11 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         prot_obs = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
         prot_obs = pd.DataFrame(prot_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(str.strip).astype('category')
         if (prot_obs == "n/a").all().any():
-            print("WARNING: Found columns with all 'n/a'. Dropping these columns.")
+            print("⚠️ Found columns with all 'n/a'. Dropping these columns.")
             prot_obs = prot_obs.loc[:, ~(prot_obs == "n/a").all()]
 
         print(f"Number of files: {len(prot_obs_names)}")
-        print(f"Number of proteins: {len(prot_var)}")
-        print(f"Number of obs: {len(prot_obs.columns)}")
+        print(f"Proteins: {len(prot_var)}")
     else:
         prot_X = prot_layers_mbr = prot_var_names = prot_var = prot_obs_names = prot_obs = None
 
@@ -1671,7 +1914,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         if pep_file.endswith('.txt') or pep_file.endswith('.tsv'):
             pep_all = pd.read_csv(pep_file, sep='\t')
         elif pep_file.endswith('.xlsx'):
-            print("WARNING: The read_excel function is slower compared to reading .tsv or .txt files. For improved performance, consider converting your data to .tsv or .txt format.")
+            print("⚠️ The read_excel function is slower compared to reading .tsv or .txt files. For improved performance, consider converting your data to .tsv or .txt format.")
             pep_all = pd.read_excel(pep_file)
         # pep_X: sparse data matrix
         pep_X = sparse.csr_matrix(pep_all.filter(regex='Abundance: F', axis=1).values).transpose()
@@ -1687,12 +1930,10 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         pep_obs = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
         pep_obs = pd.DataFrame(pep_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(str.strip).astype('category')
         if (pep_obs == "n/a").all().any():
-            print("WARNING: Found columns with all 'n/a'. Dropping these columns.")
+            print("⚠️ Found columns with all 'n/a'. Dropping these columns.")
             pep_obs = pep_obs.loc[:, ~(pep_obs == "n/a").all()]
 
-
-        print(f"Number of files: {len(pep_obs_names)}")
-        print(f"Number of peptides: {len(pep_var)}")
+        print(f"Peptides: {len(pep_var)}")
     else:
         pep_X = pep_layers_mbr = pep_var_names = pep_var = pep_obs_names = pep_obs = None
 
@@ -1707,7 +1948,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
             index_dict = {protein: index for index, protein in enumerate(mlb.classes_)}
             reorder_indices = [index_dict[protein] for protein in prot_var_names]
             rs = rs[:, reorder_indices]
-        print("RS matrix successfully computed")
+        # print("RS matrix successfully computed")
     else:
         rs = None
 
@@ -1719,7 +1960,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         prot_var_set = set(prot_var_names)
 
         if mlb_classes_set != prot_var_set:
-            print("WARNING: Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.")
+            print("⚠️ Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.")
             print(f"Overlap: {len(mlb_classes_set & prot_var_set)}")
             print(f"Unique to peptide data: {mlb_classes_set - prot_var_set}")
             print(f"Unique to protein data: {prot_var_set - mlb_classes_set}")
@@ -1739,7 +1980,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         history_msg="Imported protein and/or peptide data from Proteome Discoverer."
     )
 
-    print("pAnnData object created. Use `print(pdata)` to view the object.")
+    print("✅ Import complete. Use `print(pdata)` to view the object.")
     return pdata
 
 def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Normalised', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes']):
@@ -1747,7 +1988,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
         raise ValueError("Importing from DIA-NN: report.tsv or report.parquet must be provided")
     print("--------------------------\nStarting import...\n--------------------------")
 
-    print(f"Importing from {report_file}")
+    print(f"Source file: {report_file}")
     # if csv, then use pd.read_csv, if parquet then use pd.read_parquet('example_pa.parquet', engine='pyarrow')
     if report_file.endswith('.tsv'):
         report_all = pd.read_csv(report_file, sep='\t')
@@ -1764,7 +2005,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
             if 'PG.Quantity' not in report_all.columns:
                 raise ValueError("Reports generated with DIA-NN version >2.0 do not contain PG.Quantity values, please use PG.MaxLFQ .")
         else:
-            print("INFO: Protein value specified is not PG.MaxLFQ, please check if correct.")
+            print("⚠️ Protein value specified is not PG.MaxLFQ, please check if correct.")
     prot_X_pivot = report_all.pivot_table(index='Master.Protein', columns='Run', values=prot_value, aggfunc='first', sort=False)
     prot_X = sparse.csr_matrix(prot_X_pivot.values).T
     # prot_var_names: protein names
@@ -1793,7 +2034,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
         prot_obs = pd.DataFrame(prot_X_pivot.columns.values, columns=['Run'])['Run'].str.split('_', expand=True).rename(columns=dict(enumerate(obs_columns)))
     
     print(f"Number of files: {len(prot_obs_names)}")
-    print(f"Number of proteins: {len(prot_var)}")
+    print(f"Proteins: {len(prot_var)}")
 
     # -----------------------------
     # PEPTIDE DATA
@@ -1810,7 +2051,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
 
     if missing_columns:
         warnings.warn(
-            f"Warning: The following columns are missing: {', '.join(missing_columns)}. "
+            f"⚠️ The following columns are missing: {', '.join(missing_columns)}. "
             "Consider running analysis in the newer version of DIA-NN (1.8.1). "
             "Peptide-protein mapping may differ."
         )
@@ -1819,8 +2060,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     # pep_obs: sample typing from the column name, same as prot_obs
     pep_obs = prot_obs
 
-    print(f"Number of files: {len(pep_obs_names)}")
-    print(f"Number of peptides: {len(pep_var)}")
+    print(f"Peptides: {len(pep_var)}")
 
     # -----------------------------
     # RS DATA
@@ -1833,11 +2073,6 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     rs = rs[:, reorder_indices]
     # print("RS matrix successfully computed")
 
-    # TODO: number of peptides per protein
-    # number of proteins per peptide
-    # make columns isUnique for peptide
-    sum_values = np.sum(rs, axis=1)
-
     # -----------------------------
     # ASSERTIONS
     # -----------------------------
@@ -1846,7 +2081,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     prot_var_set = set(prot_var_names)
 
     if mlb_classes_set != prot_var_set:
-        print("WARNING: Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.")
+        print("⚠️ Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.")
         print(f"Overlap: {len(mlb_classes_set & prot_var_set)}")
         print(f"Unique to peptide data: {mlb_classes_set - prot_var_set}")
         print(f"Unique to protein data: {prot_var_set - mlb_classes_set}")
@@ -1864,9 +2099,6 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
         },
         history_msg=f"Imported DIA-NN report from {report_file} using {prot_value} (protein) and {pep_value} (peptide)."
     )
-    
-    pdata._append_history(f"Imported protein data from {report_file}, using {prot_value} as protein value and {pep_value} as peptide value.")
-    print("pAnnData object created. Use `print(pdata)` to view the object.")
 
     return pdata
 
@@ -1896,6 +2128,7 @@ def _create_pAnnData_from_parts(
     Returns:
     - pAnnData object with summary updated and validated
     """
+    print("")
     pdata = pAnnData(prot_X, pep_X, rs)
 
     # --- PROTEIN ---
@@ -1908,6 +2141,9 @@ def _create_pAnnData_from_parts(
         pdata.prot.layers['X_raw'] = prot_X
         if X_mbr_prot is not None:
             pdata.prot.layers['X_mbr'] = X_mbr_prot
+
+    if "Genes" in pdata.prot.var.columns and pdata.prot.var["Genes"].isna().any():
+        pdata.update_missing_genes(gene_col="Genes", verbose=True)
 
     # --- PEPTIDE ---
     if pep_X is not None:
@@ -1931,11 +2167,16 @@ def _create_pAnnData_from_parts(
 
     # --- Summary + Validation ---
     pdata.update_summary(recompute=True)
+    pdata._annotate_found_samples(threshold=0.0)
 
+    print("")
     if not pdata.validate():
-        print("⚠️ Warning: Validation issues found. Use `pdata.validate()` to inspect.")
+        print("⚠️ Validation issues found. Use `pdata.validate()` to inspect.")
 
     if history_msg:
         pdata._append_history(history_msg)
+
+    print("--------------------------")
+    print("✅ Import complete. Use `print(pdata)` to view the object.")
 
     return pdata
