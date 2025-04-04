@@ -49,8 +49,21 @@ from scviz import pAnnData
 # Thoughts: functions that act on panndata and return only panndata should be panndata methods, utility functions should be in utils
 
 # ----------------
+# BASIC UTILITY FUNCTIONS
+
+def log(msg, status="info"):
+    prefix = {
+        "info": "ℹ️",
+        "warn": "⚠️",
+        "ok": "✅",
+        "fail": "❌",
+        "check": "🔍"
+    }.get(status, "")
+    print(f"{prefix} {msg}")
+
+# ----------------
 # DATA PROCESSING FUNCTIONS
-# TODO: get_samplenames and get_classlist are very similar, may want to consider combining at some point
+# NOTE: get_samplenames and get_classlist are very similar, may want to consider combining at some point
 def get_samplenames(adata, classes):
     """
     Gets the sample names for the given class(es) type. Helper function for plot functions. 
@@ -136,7 +149,26 @@ def get_classlist(adata, classes = None, order = None):
 
     return classes_list
 
-# NOTE: not sure if needed?
+def get_adata_layer(adata, layer):
+    """
+    Safely extract layer data as dense numpy array.
+
+    Parameters:
+    - adata: AnnData object
+    - layer (str): Layer name or "X"
+
+    Returns:
+    - numpy.ndarray
+    """
+    if layer == "X":
+        data = adata.X
+    elif layer in adata.layers:
+        data = adata.layers[layer]
+    else:
+        raise ValueError(f"Layer '{layer}' not found in .layers and is not 'X'.")
+
+    return data.toarray() if hasattr(data, 'toarray') else data
+
 def get_adata(pdata, on = 'protein'):
     if on == 'protein':
         return pdata.prot
@@ -315,7 +347,12 @@ def format_class_filter(classes, class_value, exact_cases=False):
 
     elif isinstance(classes, list):
         if exact_cases:
-            # exact_cases + list of combos
+            # Handle the case where a single list is passed as one combination
+            if isinstance(class_value, list) and all(isinstance(v, str) for v in class_value):
+                if len(class_value) != len(classes):
+                    raise ValueError("Length of class_value must match the number of classes.")
+                return [{cls: val for cls, val in zip(classes, class_value)}]
+
             if isinstance(class_value, str):
                 class_value = [class_value]
 
@@ -374,8 +411,8 @@ def resolve_class_filter(adata, classes, class_value, debug=False, *, filter_fun
     return filter_func(adata, classes, values, debug=debug)
 
 # ----------------
-# EXPLORATION(?) FUNCTIONS
-def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction']):
+# EXPLORATION FUNCTIONS
+def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], verbose = False):
     """ Worker function to get data from Uniprot for a list of proteins, used by get_uniprot_fields(). Calls to UniProt REST API, and returns batch of maximum 1024 proteins at a time.
 
     Args:
@@ -396,7 +433,8 @@ def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'prot
     query = "%28" + query + "%29"
     format_type = 'tsv'
     
-    print(f"Querying Uniprot for {len(prot_list)} proteins")
+    if verbose:
+        print(f"Querying Uniprot for {len(prot_list)} proteins")
 
     # full url
     url = f'{base_url}?fields={fields}&format={format_type}&query={query}'
@@ -409,7 +447,8 @@ def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'prot
     isoform_prots = set(prot_list) - set(df['Entry'])
     if isoform_prots:
         # print statement for missing proteins, saying will now search for isoforms
-        print(f'Searching for isoforms in unmapped accessions: {len(isoform_prots)}')
+        if verbose:
+            print(f'Searching for isoforms in unmapped accessions: {len(isoform_prots)}')
         # these are typically isoforms, so we will try to search for them again
         query_parts = ["%28accession%3A" + id + "%29" for id in isoform_prots]
         query = "+OR+".join(query_parts)
@@ -449,7 +488,7 @@ def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'prot
     
     return df
 
-def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], batch_size=1024):
+def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], batch_size=1024, verbose=False):
     """ Get data from Uniprot for a list of proteins. Uses get_uniprot_fields_worker to get data in batches of batch_size. For more information, see https://www.uniprot.org/help/return_fields for list of search_fields.
         Current function accepts accession protein list. For more queries, see https://www.uniprot.org/help/query-fields for a list of query fields that can be searched for.
 
@@ -475,15 +514,17 @@ def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_nam
     # Split the id_list into batches of size batch_size
     batches = [prot_list[i:i + batch_size] for i in range(0, len(prot_list), batch_size)]
     # print total number and number of batches
-    print(f"Total number of proteins: {len(prot_list)}, Number of batches: {len(batches)}")
-    print(f"Fields: {search_fields}")
+    if verbose:
+        print(f"Total number of proteins: {len(prot_list)}, Number of batches: {len(batches)}")
+        print(f"Fields: {search_fields}")
     # Initialize an empty dataframe to store the results
     full_method_df = pd.DataFrame()
     
     # Loop through each batch and get the uniprot fields
     for batch in batches:
         # print progress
-        print(f"Processing batch {batches.index(batch) + 1} of {len(batches)}")
+        if verbose:
+            print(f"Processing batch {batches.index(batch) + 1} of {len(batches)}")
         batch_df = get_uniprot_fields_worker(batch, search_fields)
         full_method_df = pd.concat([full_method_df, batch_df], ignore_index=True)
     
@@ -491,6 +532,23 @@ def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_nam
 
 # ----------------
 # STATISTICAL TEST FUNCTIONS
+def pairwise_log2fc(data1, data2):
+    """
+    Compute pairwise median log2FC for each feature between two sample groups.
+
+    Parameters:
+    - data1, data2: np.ndarray of shape (n_samples, n_features)
+
+    Returns:
+    - median_log2fc: np.ndarray of shape (n_features,)
+    """
+    n1, n2 = data1.shape[0], data2.shape[0]
+    # shape: (n1, n2, n_features)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        pairwise_ratios = np.log2(data1[:, None, :] / data2[None, :, :])  # (n1, n2, features)
+    median_fc = np.nanmedian(pairwise_ratios.reshape(-1, data1.shape[1]), axis=0)
+    return median_fc
+
 # TODO: fix with pdata.summary maybe call stats_ttest instead
 def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_results=False, test_variable='total_count'):
     """
