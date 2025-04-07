@@ -1,25 +1,28 @@
 ## To-Do List
-1. Add more comprehensive documentation.
 
 # TODO features to implement
+0. Consider adding function that tidies up anndata.X -> so that we can directly use any sc.tl/sc.pl function
 1. Add sharedPeptides function on get_CV()
-2. Protein functionality - how many peptides/unique peptides per protein (+ TRUE/FALSE column for >=1 peptide common between samples with that peptide)
-3. Double-check peptide export format: (i) Gene Name (ii) Peptide name (iii) Peptide amino acid sequence start and end in the protein (iv) Charge, etc. if any (v) and then columns with the sample names where the intensities are reported
-4. Update umap with uncertainty and also subset coloring
-Implement dot plot: expression of the indicated genes in the three clusters (dot size is percentage of cells per cluster; color is cluster average normalized expression)
-5. implement directLFQ () for normalization, double check normalization (median?) from 240731_cbr
-6. implement correlation visualization (protein corr module)
-7. implement peptide sequence characteristics (hydrophobicity, etc.)
+2. Update umap with uncertainty and also subset coloring
+3. Implement dot plot: expression of the indicated genes in the three clusters (dot size is percentage of cells per cluster; color is cluster average normalized expression)
+4. implement directLFQ () for normalization, double check normalization (median?) from 240731_cbr
+5. implement correlation visualization (protein corr module)
+6. implement peptide sequence characteristics (hydrophobicity, etc.)
+7. implement imputation within classes (nested), not sure if can use ColumnTransformer together with SimpleImputer for this (check dev_imputation.ipynb)
+
+# TESTS
+1. Import tests most importation
 
 # FIX/BUGS
-1. get_query()
-2. get_abundance_query()
-3. fix up naming/usage of panndata.filter() and also scutils.filter()
-4. sync get_uniprot_fields() with convert_identifiers() and get_string_... functions - make one combined function for all 3
-5. housekeeping csvs not installed with package - find a way to fix this
-6. get_pca_importance just needs to accept pdata input (and prot/pep) - can get uns['pca'] and var_names from it. Keep n
+1. sync get_uniprot_fields() with convert_identifiers() and get_string_... functions - make one combined function for all 3
+2. housekeeping csvs not installed with package - find a way to fix this
+3. get_pca_importance just needs to accept pdata input (and prot/pep) - can get uns['pca'] and var_names from it.
 
 # MAINTENANCE
-1. Tests for imports - new+old DIANN format, new PD DIA format
-2. Check out scprep repo for possible utility functions
-3. Add Type hints to all functions, e.g. 
+1. Check out scprep repo for possible utility functions
+2. Add Type hints to all functions, try to fix all the lint errors...
+3. Double-check peptide export format: (i) Gene Name (ii) Peptide name (iii) Peptide amino acid sequence start and end in the protein (iv) Charge, etc. if any (v) and then columns with the sample names where the intensities are reported
+
+# DOCUMENTATION
+1. yes.
+2. But also a tutorial ipynb
