@@ -34,6 +34,7 @@ from os import access
 import re
 import io
 import requests
+import warnings
 
 import pandas as pd
 import numpy as np
@@ -48,14 +49,28 @@ from scviz import pAnnData
 # Thoughts: functions that act on panndata and return only panndata should be panndata methods, utility functions should be in utils
 
 # ----------------
+# BASIC UTILITY FUNCTIONS
+
+def log(msg, status="info"):
+    prefix = {
+        "info": "ℹ️",
+        "warn": "⚠️",
+        "ok": "✅",
+        "fail": "❌",
+        "check": "🔍"
+    }.get(status, "")
+    print(f"{prefix} {msg}")
+
+# ----------------
 # DATA PROCESSING FUNCTIONS
-def get_samplenames(adata, class_type):
+# NOTE: get_samplenames and get_classlist are very similar, may want to consider combining at some point
+def get_samplenames(adata, classes):
     """
     Gets the sample names for the given class(es) type. Helper function for plot functions. 
 
     Parameters:
     - adata (anndata.AnnData): The AnnData object containing the sample names.
-    - class_type (str or list of str): The classes to use for selecting samples. E.g. 'cell_type' or ['cell_type', 'treatment'].
+    - classes (str or list of str): The classes to use for selecting samples. E.g. 'cell_type' or ['cell_type', 'treatment'].
 
     Returns:
     - list of str: The sample names.
@@ -64,14 +79,14 @@ def get_samplenames(adata, class_type):
     >>> samples = get_samplenames(adata, 'cell_type')
     """
 
-    if class_type is None:
+    if classes is None:
         return None
-    elif isinstance(class_type, str):
-        return adata.obs[class_type].values.tolist()
-    elif isinstance(class_type, list):
-        return adata.obs[class_type].apply(lambda row: ', '.join(row.values.astype(str)), axis=1).values.tolist()
+    elif isinstance(classes, str):
+        return adata.obs[classes].values.tolist()
+    elif isinstance(classes, list):
+        return adata.obs[classes].apply(lambda row: ', '.join(row.values.astype(str)), axis=1).values.tolist()
     else:
-        raise ValueError("Invalid input for 'class_type'. It should be None, a string, or a list of strings.")
+        raise ValueError("Invalid input for 'classes'. It should be None, a string, or a list of strings.")
     
 def get_classlist(adata, classes = None, order = None):
     """
@@ -134,6 +149,26 @@ def get_classlist(adata, classes = None, order = None):
 
     return classes_list
 
+def get_adata_layer(adata, layer):
+    """
+    Safely extract layer data as dense numpy array.
+
+    Parameters:
+    - adata: AnnData object
+    - layer (str): Layer name or "X"
+
+    Returns:
+    - numpy.ndarray
+    """
+    if layer == "X":
+        data = adata.X
+    elif layer in adata.layers:
+        data = adata.layers[layer]
+    else:
+        raise ValueError(f"Layer '{layer}' not found in .layers and is not 'X'.")
+
+    return data.toarray() if hasattr(data, 'toarray') else data
+
 def get_adata(pdata, on = 'protein'):
     if on == 'protein':
         return pdata.prot
@@ -142,7 +177,82 @@ def get_adata(pdata, on = 'protein'):
     else:
         raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
-def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True):
+def get_abundance(pdata, namelist=None, layer='X', on='protein',
+                  classes=None, log=True, x_label='gene'):
+    """
+    Extract long-form abundance DataFrame from a pAnnData object.
+
+    Parameters:
+        pdata: pAnnData object
+        namelist: list of accessions or genes to extract (optional)
+        layer: which data layer to use (default: 'X')
+        on: 'protein' or 'peptide'
+        classes: obs column or list of columns to group by
+        log: whether to apply log2 transform
+        x_label: 'gene' or 'accession'
+
+    Returns:
+        pd.DataFrame with abundance + metadata
+    """
+    import numpy as np
+    import pandas as pd
+
+    adata = get_adata(pdata, on)
+
+    # Resolve gene names → accessions
+    if namelist:
+        gene_to_accession = {}
+        if "Genes" in adata.var.columns:
+            for acc, gene in zip(adata.var_names, adata.var["Genes"]):
+                if pd.notna(gene):
+                    gene_to_accession[str(gene)] = acc
+        resolved, unmatched = [], []
+        for name in namelist:
+            if name in adata.var_names:
+                resolved.append(name)
+            elif name in gene_to_accession:
+                resolved.append(gene_to_accession[name])
+            else:
+                unmatched.append(name)
+        if not resolved:
+            raise ValueError("No valid names in `namelist`.")
+        if unmatched:
+            print("[get_abundance] Warning: Unmatched names:")
+            for u in unmatched:
+                print(f"  - {u}")
+        adata = adata[:, resolved]
+
+    # Extract data matrix
+    X = adata.layers[layer] if layer in adata.layers else adata.X
+    if hasattr(X, "toarray"):
+        X = X.toarray()
+
+    # Melt into long format
+    df = pd.DataFrame(X, columns=adata.var_names, index=adata.obs_names).reset_index()
+    df = df.melt(id_vars="index", var_name="accession", value_name="abundance")
+    df = df.rename(columns={"index": "cell"})
+
+    # Merge obs metadata
+    df = df.merge(adata.obs.reset_index(), left_on="cell", right_on="index")
+
+    # Annotate gene (if available)
+    gene_map = adata.var["Genes"].to_dict() if "Genes" in adata.var else {}
+    df['gene'] = df['accession'].map(gene_map)
+    df['x_label_name'] = df['gene'].fillna(df['accession']) if x_label == 'gene' else df['accession']
+
+    # Annotate class grouping
+    if classes:
+        df['class'] = df[classes] if isinstance(classes, str) else df[classes].astype(str).agg('_'.join, axis=1)
+    else:
+        df['class'] = 'all'
+
+    # Log2 transform
+    if log:
+        df['log2_abundance'] = np.log2(np.clip(df['abundance'], 1e-6, None))
+
+    return df
+
+def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True, debug=False):
     """
     Get the contents for an UpSet plot based on the specified case list. Helper function for UpSet plots.
 
@@ -170,20 +280,10 @@ def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True):
     upset_dict = {}
 
     for j, class_value in enumerate(classes_list):
-        if classes is None:
-            values = class_value.split('_')
-            # print(f'Classes: {classes}, Values: {values}') if debug else None
-            data_filter = filter(adata, classes, values, suppress_warnings=True)
-        elif isinstance(classes, str):
-            # print(f'Class: {classes}, Value: {class_value}') if debug else None
-            data_filter = filter(adata, classes, class_value, suppress_warnings=True)
-        elif isinstance(classes, list):
-            values = class_value.split('_')
-            # print(f'Classes: {classes}, Values: {values}') if debug else None
-            data_filter = filter(adata, classes, values, suppress_warnings=True)
+        data_filtered = resolve_class_filter(adata, classes, class_value, debug=True)
 
         # get proteins that are present in the filtered data (at least one value is not NaN)
-        prot_present = data_filter.var_names[(~np.isnan(data_filter.X.toarray())).sum(axis=0) > 0]
+        prot_present = data_filtered.var_names[(~np.isnan(data_filtered.X.toarray())).sum(axis=0) > 0]
         upset_dict[class_value] = prot_present.tolist()
 
     if upsetForm:
@@ -199,83 +299,230 @@ def get_upset_query(upset_content, present, absent):
 
     return prot_query_df
 
-# IMPORTANT: move to class function, ensure nothing else breaks
-def filter(pdata, class_type, values, exact_cases = False, suppress_warnings = False):
+# TODO: check through all code and migrate to new filter_dict()
+def filter(pdata, class_type, values, exact_cases = False, debug = False):
     """
-    Filters out for the given class(es) type. Returns a copy of the filtered pdata object, does not modify the original object.
+    Filters samples from either a pAnnData or AnnData object using legacy-style
+    (class_type + values) input.
+
+    This function converts the input to the new dictionary-style format internally.
+    - If `pdata` is a pAnnData object, this delegates to the class method `filter_sample_values()`.
+    - If `pdata` is an AnnData object, filtering is performed directly on `.obs`.
+
+    Note:
+    For pAnnData users, it is recommended to use the class method `.filter_sample_values()`
+    with dictionary-style input for cleaner and more consistent filtering.
 
     Parameters:
-    - pdata (pAnnData): The pAnnData object containing the samples.
-    - class_type (str or list of str): The classes to use for selecting samples. E.g. 'cell_type' or ['cell_type', 'treatment'].
-    - values (list of str or list of list of str): The values to select for within the class_type. E.g. for cell_type: ['wt', 'kd'], or for a list of class_type [['wt', 'kd'],['control', 'treatment']].
-    - exact_cases (bool): Whether to match the exact cases specified by the user. Default is False.
+    - pdata (pAnnData or AnnData): The data object to filter.
+    - class_type (str or list of str): Class labels to filter on (e.g. 'treatment' or ['treatment', 'cellline'])
+    - values (list of str or list of list of str): Value(s) to match. For multiple class_types, this should be a list of values or a list of value-combinations. E.g. for cell_type: ['wt', 'kd'], or for a list of class_type [['wt', 'kd'],['control', 'treatment']].
+    - exact_cases (bool): If True, treat values as exact combinations (AND across class types); otherwise allow OR logic within each class type.
+    - debug (bool): If True, prints filter query.
     
     Returns:
-    - pAnnData: Returns a copy of the filtered pdata object. Does not modify the original object.
+    - Filtered object of the same type (pAnnData or AnnData).
 
     Example:
-    >>> samples = get_samples(adata, class_type = ['cell_type', 'treatment'], values = [['wt', 'kd'], ['control', 'treatment']])
+    >>> samples = filter(pdata, class_type="treatment", values="kd")
+
+    >>> samples = utils.filter(adata, class_type = ['cell_type', 'treatment'], values = [['wt', 'kd'], ['control', 'treatment']])
     # returns samples where cell_type is either 'wt' or 'kd' and treatment is either 'control' or 'treatment'
 
-    >>> samples = get_samples(adata, exact_cases = True, class_type = ['cell_type', 'treatment'], values = [['wt', 'control'], ['kd', 'treatment']])
+    >>> samples = utils.filter(adata, exact_cases = True, class_type = ['cell_type', 'treatment'], values = [['wt', 'control'], ['kd', 'treatment']])
     # returns samples where cell_type is 'wt' and treatment is 'kd', or cell_type is 'control' and treatment is 'treatment'
     """
-    pdata = pdata.copy()
-
-    is_anndata = False
-    if isinstance(pdata, ad.AnnData):
-        if not suppress_warnings:
-            print("Warning: The provided object is an AnnData object, not a pAnnData object. Proceeding with the filter.")
-        is_anndata = True
-    elif not isinstance(pdata, pAnnData.pAnnData):
-        raise ValueError("Invalid input for 'pdata'. It should be a pAnnData object.")
-
-    if class_type is None:
-        print("No class type specified. Returning unmodified pAnnData object.")
-        return pdata
     
-    if isinstance(class_type, str):
-        query = f"(adata.obs['{class_type}'] == '{values}')"
-        print('DEVELOPMENT: testing for query - ', query)
-    elif isinstance(class_type, list):
-        # if values is not wrapped in a list, wrap it
-        if len(values) != 1:
-            values = [values]
-            
-        if exact_cases:
-            query = " | ".join([
-                " & ".join(["(adata.obs['{}'] == '{}')".format(cls, val) for cls, val in zip(class_type, (vals if isinstance(vals, list) else [vals]))]) for vals in values
-            ])
-            print('DEVELOPMENT: exact|testing for query - ', query)
-        else:
-            # query = " & ".join([
-            #     "({})".format(' | '.join(["(adata.obs['{}'] == '{}')".format(cls, val) for val in vals])) for cls, vals in zip(class_type, values)])
-            query = " & ".join([
-                "({})".format(' | '.join(["(adata.obs['{}'] == '{}')".format(cls, val) for val in (vals if isinstance(vals, list) else [vals])])) for cls, vals in zip(class_type, values)
-            ])
-            print('DEVELOPMENT: non-exact|testing for query - ', query)
-            
-    else:
-        raise ValueError("Invalid input for 'class_type'. It should be None, a string, or a list of strings.")
+    if hasattr(pdata, "filter_sample_values"):
+        warnings.warn(
+            "You passed a pAnnData object to `filter()`. "
+            "It is recommended to use `pdata.filter_sample_values()` directly.",
+            UserWarning)
+        
+        print("UserWarning: It is recommended to use the class method `.filter_sample_values()` with dictionary-style input for cleaner and more consistent filtering.")
+
+    formatted_values = format_class_filter(class_type, values, exact_cases)
     
-    if is_anndata:
+    # pAnnData input
+    if hasattr(pdata, "filter_sample_values"):
+        return pdata.filter_sample_values(
+            values=formatted_values,
+            exact_cases=exact_cases,
+            debug=debug,
+            return_copy=True
+        )
+
+    # plain AnnData input
+    elif isinstance(pdata, ad.AnnData):
         adata = pdata
-        pdata = adata[eval(query)]
-    else:
-        if pdata.prot is not None:
-            adata = pdata.prot
-            pdata.prot = adata[eval(query)]
-        if pdata.pep is not None:
-            adata = pdata.pep
-            pdata.pep = adata[eval(query)]
-        pdata._update_summary()
-        pdata._append_history(f"Filtered by class type: {class_type}, values: {values}, exact_cases: {exact_cases}. Copy of the filtered pAnnData object returned.")    
+        obs_keys = adata.obs.columns
 
-    return pdata
+        if exact_cases:
+            if not isinstance(formatted_values, list) or not all(isinstance(v, dict) for v in formatted_values):
+                raise ValueError("When exact_cases=True, `values` must be a list of dictionaries.")
+
+            for case in formatted_values:
+                if not case:
+                    raise ValueError("Empty dictionary found in values.")
+                for key in case:
+                    if key not in obs_keys:
+                        raise ValueError(f"Field '{key}' not found in adata.obs.")
+
+            query = " | ".join([
+                " & ".join([
+                    f"(adata.obs['{k}'] == '{v}')" for k, v in case.items()
+                ])
+                for case in formatted_values
+            ])
+
+        else:
+            if not isinstance(formatted_values, dict):
+                raise ValueError("When exact_cases=False, `values` must be a dictionary.")
+
+            for key in formatted_values:
+                if key not in obs_keys:
+                    raise ValueError(f"Field '{key}' not found in adata.obs.")
+
+            query_parts = []
+            for k, v in formatted_values.items():
+                v_list = v if isinstance(v, list) else [v]
+                part = " | ".join([f"(adata.obs['{k}'] == '{val}')" for val in v_list])
+                query_parts.append(f"({part})")
+            query = " & ".join(query_parts)
+
+        if debug:
+            print(f"Filter query: {query}")
+
+        return adata[eval(query)]
+
+    else:
+        raise ValueError("Input must be a pAnnData or AnnData object.")
+
+def format_class_filter(classes, class_value, exact_cases=False):
+    """
+    Converts legacy `classes` and `class_value` input into the new dictionary-style filter format.
+
+    Parameters:
+    - classes (str or list of str): Field name(s) used for filtering (e.g. 'treatment' or ['treatment', 'cellline']).
+    - class_value (str, list of str, or list of list): The value(s) corresponding to the class(es).
+        If a string, it may be underscore-joined (e.g. 'kd_AS').
+        If a list of strings (e.g. ['kd_AS', 'sc_BE']), and exact_cases=True, each will be split and zipped with classes.
+    - exact_cases (bool): Whether to return a list of exact match dictionaries or a combined OR filter.
+
+    Returns:
+    - dict or list of dicts: Formatted for dictionary-style filter input.
+    """
+
+    if isinstance(classes, str):
+        # Simple case: one class
+        if isinstance(class_value, list) and exact_cases:
+            return [{classes: val} for val in class_value]
+        else:
+            return {classes: class_value}
+
+    elif isinstance(classes, list):
+        if exact_cases:
+            # Handle the case where a single list is passed as one combination
+            if isinstance(class_value, list) and all(isinstance(v, str) for v in class_value):
+                if len(class_value) != len(classes):
+                    raise ValueError("Length of class_value must match the number of classes.")
+                return [{cls: val for cls, val in zip(classes, class_value)}]
+
+            if isinstance(class_value, str):
+                class_value = [class_value]
+
+            formatted = []
+            for entry in class_value:
+                if isinstance(entry, str):
+                    values = entry.split('_')
+                else:
+                    values = entry
+                if len(values) != len(classes):
+                    raise ValueError("Each class_value entry must match the number of classes.")
+                formatted.append({cls: val for cls, val in zip(classes, values)})
+            return formatted
+
+        else:
+            # loose match — OR within each class
+            if isinstance(class_value, str):
+                values = class_value.split('_')
+            else:
+                values = class_value
+            if len(values) != len(classes):
+                raise ValueError("class_value must align with the number of classes.")
+            return {cls: val for cls, val in zip(classes, values)}
+
+    else:
+        raise ValueError("Invalid input: `classes` should be a string or list of strings.")
+
+def resolve_class_filter(adata, classes, class_value, debug=False, *, filter_func=None):
+    """
+    Helper to resolve (classes, class_value) inputs and apply filtering.
+
+    Parameters:
+    - adata (AnnData or pAnnData): The data object to filter.
+    - classes (str, list, or None): Class label(s) for filtering.
+    - class_value (str or list): Corresponding value(s) to filter.
+    - debug (bool): Print resolved class/value pairs.
+    - filter_func (callable): Filtering function to use (default: `utils.filter`).
+
+    Returns:
+    - Filtered data object (same type as input).
+    """
+
+    from scviz import utils  # safe to do here in case of circular import
+
+    if isinstance(classes, str):
+        values = class_value
+    else:
+        values = class_value.split('_')
+
+    if debug:
+        print(f"Classes: {classes}, Values: {values}")
+
+    if filter_func is None:
+        filter_func = utils.filter
+
+    return filter_func(adata, classes, values, debug=debug)
+
+def get_pep_prot_mapping(pdata, return_series=False):
+    """
+    Returns the column name in .pep.var that maps peptides to proteins, or Series of mapping 
+    based on the data source recorded in pdata.metadata.
+
+    Parameters:
+        pdata : pAnnData
+            The annotated proteomics object with .metadata and .pep
+        return_series : bool, optional (default=False)
+            If True, returns a Series mapping peptides to proteins.
+            If False, returns the name of the mapping column
+
+    Returns:
+        str : column name containing peptide-to-protein mapping
+        or pd.Series : mapping of peptides to proteins
+
+    Raises:
+        ValueError if source is unrecognized or mapping column not found.
+    """
+    source = pdata.metadata.get("source", "").lower()
+
+    if source == "proteomediscoverer":
+        col = "Master Protein Accessions"
+    elif source == "diann":
+        col = "Protein.Group"
+    elif source == "maxquant":
+        col = "Leading razor protein"
+    else:
+        raise ValueError(f"Unknown data source '{source}' — cannot determine peptide-to-protein mapping.")
+
+    if return_series:
+        return pdata.pep.var[col]
+
+    return col
 
 # ----------------
-# EXPLORATION(?) FUNCTIONS
-def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction']):
+# EXPLORATION FUNCTIONS
+def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], verbose = False):
     """ Worker function to get data from Uniprot for a list of proteins, used by get_uniprot_fields(). Calls to UniProt REST API, and returns batch of maximum 1024 proteins at a time.
 
     Args:
@@ -296,7 +543,8 @@ def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'prot
     query = "%28" + query + "%29"
     format_type = 'tsv'
     
-    print(f"Querying Uniprot for {len(prot_list)} proteins")
+    if verbose:
+        print(f"Querying Uniprot for {len(prot_list)} proteins")
 
     # full url
     url = f'{base_url}?fields={fields}&format={format_type}&query={query}'
@@ -309,7 +557,8 @@ def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'prot
     isoform_prots = set(prot_list) - set(df['Entry'])
     if isoform_prots:
         # print statement for missing proteins, saying will now search for isoforms
-        print(f'Searching for isoforms in unmapped accessions: {len(isoform_prots)}')
+        if verbose:
+            print(f'Searching for isoforms in unmapped accessions: {len(isoform_prots)}')
         # these are typically isoforms, so we will try to search for them again
         query_parts = ["%28accession%3A" + id + "%29" for id in isoform_prots]
         query = "+OR+".join(query_parts)
@@ -349,16 +598,14 @@ def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'prot
     
     return df
 
-def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], batch_size=1024):
-    """ Get data from Uniprot for a list of proteins. Uses get_uniprot_fields_worker to get data in batches of batch_size.
+def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], batch_size=1024, verbose=False):
+    """ Get data from Uniprot for a list of proteins. Uses get_uniprot_fields_worker to get data in batches of batch_size. For more information, see https://www.uniprot.org/help/return_fields for list of search_fields.
+        Current function accepts accession protein list. For more queries, see https://www.uniprot.org/help/query-fields for a list of query fields that can be searched for.
 
     Args:
         prot_list (list): list of protein IDs
         search_fields (list): list of fields to search for.
         batch_size (int): number of proteins to search for in each batch. Default (and maximum) is 1024.
-
-        For more information, see https://www.uniprot.org/help/return_fields for list of search_fields.
-        Current function accepts accession protein list. For more queries, see https://www.uniprot.org/help/query-fields for a list of query fields that can be searched for.
 
     Returns:
         pandas.DataFrame: DataFrame with the results
@@ -368,18 +615,26 @@ def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_nam
         >>> df = get_uniprot_fields(uniprot_list)
     """
 
+    # BUGFIX: accession should be first in the list of search fields, otherwise error thrown in worker function
+    if 'accession' not in search_fields:
+        search_fields = ['accession'] + search_fields
+    elif search_fields[0] != 'accession':
+        search_fields.remove('accession')
+        search_fields = ['accession'] + search_fields
     # Split the id_list into batches of size batch_size
     batches = [prot_list[i:i + batch_size] for i in range(0, len(prot_list), batch_size)]
     # print total number and number of batches
-    print(f"Total number of proteins: {len(prot_list)}, Number of batches: {len(batches)}")
-    print(f"Fields: {search_fields}")
+    if verbose:
+        print(f"Total number of proteins: {len(prot_list)}, Number of batches: {len(batches)}")
+        print(f"Fields: {search_fields}")
     # Initialize an empty dataframe to store the results
     full_method_df = pd.DataFrame()
     
     # Loop through each batch and get the uniprot fields
     for batch in batches:
         # print progress
-        print(f"Processing batch {batches.index(batch) + 1} of {len(batches)}")
+        if verbose:
+            print(f"Processing batch {batches.index(batch) + 1} of {len(batches)}")
         batch_df = get_uniprot_fields_worker(batch, search_fields)
         full_method_df = pd.concat([full_method_df, batch_df], ignore_index=True)
     
@@ -387,6 +642,28 @@ def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_nam
 
 # ----------------
 # STATISTICAL TEST FUNCTIONS
+def pairwise_log2fc(data1, data2):
+    """
+    Compute pairwise median log2FC for each feature between two sample groups. Helper function for pdata.de() in fold-change options pairwise_median and pep_pairwise_median.
+
+    Parameters:
+    - data1, data2: np.ndarray of shape (n_samples, n_features)
+
+    Returns:
+    - median_log2fc: np.ndarray of shape (n_features,)
+    """
+    n1, n2 = data1.shape[0], data2.shape[0]
+
+    # data1[:, None, :] has shape (n1, 1, n_features)
+    # data2[None, :, :] has shape (1, n2, n_features)
+    # The result is an array of shape (n1, n2, n_features)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        pairwise_ratios = np.log2(data1[:, None, :] / data2[None, :, :])  # (n1, n2, features)
+
+    # Reshape to (n1*n2, n_features) and compute the median along the first axis.
+    median_fc = np.nanmedian(pairwise_ratios.reshape(-1, data1.shape[1]), axis=0)
+    return median_fc
+
 # TODO: fix with pdata.summary maybe call stats_ttest instead
 def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_results=False, test_variable='total_count'):
     """
