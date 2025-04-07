@@ -272,7 +272,6 @@ def plot_summary(ax, pdata, value='protein_count', classes=None, plot_mean = Tru
 
     return ax
 
-# TODO: helper get_abundance class function, so that can just return df directly
 def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
                    classes=None, return_df=False, order=None, palette=None,
                    log=True, facet=None, height=4, aspect=0.5,
@@ -309,52 +308,17 @@ def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
 
     adata = utils.get_adata(pdata, on)
 
-    if namelist:
-        gene_to_accession = {}
-        if "Genes" in adata.var.columns:
-            for acc, gene in zip(adata.var_names, adata.var["Genes"]):
-                if pd.notna(gene):
-                    gene_to_accession[str(gene)] = acc
-        resolved, unmatched = [], []
-        for name in namelist:
-            if name in adata.var_names:
-                resolved.append(name)
-            elif name in gene_to_accession:
-                resolved.append(gene_to_accession[name])
-            else:
-                unmatched.append(name)
-        if not resolved:
-            raise ValueError("No valid names in `namelist`.")
-        if unmatched:
-            print("[plot_abundance] Warning: Unmatched names:")
-            for u in unmatched:
-                print(f"  - {u}")
-        adata = adata[:, resolved]
+    # Get abundance DataFrame
+    df = utils.get_abundance(
+        pdata, namelist=namelist, layer=layer, on=on,
+        classes=classes, log=log, x_label=x_label
+    )
 
-    X = adata.layers[layer] if layer in adata.layers else adata.X
-    if hasattr(X, "toarray"):
-        X = X.toarray()
-
-    df = pd.DataFrame(X, columns=adata.var_names, index=adata.obs_names).reset_index()
-    df = df.melt(id_vars="index", var_name="accession", value_name="abundance")
-    df = df.rename(columns={"index": "cell"})
-    df = df.merge(adata.obs.reset_index(), left_on="cell", right_on="index")
-
+    # Add facet column (plotting only)
     df['facet'] = df[facet] if facet else 'all'
-    if classes:
-        df['class'] = df[classes] if isinstance(classes, str) else df[classes].astype(str).agg('_'.join, axis=1)
-    else:
-        df['class'] = 'all'
 
     if facet and classes and facet == classes:
         raise ValueError("`facet` and `classes` must be different.")
-
-    gene_map = adata.var["Genes"].to_dict() if "Genes" in adata.var else {}
-    df['gene'] = df['accession'].map(gene_map)
-    df['x_label_name'] = df['gene'].fillna(df['accession']) if x_label == 'gene' else df['accession']
-
-    if log:
-        df['log2_abundance'] = np.log2(np.clip(df['abundance'], 1e-6, None))
 
     if return_df:
         return df
