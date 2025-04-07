@@ -177,6 +177,81 @@ def get_adata(pdata, on = 'protein'):
     else:
         raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
+def get_abundance(pdata, namelist=None, layer='X', on='protein',
+                  classes=None, log=True, x_label='gene'):
+    """
+    Extract long-form abundance DataFrame from a pAnnData object.
+
+    Parameters:
+        pdata: pAnnData object
+        namelist: list of accessions or genes to extract (optional)
+        layer: which data layer to use (default: 'X')
+        on: 'protein' or 'peptide'
+        classes: obs column or list of columns to group by
+        log: whether to apply log2 transform
+        x_label: 'gene' or 'accession'
+
+    Returns:
+        pd.DataFrame with abundance + metadata
+    """
+    import numpy as np
+    import pandas as pd
+
+    adata = get_adata(pdata, on)
+
+    # Resolve gene names → accessions
+    if namelist:
+        gene_to_accession = {}
+        if "Genes" in adata.var.columns:
+            for acc, gene in zip(adata.var_names, adata.var["Genes"]):
+                if pd.notna(gene):
+                    gene_to_accession[str(gene)] = acc
+        resolved, unmatched = [], []
+        for name in namelist:
+            if name in adata.var_names:
+                resolved.append(name)
+            elif name in gene_to_accession:
+                resolved.append(gene_to_accession[name])
+            else:
+                unmatched.append(name)
+        if not resolved:
+            raise ValueError("No valid names in `namelist`.")
+        if unmatched:
+            print("[get_abundance] Warning: Unmatched names:")
+            for u in unmatched:
+                print(f"  - {u}")
+        adata = adata[:, resolved]
+
+    # Extract data matrix
+    X = adata.layers[layer] if layer in adata.layers else adata.X
+    if hasattr(X, "toarray"):
+        X = X.toarray()
+
+    # Melt into long format
+    df = pd.DataFrame(X, columns=adata.var_names, index=adata.obs_names).reset_index()
+    df = df.melt(id_vars="index", var_name="accession", value_name="abundance")
+    df = df.rename(columns={"index": "cell"})
+
+    # Merge obs metadata
+    df = df.merge(adata.obs.reset_index(), left_on="cell", right_on="index")
+
+    # Annotate gene (if available)
+    gene_map = adata.var["Genes"].to_dict() if "Genes" in adata.var else {}
+    df['gene'] = df['accession'].map(gene_map)
+    df['x_label_name'] = df['gene'].fillna(df['accession']) if x_label == 'gene' else df['accession']
+
+    # Annotate class grouping
+    if classes:
+        df['class'] = df[classes] if isinstance(classes, str) else df[classes].astype(str).agg('_'.join, axis=1)
+    else:
+        df['class'] = 'all'
+
+    # Log2 transform
+    if log:
+        df['log2_abundance'] = np.log2(np.clip(df['abundance'], 1e-6, None))
+
+    return df
+
 def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True, debug=False):
     """
     Get the contents for an UpSet plot based on the specified case list. Helper function for UpSet plots.
@@ -410,6 +485,41 @@ def resolve_class_filter(adata, classes, class_value, debug=False, *, filter_fun
 
     return filter_func(adata, classes, values, debug=debug)
 
+def get_pep_prot_mapping(pdata, return_series=False):
+    """
+    Returns the column name in .pep.var that maps peptides to proteins, or Series of mapping 
+    based on the data source recorded in pdata.metadata.
+
+    Parameters:
+        pdata : pAnnData
+            The annotated proteomics object with .metadata and .pep
+        return_series : bool, optional (default=False)
+            If True, returns a Series mapping peptides to proteins.
+            If False, returns the name of the mapping column
+
+    Returns:
+        str : column name containing peptide-to-protein mapping
+        or pd.Series : mapping of peptides to proteins
+
+    Raises:
+        ValueError if source is unrecognized or mapping column not found.
+    """
+    source = pdata.metadata.get("source", "").lower()
+
+    if source == "proteomediscoverer":
+        col = "Master Protein Accessions"
+    elif source == "diann":
+        col = "Protein.Group"
+    elif source == "maxquant":
+        col = "Leading razor protein"
+    else:
+        raise ValueError(f"Unknown data source '{source}' — cannot determine peptide-to-protein mapping.")
+
+    if return_series:
+        return pdata.pep.var[col]
+
+    return col
+
 # ----------------
 # EXPLORATION FUNCTIONS
 def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], verbose = False):
@@ -534,7 +644,7 @@ def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_nam
 # STATISTICAL TEST FUNCTIONS
 def pairwise_log2fc(data1, data2):
     """
-    Compute pairwise median log2FC for each feature between two sample groups.
+    Compute pairwise median log2FC for each feature between two sample groups. Helper function for pdata.de() in fold-change options pairwise_median and pep_pairwise_median.
 
     Parameters:
     - data1, data2: np.ndarray of shape (n_samples, n_features)
@@ -543,9 +653,14 @@ def pairwise_log2fc(data1, data2):
     - median_log2fc: np.ndarray of shape (n_features,)
     """
     n1, n2 = data1.shape[0], data2.shape[0]
-    # shape: (n1, n2, n_features)
+
+    # data1[:, None, :] has shape (n1, 1, n_features)
+    # data2[None, :, :] has shape (1, n2, n_features)
+    # The result is an array of shape (n1, n2, n_features)
     with np.errstate(divide='ignore', invalid='ignore'):
         pairwise_ratios = np.log2(data1[:, None, :] / data2[None, :, :])  # (n1, n2, features)
+
+    # Reshape to (n1*n2, n_features) and compute the median along the first axis.
     median_fc = np.nanmedian(pairwise_ratios.reshape(-1, data1.shape[1]), axis=0)
     return median_fc
 

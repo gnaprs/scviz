@@ -546,7 +546,7 @@ class pAnnData:
 
                 # Summary stats
                 print(f"   - Proteins with ≥2 *unique* linked peptides: {(unique_counts >= 2).sum()}/{rs_shape[0]}")
-                print(f"   - Peptides with ≥2 linked proteins: {(col_links >= 2).sum()}/{rs_shape[1]}")
+                print(f"   - Peptides linked to ≥2 proteins: {(col_links >= 2).sum()}/{rs_shape[1]}")
                 print(f"   - Mean peptides per protein: {row_links.mean():.2f}")
                 print(f"   - Mean proteins per peptide: {col_links.mean():.2f}")
 
@@ -1420,6 +1420,7 @@ class pAnnData:
             Method for computing fold change. Options:
             - 'mean' : log2(mean(group1) / mean(group2))
             - 'pairwise_median' : median of all pairwise log2 ratios
+            - 'pep_pairwise_median' : median of all pairwise log2 ratios for peptides per protein
 
         Returns:
         df_stats : pandas.DataFrame
@@ -1480,8 +1481,47 @@ class pAnnData:
             group2_mean = np.nanmean(data2, axis=0)
             with np.errstate(divide='ignore', invalid='ignore'):
                 log2fc_vals = np.log2(group1_mean / group2_mean)
+
         elif fold_change_mode == 'pairwise_median':
             log2fc_vals = utils.pairwise_log2fc(data1, data2)
+        
+        elif fold_change_mode == 'pep_pairwise_median':
+            # --- Validate .pep presence ---
+            if self.pep is None:
+                raise ValueError("Peptide-level data (.pep) is required for fold_change_mode='pep_pairwise_median', but self.pep is None.")
+
+            # --- Handle peptide layer fallback ---
+            actual_layer = layer
+            if layer != 'X' and not (hasattr(self.pep, "layers") and layer in self.pep.layers):
+                warnings.warn(
+                    f"Layer '{layer}' not found in .pep.layers. Falling back to 'X'.",
+                    UserWarning
+                )
+                actual_layer = 'X'
+
+            # Get peptide data
+            pep_data1 = utils.get_adata_layer(pdata_case1.pep, actual_layer)
+            pep_data2 = utils.get_adata_layer(pdata_case2.pep, actual_layer)
+            pep_data1 = np.asarray(pep_data1)
+            pep_data2 = np.asarray(pep_data2)
+
+            # Compute per-peptide pairwise log2FCs
+            pep_log2fc = utils.pairwise_log2fc(pep_data1, pep_data2)
+
+            # Map peptides to proteins
+            pep_to_prot = utils.get_pep_prot_mapping(self, return_series=True)
+
+            # Aggregate peptide log2FCs into protein-level log2FCs
+            prot_log2fc = pd.Series(index=self.prot.var_names, dtype=float)
+            for prot in self.prot.var_names:
+                matching_peptides = pep_to_prot[pep_to_prot == prot].index
+                if len(matching_peptides) == 0:
+                    continue
+                idxs = self.pep.var_names.get_indexer(matching_peptides)
+                valid_idxs = idxs[idxs >= 0]
+                if len(valid_idxs) > 0:
+                    prot_log2fc[prot] = np.nanmedian(pep_log2fc[valid_idxs])
+            log2fc_vals = prot_log2fc.values
         else:
             raise ValueError(f"Unsupported fold_change_mode: {fold_change_mode}")
 
@@ -1876,7 +1916,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
     
     if prot_file:
         # -----------------------------
-        print(f"Source file: {prot_file}")
+        print(f"Source file: {prot_file} / {pep_file}")
         # PROTEIN DATA
         # check file format, if '.txt' then use read_csv, if '.xlsx' then use read_excel
         if prot_file.endswith('.txt') or prot_file.endswith('.tsv'):
@@ -1909,7 +1949,6 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
 
     if pep_file:
         # -----------------------------
-        print(f"Importing from {pep_file}")
         # PEPTIDE DATA
         if pep_file.endswith('.txt') or pep_file.endswith('.tsv'):
             pep_all = pd.read_csv(pep_file, sep='\t')
@@ -1945,7 +1984,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         mlb = MultiLabelBinarizer()
         rs = mlb.fit_transform(pep_prot_list)
         if prot_var_names is not None:
-            index_dict = {protein: index for index, protein in enumerate(mlb.classes_)}
+            index_dict = {protein: index for index, protein in enumerate(mlb.classes_)}           
             reorder_indices = [index_dict[protein] for protein in prot_var_names]
             rs = rs[:, reorder_indices]
         # print("RS matrix successfully computed")
@@ -1980,7 +2019,6 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         history_msg="Imported protein and/or peptide data from Proteome Discoverer."
     )
 
-    print("✅ Import complete. Use `print(pdata)` to view the object.")
     return pdata
 
 def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Normalised', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes']):
