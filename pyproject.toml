@@ -42,6 +42,10 @@ Issues = "https://github.com/gnaprs/scviz/issues"
 pythonpath = [
   "."
 ]
+filterwarnings = [
+    "ignore::DeprecationWarning:jupyter_client.connect",
+    "ignore::DeprecationWarning:upsetplot.plotting"
+]
 
 [project.optional-dependencies]
 pytest = ["openpyxl"]

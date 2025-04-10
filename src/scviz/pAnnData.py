@@ -247,9 +247,6 @@ class pAnnData:
 
     def _update_metrics(self):
         """Compute per-sample and RS-derived metrics for prot and pep data."""
-        import time
-        t0 = time.time()
-
         if self.prot is not None:
             X = self.prot.X.toarray()
             self.prot.obs['protein_quant'] = np.sum(~np.isnan(X), axis=1) / X.shape[1]
@@ -259,8 +256,6 @@ class pAnnData:
             if 'X_mbr' in self.prot.layers:
                 self.prot.obs['mbr_count'] = (self.prot.layers['X_mbr'] == 'Peak Found').sum(axis=1)
                 self.prot.obs['high_count'] = (self.prot.layers['X_mbr'] == 'High').sum(axis=1)
-
-        print('prot updated:', time.time() - t0, 's')
 
         if self.pep is not None:
             X = self.pep.X.toarray()
@@ -272,8 +267,6 @@ class pAnnData:
                 self.pep.obs['mbr_count'] = (self.pep.layers['X_mbr'] == 'Peak Found').sum(axis=1)
                 self.pep.obs['high_count'] = (self.pep.layers['X_mbr'] == 'High').sum(axis=1)
 
-        print('pep updated:', time.time() - t0, 's')
-
         # RS metrics for prot.var
         if self.rs is not None and self.prot is not None:
             rs = self.rs  # leave it sparse
@@ -282,8 +275,6 @@ class pAnnData:
             unique_counts = rs[:, unique_mask].getnnz(axis=1)
             self.prot.var['peptides_per_protein'] = peptides_per_protein
             self.prot.var['unique_peptides'] = unique_counts
-
-        print('RS updated:', time.time() - t0, 's')
 
     def _update_summary_metrics(self, unique_peptide_thresh=2):
         """
@@ -386,7 +377,7 @@ class pAnnData:
             self._update_metrics()
         self._merge_obs()
         self._update_summary_metrics()
-        self.refresh_gene_cache()
+        self.refresh_identifier_maps()
 
         # 3. Final messaging
         if verbose and not (sync_back or self._summary_is_stale):
@@ -435,7 +426,7 @@ class pAnnData:
 
         return forward, reverse
 
-    def refresh_gene_cache(self):
+    def refresh_identifier_maps(self):
         """
         Refresh all gene/accession map caches.
         """
@@ -457,6 +448,116 @@ class pAnnData:
             return self._cached_identifier_maps_peptide
         else:
             raise ValueError(f"Invalid value for 'on': {on}. Must be 'protein' or 'peptide'.")
+
+    # TODO: add peptide remapping to var, but need to also update rs if you do this.
+    def update_identifier_maps(self, mapping, on='protein', direction='forward', overwrite=False, verbose=True):
+        """
+        Update cached identifier maps with user-supplied mappings.
+
+        Parameters:
+            mapping (dict): Dictionary of mappings to add.
+            on (str): 'protein' or 'peptide' — which set of maps to update.
+            direction (str): 'forward' or 'reverse'.
+                - For 'protein':
+                    forward: gene → accession
+                    reverse: accession → gene
+                - For 'peptide':
+                    forward: protein accession → peptide
+                    reverse: peptide → protein accession
+            overwrite (bool): If True, overwrite existing entries.
+            verbose (bool): If True, print a summary of the update.
+
+        This updates both the forward and reverse maps to maintain consistency.
+
+        Examples:
+        ---------
+        # Add new gene-to-accession mappings (protein)
+        pdata.update_identifier_maps({'MYGENE1': 'P00001', 'MYGENE2': 'P00002'}, on='protein', direction='forward')
+
+        # Add peptide → protein mappings
+        pdata.update_identifier_maps({'PEPTIDE_ABC': 'P12345'}, on='peptide', direction='reverse')
+
+        # Overwrite a protein → gene mapping
+        pdata.update_identifier_maps({'P12345': 'NEWGENE'}, on='protein', direction='reverse', overwrite=True)
+        """
+        if on == 'protein':
+            forward, reverse = self._cached_identifier_maps_protein
+        elif on == 'peptide':
+            forward, reverse = self._cached_identifier_maps_peptide
+        else:
+            raise ValueError(f"Invalid value for 'on': {on}. Must be 'protein' or 'peptide'.")
+
+        source_map = forward if direction == 'forward' else reverse
+        target_map = reverse if direction == 'forward' else forward
+
+        added, updated, skipped = 0, 0, 0
+
+        for key, val in mapping.items():
+            if key in source_map:
+                if overwrite:
+                    source_map[key] = val
+                    target_map[val] = key
+                    updated += 1
+                else:
+                    skipped += 1
+            else:
+                source_map[key] = val
+                target_map[val] = key
+                added += 1
+
+        message = (
+            f"[update_identifier_maps] Updated '{on}' ({direction}): "
+            f"{added} added, {updated} overwritten, {skipped} skipped."
+        )
+
+        if verbose:
+            print(message)
+        self._append_history(message)
+
+        # Update .prot.var["Genes"] if updating protein identifier reverse map (accession → gene)
+        if on == 'protein' and direction == 'reverse':
+            updated_var_count = 0
+            updated_accessions = []
+
+            for acc, gene in mapping.items():
+                if acc in self.prot.var_names:
+                    self.prot.var.at[acc, "Genes"] = gene
+                    updated_accessions.append(acc)
+                    updated_var_count += 1
+
+            if updated_var_count > 0:
+                var_message = (
+                    f"🔁 Updated `.prot.var['Genes']` for {updated_var_count} entries from custom mapping. "
+                    f"(View details in `pdata.metadata['identifier_map_history']`)"
+                )
+                if verbose:
+                    print(var_message)
+                self._append_history(var_message)
+
+        # Log detailed update history for all cases
+        import datetime
+
+        record = {
+            'on': on,
+            'direction': direction,
+            'input_mapping': dict(mapping),  # shallow copy
+            'overwrite': overwrite,
+            'timestamp': datetime.datetime.now().isoformat(timespec='seconds'),
+            'summary': {
+                'added': added,
+                'updated': updated,
+                'skipped': skipped,
+            }
+        }
+
+        if on == 'protein' and direction == 'reverse':
+            record['updated_var_column'] = {
+                'column': 'Genes',
+                'accessions': updated_accessions,
+                'n_updated': updated_var_count
+            }
+
+        self.metadata.setdefault("identifier_map_history", []).append(record)
 
     get_gene_maps = get_identifier_maps
 
@@ -518,6 +619,7 @@ class pAnnData:
                 missing_ids = self.prot.var.loc[missing_mask].index[pd.isna(filled)]
                 print(f"⚠️ {unknown} gene names still missing. Assigned as 'UNKNOWN_<accession>' for:")
                 print("   ", ", ".join(missing_ids[:5]) + ("..." if unknown > 5 else ""))
+                print("💡 You can update these using `pdata.update_identifier_maps({'GENE': 'ACCESSION'}, on='protein', direction='reverse', overwrite=True)`")
 
     def validate(self, verbose=True):
         """
@@ -634,9 +736,9 @@ class pAnnData:
             print("⚠️ No RS matrix to plot.")
             return
 
-        rs_dense = self.rs.toarray() if sparse.issparse(self.rs) else self.rs
-        prot_links = rs_dense.sum(axis=1)
-        pep_links = rs_dense.sum(axis=0)
+        rs = self.rs
+        prot_links = rs.getnnz(axis=1)
+        pep_links = rs.getnnz(axis=0)
 
         fig, axes = plt.subplots(1, 2, figsize=figsize)
 
@@ -729,7 +831,7 @@ class pAnnData:
             pd.DataFrame with abundance + metadata
         """
 
-        gene_map, _ = self.get_gene_maps(on='protein' if on == 'peptide' else on)
+        gene_to_acc, _ = self.get_gene_maps(on='protein' if on == 'peptide' else on)
 
 
         if on == 'peptide' and namelist:
@@ -755,7 +857,7 @@ class pAnnData:
             adata = utils.get_adata(self, on)
 
             if namelist:
-                resolved = utils.resolve_accessions(adata, namelist, gene_map=gene_map)
+                resolved = utils.resolve_accessions(adata, namelist, gene_map=gene_to_acc)
                 adata = adata[:, resolved]
 
         # Extract the abundance matrix
@@ -771,16 +873,20 @@ class pAnnData:
         # Merge obs metadata
         df = df.merge(adata.obs.reset_index(), left_on="cell", right_on="index")
 
+        _, pep_to_prot = self.get_gene_maps(on='peptide')  # peptide → protein map
+        _, acc_to_gene = self.get_gene_maps(on='protein')  # protein accession → gene
         # Map to gene names
         if on == 'peptide':
             try:
-                _, pep_to_prot = self.get_gene_maps(on='peptide')  # peptide → protein map
-                _, acc_to_gene = self.get_gene_maps(on='protein')  # protein accession → gene
-
                 df['protein_accession'] = df['accession'].map(pep_to_prot)
                 df['gene'] = df['protein_accession'].map(acc_to_gene)
+
+                # Report unmapped peptides
+                unmapped = df[df['gene'].isna()]['accession'].unique().tolist()
+                if unmapped:
+                    print(f"[get_abundance] {len(unmapped)} peptides could not be mapped to genes: {unmapped}")
             except Exception as e:
-                warnings.warn(f"Could not map peptides to genes: {e}")
+                print(f"[get_abundance] Mapping error: {e}")
                 df['gene'] = None
         else:
             df['gene'] = df['accession'].map(acc_to_gene)
