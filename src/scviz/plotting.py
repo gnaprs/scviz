@@ -306,8 +306,6 @@ def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
     import matplotlib.pyplot as plt
     import warnings
 
-    adata = utils.get_adata(pdata, on)
-
     # Get abundance DataFrame
     df = utils.get_abundance(
         pdata, namelist=namelist, layer=layer, on=on,
