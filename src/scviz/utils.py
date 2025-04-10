@@ -177,80 +177,112 @@ def get_adata(pdata, on = 'protein'):
     else:
         raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
-def get_abundance(pdata, namelist=None, layer='X', on='protein',
-                  classes=None, log=True, x_label='gene'):
+def get_abundance(pdata, *args, **kwargs):
     """
-    Extract long-form abundance DataFrame from a pAnnData object.
+    Wrapper to extract abundance from either pAnnData or AnnData.
+
+    If pdata is a pAnnData object, calls pdata.get_abundance().
+    If pdata is an AnnData object, calls the internal logic directly.
 
     Parameters:
-        pdata: pAnnData object
-        namelist: list of accessions or genes to extract (optional)
-        layer: which data layer to use (default: 'X')
-        on: 'protein' or 'peptide'
-        classes: obs column or list of columns to group by
-        log: whether to apply log2 transform
-        x_label: 'gene' or 'accession'
+        pdata: pAnnData or AnnData
+        *args, **kwargs: passed to get_abundance
 
     Returns:
-        pd.DataFrame with abundance + metadata
+        pd.DataFrame
     """
-    import numpy as np
-    import pandas as pd
+    if hasattr(pdata, "get_abundance"):
+        return pdata.get_abundance(*args, **kwargs)
+    else:
+        # Fall back to internal logic (can move to a private function if cleaner)
+        return _get_abundance_from_adata(pdata, *args, **kwargs)
 
-    adata = get_adata(pdata, on)
+def _get_abundance_from_adata(adata, namelist=None, layer='X', log=True,
+                               x_label='gene', classes=None, gene_col="Genes"):
+    """
+    Abundance extraction for plain AnnData, including gene/accession support.
+    """
 
     # Resolve gene names → accessions
     if namelist:
-        gene_to_accession = {}
-        if "Genes" in adata.var.columns:
-            for acc, gene in zip(adata.var_names, adata.var["Genes"]):
-                if pd.notna(gene):
-                    gene_to_accession[str(gene)] = acc
-        resolved, unmatched = [], []
-        for name in namelist:
-            if name in adata.var_names:
-                resolved.append(name)
-            elif name in gene_to_accession:
-                resolved.append(gene_to_accession[name])
-            else:
-                unmatched.append(name)
-        if not resolved:
-            raise ValueError("No valid names in `namelist`.")
-        if unmatched:
-            print("[get_abundance] Warning: Unmatched names:")
-            for u in unmatched:
-                print(f"  - {u}")
+        resolved = resolve_accessions(adata, namelist, gene_col=gene_col)
         adata = adata[:, resolved]
 
-    # Extract data matrix
+    # Extract matrix
     X = adata.layers[layer] if layer in adata.layers else adata.X
     if hasattr(X, "toarray"):
         X = X.toarray()
 
-    # Melt into long format
     df = pd.DataFrame(X, columns=adata.var_names, index=adata.obs_names).reset_index()
     df = df.melt(id_vars="index", var_name="accession", value_name="abundance")
     df = df.rename(columns={"index": "cell"})
 
-    # Merge obs metadata
     df = df.merge(adata.obs.reset_index(), left_on="cell", right_on="index")
 
-    # Annotate gene (if available)
     gene_map = adata.var["Genes"].to_dict() if "Genes" in adata.var else {}
     df['gene'] = df['accession'].map(gene_map)
     df['x_label_name'] = df['gene'].fillna(df['accession']) if x_label == 'gene' else df['accession']
 
-    # Annotate class grouping
     if classes:
         df['class'] = df[classes] if isinstance(classes, str) else df[classes].astype(str).agg('_'.join, axis=1)
     else:
         df['class'] = 'all'
 
-    # Log2 transform
     if log:
         df['log2_abundance'] = np.log2(np.clip(df['abundance'], 1e-6, None))
 
     return df
+
+def resolve_accessions(adata, namelist, gene_col="Genes", gene_map=None):
+    """
+    Resolve gene or accession names to accession IDs from .var_names.
+
+    Parameters:
+        adata: AnnData or pAnnData object
+        namelist: list of input names (genes or accessions)
+        gene_col: column in .var containing gene names (default: "Genes")
+        gene_map: optional precomputed map of gene → accession
+
+    Returns:
+        List of resolved accessions
+    """
+    import pandas as pd
+
+    if not namelist:
+        return None
+
+    var_names = adata.var_names.astype(str)
+
+    # Use passed-in gene_map or build one
+    if gene_map is None:
+        gene_map = {}
+        if gene_col in adata.var.columns:
+            for acc, gene in zip(var_names, adata.var[gene_col]):
+                if pd.notna(gene):
+                    gene_map[str(gene)] = acc
+
+    resolved, unmatched = [], []
+    for name in namelist:
+        name = str(name)
+        if name in var_names:
+            resolved.append(name)
+        elif name in gene_map:
+            resolved.append(gene_map[name])
+        else:
+            unmatched.append(name)
+
+    if not resolved:
+        raise ValueError(
+            f"No valid names found in `namelist`: {namelist}.\n"
+            f"Check against .var_names or '{gene_col}' column."
+        )
+
+    if unmatched:
+        print("[resolve_accessions] Warning: Unmatched names:")
+        for u in unmatched:
+            print(f"  - {u}")
+
+    return resolved
 
 def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True, debug=False):
     """
