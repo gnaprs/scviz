@@ -2032,7 +2032,7 @@ class pAnnData:
         df_stats['p_value'] = pvals
         df_stats['test_statistic'] = stats
 
-        df_stats['-log10(p_value)'] = -np.log10(df_stats['p_value'].replace(0, np.nan))
+        df_stats['-log10(p_value)'] = -np.log10(df_stats['p_value'].replace(0, np.nan).astype(float))
         df_stats['significance_score'] = df_stats['-log10(p_value)'] * df_stats['log2fc']
         df_stats['significance'] = 'not significant'
         df_stats.loc[(df_stats['p_value'] < pval) & (df_stats['log2fc'] > log2fc), 'significance'] = 'upregulated'
