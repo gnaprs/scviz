@@ -22,7 +22,6 @@ Todo:
 """
 
 import re
-
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
@@ -641,6 +640,20 @@ def resolve_pca_colors(adata, classes, cmap, layer="X"):
     else:
         raise ValueError("Invalid classes input.")
 
+# NOTE: STRING enrichment plots live in enrichment.py, not here.
+# This function is re-documented here for discoverability.
+def plot_enrichment_svg(*args, **kwargs):
+    """
+    Plot STRING enrichment results as an SVG figure.
+
+    NOTE:
+        This function is implemented in `enrichment.py`, not `plotting.py`.
+
+    See Also:
+        scviz.enrichment.plot_enrichment_svg
+    """
+    from .enrichment import plot_enrichment_svg as actual_plot
+    return actual_plot(*args, **kwargs)
 
 # TODO
 def plot_umap(ax, pdata, color = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False):
@@ -942,7 +955,6 @@ def add_volcano_legend(ax, colors=None):
         Line2D([0], [0], marker='o', color='w', label='NS', markerfacecolor=colors['not significant'], markersize=6)
     ]
     ax.legend(handles=handles, loc='upper right', frameon=True, fontsize=7)
-
 
 def mark_volcano(ax, volcano_df, label, label_color="black", label_type='Gene', s=10, alpha=1, show_names=True, fontsize=8):
     """

@@ -553,7 +553,7 @@ def get_pep_prot_mapping(pdata, return_series=False):
     return col
 
 # ----------------
-# EXPLORATION FUNCTIONS
+# API FUNCTIONS
 def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], verbose = False):
     """ Worker function to get data from Uniprot for a list of proteins, used by get_uniprot_fields(). Calls to UniProt REST API, and returns batch of maximum 1024 proteins at a time.
 
@@ -672,6 +672,26 @@ def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_nam
     
     return full_method_df
 
+def get_string_mappings(identifiers):
+    url = "https://version-12-0.string-db.org/api/tsv-no-header/get_string_ids"
+    params = {
+        "identifiers": "\r".join(identifiers),
+        "limit": 1,
+        "echo_query": 1,
+        "caller_identity": "scviz",
+    }
+
+    response = requests.post(url, data=params)
+    response.raise_for_status()
+
+    df = pd.read_csv(io.StringIO(response.text), sep="\t", header=None)
+    df.columns = [
+        "input_identifier", "input_alias", "string_identifier", "ncbi_taxon_id",
+        "preferred_name", "annotation", "score"
+    ]
+    return df
+
+
 # ----------------
 # STATISTICAL TEST FUNCTIONS
 def pairwise_log2fc(data1, data2):
@@ -696,6 +716,41 @@ def pairwise_log2fc(data1, data2):
     median_fc = np.nanmedian(pairwise_ratios.reshape(-1, data1.shape[1]), axis=0)
     return median_fc
 
+def get_pca_importance(model, initial_feature_names, n=1):
+    """
+    Get the most important feature for each principal component in a PCA model.
+
+    Args:
+        model (sklearn.decomposition.PCA): The PCA model.
+        initial_feature_names (list): The initial feature names. Typically adata.var_names.
+        n (int): The number of top features to return for each principal component.
+
+        
+    Returns:
+        df (pd.DataFrame): A DataFrame containing the most important feature for each principal component.
+
+    Example:
+        >>> from scviz import utils as scutils
+        >>> pca = PCA(n_components=5)
+        >>> pca.fit(data)
+        >>> df = scutils.get_pca_importance(pca)
+    """
+
+    # number of components
+    n_pcs= model['PCs'].shape[0]
+
+    # get the index of the most important feature on EACH component
+    most_important = [np.abs(model['PCs'][i]).argsort()[-n:][::-1] for i in range(n_pcs)]
+    most_important_names = [[initial_feature_names[idx] for idx in most_important[i]] for i in range(n_pcs)]
+
+
+    dic = {'PC{}'.format(i): most_important_names[i] for i in range(n_pcs)}
+    df = pd.DataFrame(dic.items(), columns=['Principal Component', 'Top Features'])
+
+    return df
+
+# ----------------
+# TO FIX
 # TODO: fix with pdata.summary maybe call stats_ttest instead
 def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_results=False, test_variable='total_count'):
     """
@@ -740,169 +795,6 @@ def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_resu
 
     ttest_df = pd.DataFrame(ttest_params, columns=['Group1', 'Group2', 'T-statistic', 'P-value', 'N1', 'N2'])
     return ttest_df
-
-def get_pca_importance(model, initial_feature_names, n=1):
-    """
-    Get the most important feature for each principal component in a PCA model.
-
-    Args:
-        model (sklearn.decomposition.PCA): The PCA model.
-        initial_feature_names (list): The initial feature names. Typically adata.var_names.
-        n (int): The number of top features to return for each principal component.
-
-        
-    Returns:
-        df (pd.DataFrame): A DataFrame containing the most important feature for each principal component.
-
-    Example:
-        >>> from scviz import utils as scutils
-        >>> pca = PCA(n_components=5)
-        >>> pca.fit(data)
-        >>> df = scutils.get_pca_importance(pca)
-    """
-
-    # number of components
-    n_pcs= model['PCs'].shape[0]
-
-    # get the index of the most important feature on EACH component
-    most_important = [np.abs(model['PCs'][i]).argsort()[-n:][::-1] for i in range(n_pcs)]
-    most_important_names = [[initial_feature_names[idx] for idx in most_important[i]] for i in range(n_pcs)]
-
-
-    dic = {'PC{}'.format(i): most_important_names[i] for i in range(n_pcs)}
-    df = pd.DataFrame(dic.items(), columns=['Principal Component', 'Top Features'])
-
-    return df
-
-# ----------------
-# TO FIX
-# TODO: fix
-def get_query(pdata, search_term, search_on = 'gene', on = 'protein'):
-    valid_search_terms = ['gene', 'protein', 'description', 'pathway', 'all']
-
-    # If search is a list, remove duplicates and check if it includes all terms
-    if isinstance(search, list):
-        search = list(set(search))  # Remove duplicates
-        if set(valid_search_terms[:-1]).issubset(set(search)):  # Check if it includes all terms
-            print('All search terms included. Using search term \'all\'.')
-            search = 'all'
-        elif not all(term in valid_search_terms for term in search):  # Check if all terms are valid
-            raise ValueError(f'Invalid search term. Please use one of the following: {valid_search_terms}')
-    # If search is a single term, check if it's valid
-    elif search not in valid_search_terms:
-        raise ValueError(f'Invalid search term. Please use one of the following: {valid_search_terms}')
-
-    if on == 'protein':
-        adata = pdata.prot
-    elif on == 'peptide':
-        adata = pdata.pep
-
-    if search_on == 'gene':
-        return adata[adata.var['Gene Symbol'] == search_term]
-    elif search_on == 'protein':
-        return adata[adata.var['Accession'] == search_term]
-    elif search_on == 'description':
-        return adata[adata.var['Description'] == search_term]
-    elif search_on == 'pathway':
-        return adata[adata.var['WikiPathways'] == search_term]
-
-# TODO: fix to work with panndata, just need to search through .vars and identify whether keyword is in any column
-def get_abundance_query(pdata, cases, genelist, search='gene', on = 'protein'):
-    """
-    Search and extract protein abundance data based on a specific gene list.
-
-    This function searches and extracts protein abundance data for specified cases based on a specific gene list. The search can be performed on 'gene', 'protein', 'description', 'pathway', or 'all'. It also accepts a list of terms.
-
-    Args:
-        pdata (pandas.DataFrame): The protein data.
-        cases (list): The cases to include in the search.
-        genelist (list): The genes to include in the search. Can also be accession numbers, descriptions, or pathways.
-        search (str): The search term to use. Can be 'gene', 'protein', 'description', 'pathway', or 'all'. Also accepts list of terms.
-
-    Returns:
-        matched_features_data (pandas.DataFrame): Extracted protein abundance data, along with matched search features and the respective genes they were matched to.
-        combined_abundance_data (pandas.DataFrame): Protein abundance data per sample for matching genes.
-
-    Raises:
-        ValueError: If the search term is not valid. Valid search terms are 'gene', 'protein', 'description', 'pathway', 'all', or a list of these.
-
-    Example:
-        >>> from scviz import utils as scutils
-        >>> import pandas as pd
-        >>> cases = [['head'],['heart'],['tail']]
-        >>> matched_features, combined_abundance = scutils.get_abundance_query(data, cases, gene_list.Gene, search=["gene","pathway","description"])
-    """
-
-    # TODO: WILL NEED TO USE get_uniprot_fields TO GET ANNOTATED DATA
-
-    valid_search_terms = ['gene', 'protein', 'description', 'pathway', 'all']
-
-    # If search is a list, remove duplicates and check if it includes all terms
-    if isinstance(search, list):
-        search = list(set(search))  # Remove duplicates
-        if set(valid_search_terms[:-1]).issubset(set(search)):  # Check if it includes all terms
-            print('All search terms included. Using search term \'all\'.')
-            search = 'all'
-        elif not all(term in valid_search_terms for term in search):  # Check if all terms are valid
-            raise ValueError(f'Invalid search term. Please use one of the following: {valid_search_terms}')
-    # If search is a single term, check if it's valid
-    elif search not in valid_search_terms:
-        raise ValueError(f'Invalid search term. Please use one of the following: {valid_search_terms}')
-
-    # ------------------------------------------------------------------------------------------------
-    data_abundance = data.copy()
-    data = data.copy()
-
-    for case in cases:
-        vars = ['Abundance: '] + case
-        append_string = '_'.join(vars[1:])
-        cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-        data['Average: '+append_string] = data[cols].mean(axis=1, skipna=True)
-        data['Stdev: '+append_string] = data[cols].std(axis=1, skipna=True)
-
-    case_col = [data.columns.get_loc('Average: '+'_'.join(case)) for case in cases]
-
-    search_to_column = {
-        'gene': 'Gene Symbol',
-        'protein': 'Accession',
-        'description': 'Description',
-        'pathway': 'WikiPathways',
-        'all': ['Gene Symbol', 'Accession', 'Description', 'WikiPathways']
-    }
-
-    # search can be a single term or a list of terms
-    columns = [search_to_column[term] for term in (search if isinstance(search, list) else [search]) if term != 'all']
-    if 'all' in (search if isinstance(search, list) else [search]):
-        columns.extend(search_to_column['all'])
-
-    for column in columns:
-        data[f'Matched in {column}'] = data[column].apply(lambda x: [])
-
-        for gene in genelist:
-            regex = rf"\b{re.escape(gene)}\b"
-            data[f'Matched in {column}'] = data.apply(lambda row: row[f'Matched in {column}'] + [gene] if isinstance(row[column], str) and re.search(regex, row[column], re.IGNORECASE) else row[f'Matched in {column}'], axis=1)
-
-    data = data[data.filter(regex='Matched').apply(any, axis=1)]
-    data.set_index('Gene Symbol', inplace=True)
-
-    if data.shape[0] == 0:
-        raise ValueError('No data to plot. Please check the gene list and the search parameters.')
-
-    num_new_cols = len(search) if isinstance(search, list) else (4 if search == 'all' else 1)
-    case_col.extend(range(len(data.columns) - (num_new_cols-1), len(data.columns) + 1))
-    matched_features_data = data.iloc[:,[i-1 for i in case_col]]
-    matched_features_data = matched_features_data.dropna(how='all')
-
-    data_abundance.set_index('Gene Symbol', inplace=True)
-    data_abundance = data_abundance.loc[data.index]
-    combined_abundance_data = pd.DataFrame()
-
-    for case in cases:
-        vars = ['Abundance: '] + case
-        cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-        combined_abundance_data = pd.concat([combined_abundance_data, data_abundance[cols]], axis=1)
-
-    return matched_features_data, combined_abundance_data
 
 # TODO: sync with get_uniprot_fields
 def convert_identifiers(input_list, input_type, output_type, df):
