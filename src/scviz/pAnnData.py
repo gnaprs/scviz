@@ -35,6 +35,8 @@ from typing import (  # Meta  # Generic ABCs  # Generic
     List
 )
 
+from .enrichment import get_string_mappings, resolve_to_accessions, enrichment_functional, enrichment_ppi, list_enrichments, plot_enrichment_svg, get_string_network_link
+
 # TODO!: methods to write
 # easy way to assign obs, names, var to prot and pep
 # def set_prot_obs(self, obs):
@@ -165,6 +167,18 @@ class pAnnData:
     @stats.setter
     def stats(self, value):
         self._stats = value
+
+    # -----------------------------
+    # ALIASSES
+
+    # STRING RELATED
+    get_string_mappings = get_string_mappings
+    resolve_to_accessions = resolve_to_accessions
+    enrichment_functional = enrichment_functional
+    enrichment_ppi = enrichment_ppi
+    list_enrichments = list_enrichments
+    plot_enrichment_svg = plot_enrichment_svg
+    get_string_network_link = get_string_network_link
 
     # -----------------------------
     # UTILITY FUNCTIONS
