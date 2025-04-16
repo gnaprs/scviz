@@ -6,6 +6,7 @@ import ast
 from IPython.display import SVG, display
 import tempfile
 import os
+import re
 
 # Helpers
 def _pretty_vs_key(k):
@@ -262,6 +263,9 @@ def enrichment_functional(
             bg_map = self.get_string_mappings(background_accs)
             background_string_ids = bg_map["string_identifier"].tolist()
 
+        if store_key is not None:
+            print("[WARNING] Ignoring `store_key` for DE-based enrichment. Using auto-generated pretty keys.")
+
         results = {}
         for label, accs in zip(["up", "down"], [up_accs, down_accs]):
             t0 = time.time()
@@ -280,25 +284,27 @@ def enrichment_functional(
             species_id = species if species is not None else inferred_species
 
             enrichment_df = query_functional_enrichment(string_ids, species_id, background_string_ids)
+            
             enrich_key = f"{resolved_key}_{label}"
-            self.stats[enrich_key] = enrichment_df
-            self.stats["functional"][enrich_key] = {
-                "string_ids": string_ids,
-                "background_string_ids": background_string_ids,
-                "species": species_id
-            }
-
-            string_url = self.get_string_network_link(string_ids=string_ids, species=species_id)
-            self.stats["functional"][enrich_key]["string_url"] = string_url
-
             pretty_base = _pretty_vs_key(resolved_key)
             pretty_key = f"{pretty_base}_{label}"
+            string_url = self.get_string_network_link(string_ids=string_ids, species=species_id)
+
+            self.stats["functional"][pretty_key] = {
+                "string_ids": string_ids,
+                "background_string_ids": background_string_ids,
+                "species": species_id,
+                "input_key": resolved_key if from_de else None,
+                "string_url": string_url,
+                "result": enrichment_df
+            }
+
             print(f"\n[Enrichment: {pretty_base} ({label}-regulated)]")
             print(f"  → {len(accs)} proteins → {len(string_ids)} STRING IDs")
             print(f"  → Enrichment complete ({time.time() - t0:.2f}s)")
-            print(f"  → Access: pdata.stats[\"{enrich_key}\"]")
+            print(f"  → Access: pdata.stats['functional'][\"{pretty_key}\"]['result']")
             print(f"  → Plot  : pdata.plot_enrichment_svg(\"{pretty_base}\", direction=\"{label}\")")
-            print(f"  → Web   : {string_url[:100]}..." if len(string_url) > 100 else f"  → Web   : {string_url}\n")
+            print(f"  → Web   : {string_url}\n")
 
             results[label] = enrichment_df
 
@@ -307,7 +313,7 @@ def enrichment_functional(
 
         if store_key is None:
             prefix = "UserSearch"
-            existing = self.stats["functional"].keys() if "string" in self.stats else []
+            existing = self.stats["functional"].keys() if "functional" in self.stats else []
             existing_ids = [k for k in existing if k.startswith(prefix)]
             next_id = len(existing_ids) + 1
             store_key = f"{prefix}{next_id}"
@@ -331,23 +337,23 @@ def enrichment_functional(
             background_string_ids = bg_map["string_identifier"].tolist()
 
         enrichment_df = query_functional_enrichment(string_ids, species_id, background_string_ids)
-        self.stats[store_key] = enrichment_df
+        string_url = self.get_string_network_link(string_ids=string_ids, species=species_id)
+
         self.stats["functional"][store_key] = {
             "string_ids": string_ids,
             "background_string_ids": background_string_ids,
-            "species": species_id
+            "species": species_id,
+            "input_key": None,
+            "string_url": string_url,
+            "result": enrichment_df
         }
-
-        # Auto-generate STRING web link
-        string_url = self.get_string_network_link(string_ids=string_ids, species=species_id)
-        self.stats["functional"][store_key]["string_url"] = string_url
 
         print(f"\n[Enrichment: {store_key} (user-supplied list)]")
         print(f"  → {len(input_accs)} input genes → {len(string_ids)} STRING IDs")
         print(f"  → Enrichment complete ({time.time() - t0:.2f}s)")
-        print(f"  → Access: pdata.stats[\"{store_key}\"]")
+        print(f"  → Access: pdata.stats['functional'][\"{store_key}\"]['result']")
         print(f"  → Plot  : pdata.plot_enrichment_svg(\"{store_key}\")")
-        print(f"  → Web   : {string_url[:100]}..." if len(string_url) > 100 else f"  → Web   : {string_url}\n")
+        print(f"  → Web   : {string_url}\n")
 
         return enrichment_df
 
@@ -478,9 +484,11 @@ def enrichment_ppi(self, genes, species=None, store_key=None):
         "species": species_id
     }
 
-    print(f"[INFO] Stored PPI enrichment under key: '{store_key}'")
-    print(f"[INFO] Access result: pdata.stats['ppi']['{store_key}']['result']")
-    print(f"[INFO] PPI: {result['number_of_edges']} edges vs {result['expected_number_of_edges']} expected (p={result['p_value']:.2e})")
+    print(f"\n[PPI Enrichment: {store_key}]")
+    print(f"  → {len(string_ids)} STRING IDs")
+    print(f"  → {result['number_of_edges']} edges vs {result['expected_number_of_edges']} expected")
+    print(f"  → p = {result['p_value']:.2e}")
+    print(f"  → Access: pdata.stats['ppi']['{store_key}']['result']\n")
     return result
 
 def list_enrichments(self):
@@ -489,71 +497,64 @@ def list_enrichments(self):
     Always outputs as plain text (for use in scripts, terminals, notebooks).
     """
 
-    functional_keys = set(self.stats.get("functional", {}).keys())
-    all_stats_keys = set(self.stats.keys())
-    de_keys = {k for k in all_stats_keys if "vs" in k and not (k.endswith("_up") or k.endswith("_down"))}
+    functional = self.stats.get("functional", {})
     ppi_keys = self.stats.get("ppi", {}).keys()
+    de_keys = {k for k in self.stats if "vs" in k and not k.endswith(("_up", "_down"))}
 
-    # Already enriched DE keys (up/down)
+    # Collect enriched DE keys based on input_key metadata
     enriched_de = set()
-    for k in functional_keys:
-        if "vs" in k and (k.endswith("_up") or k.endswith("_down")):
-            base = k.rsplit("_", 1)[0]
-            enriched_de.add(base)
-
-    # DE keys with no enrichment yet
-    de_unenriched = de_keys - enriched_de
-    unenriched_pretty = sorted(_pretty_vs_key(k) for k in de_unenriched)
-
     enriched_results = []
-    for k in sorted(functional_keys):
-        if "vs" in k:
-            if k.endswith("_up") or k.endswith("_down"):
-                base, suffix = k.rsplit("_", 1)
-                pretty = f"{_pretty_vs_key(base)}_{suffix}"
-            else:
-                pretty = _pretty_vs_key(k)
-            entry_type = "DE-based"
+
+    for k, meta in functional.items():
+        input_key = meta.get("input_key", None)
+        is_de = "vs" in k
+
+        if input_key and input_key in de_keys:
+            base = input_key
+            suffix = k.rsplit("_", 1)[-1]
+            pretty = f"{_pretty_vs_key(base)}_{suffix}"
+            enriched_de.add(base)
+            enriched_results.append((pretty, k, "DE-based"))
         else:
-            pretty = k
-            entry_type = "User"
-        enriched_results.append((pretty, k, entry_type))
+            enriched_results.append((k, k, "User"))
+
+    de_unenriched = sorted(_pretty_vs_key(k) for k in (de_keys - enriched_de))
 
     print("\n[STRING Enrichment Summary]\n")
 
     print("Available DE comparisons (not yet enriched):")
-    if unenriched_pretty:
-        for pk in unenriched_pretty:
+    if de_unenriched:
+        for pk in de_unenriched:
             print(f"  - {pk}")
     else:
         print("  (none)\n")
 
     print('\nTo run enrichment: pdata.enrichment_functional(from_de=True, de_key="...")')
-    print("Completed STRING enrichment results:")
+    print("\nCompleted STRING enrichment results:")
     if not enriched_results:
         print("  (none)")
     for pretty, raw_key, kind in enriched_results:
         if kind == "DE-based":
             base, suffix = pretty.rsplit("_", 1)
             print(f"  - {pretty} ({kind})")
-            print(f"    Access table: pdata.stats[\"{raw_key}\"]")
+            print(f"    Access table: pdata.stats['functional'][\"{raw_key}\"]['result']")
             print(f"    Plot result : pdata.plot_enrichment_svg(\"{base}\", direction=\"{suffix}\")")
             url = self.stats["functional"].get(raw_key, {}).get("string_url")
             if url:
                 print(f"    View online  : {url}")
         else:
             print(f"  - {pretty} ({kind})")
-            print(f"    Access table: pdata.stats[\"{raw_key}\"]")
+            print(f"    Access table: pdata.stats['functional'][\"{raw_key}\"]['result']")
             print(f"    Plot result : pdata.plot_enrichment_svg(\"{pretty}\")")
             url = self.stats["functional"].get(raw_key, {}).get("string_url")
             if url:
                 print(f"    View online  : {url}")
 
     if ppi_keys:
-        print("\nCompleted STRING PPI Results")
+        print("\nCompleted STRING PPI results:")
         for key in sorted(ppi_keys):
             print(f"  - {key} (User)")
             print(f"    Access result: pdata.stats['ppi']['{key}']['result']")
     else:
-        print("\nCompleted STRING PPI Results")
+        print("\nCompleted STRING PPI results:")
         print("  (none)")

@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import warnings
 
-from scviz.enrichment import enrichment_functional, _resolve_de_key
+from scviz.enrichment import enrichment_functional, _resolve_de_key, enrichment_ppi, _pretty_vs_key
 
 # Dummy gene list for user input test
 genelist = ['P55072', 'NPLOC4', 'UFD1', 'STX5A', 'NSFL1C', 'UBXN2A', 'UBXN4', 'UBE4B', 'YOD1']
@@ -26,6 +26,15 @@ mock_enrichment_response = [
         "number_of_genes": 5
     }
 ]
+
+mock_ppi_response = {
+    "number_of_nodes": 6,
+    "number_of_edges": 15,
+    "average_node_degree": 5.0,
+    "local_clustering_coefficient": 0.6,
+    "expected_number_of_edges": 4.2,
+    "p_value": 1.2e-5
+}
 
 @pytest.fixture
 def pdata_with_de(pdata):
@@ -117,6 +126,13 @@ def mock_string_responses(mock_post, mapping_text, enrichment_json, total_pairs=
             m.raise_for_status = Mock()
             print("[DEBUG] → Returning MOCK MAPPING")
             return m
+        elif "ppi_enrichment" in url:
+            e = Mock()
+            e.status_code = 200
+            e.raise_for_status = Mock()
+            e.json = Mock(return_value=mock_ppi_response)  # this is a dict
+            print("[DEBUG] → Returning MOCK PPI")
+            return e
         elif "enrichment" in url:
             e = Mock()
             e.status_code = 200
@@ -129,7 +145,6 @@ def mock_string_responses(mock_post, mapping_text, enrichment_json, total_pairs=
 
     mock_post.side_effect = smart_string_side_effect
 
-
 @patch("scviz.enrichment.requests.post")
 def test_user_supplied_functional(mock_post, pdata):
     # Set up mocks using the shared helper
@@ -139,32 +154,48 @@ def test_user_supplied_functional(mock_post, pdata):
     
     assert isinstance(df, pd.DataFrame)
     assert "fdr" in df.columns
-    assert "TestUserSearch" in pdata.stats
-    assert "TestUserSearch" in pdata.stats["string"]
+    assert "functional" in pdata.stats
+    assert "TestUserSearch" in pdata.stats["functional"]
 
+    meta = pdata.stats["functional"]["TestUserSearch"]
+    assert isinstance(meta, dict)
+    assert "result" in meta
+    assert isinstance(meta["result"], pd.DataFrame)
+
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+@pytest.mark.filterwarnings("ignore::UserWarning")
 @patch("scviz.enrichment.requests.post")
 def test_de_based_functional(mock_post, pdata_with_de):
-    warnings.filterwarnings("ignore", category=RuntimeWarning)
-    warnings.filterwarnings("ignore", category=UserWarning)
-
     de_key = "[{'cellline': 'BE', 'treatment': 'kd'}] vs [{'cellline': 'BE', 'treatment': 'sc'}]"
     resolved_key = _resolve_de_key(pdata_with_de.stats, de_key)
 
-    # Step 1: Set up mocks
     mock_string_responses(mock_post, mock_mapping_response, mock_enrichment_response, total_pairs=6)
-
-    # Step 2: Inject mock Genes into DE results
     inject_mock_de_genes(pdata_with_de, resolved_key, up_gene="P55072", down_gene="NPLOC4")
 
-    # Step 3: Run enrichment
     enrichment_functional(pdata_with_de, from_de=True, de_key=resolved_key, store_key="TestDE")
 
-    # Step 4: Validate
-    assert f"{resolved_key}_up" in pdata_with_de.stats["string"]
-    assert f"{resolved_key}_down" in pdata_with_de.stats["string"]
-    assert "TestDE_up" in pdata_with_de.stats
-    assert "TestDE_down" in pdata_with_de.stats
+    for suffix in ["up", "down"]:
+        pretty_key = f"{_pretty_vs_key(resolved_key)}_{suffix}"
+        assert pretty_key in pdata_with_de.stats["functional"]
+        assert "result" in pdata_with_de.stats["functional"][pretty_key]
+        assert isinstance(pdata_with_de.stats["functional"][pretty_key]["result"], pd.DataFrame)
 
+@patch("scviz.enrichment.requests.post")
+def test_user_supplied_ppi(mock_post, pdata):
+    mock_string_responses(mock_post, mock_mapping_response, mock_ppi_response, total_pairs=1)
+
+    # Run enrichment
+    result = enrichment_ppi(pdata, genes=genelist, store_key="TestUserPPI")
+
+    # Check structure
+    assert isinstance(result, dict)
+    assert "number_of_nodes" in result
+    assert "p_value" in result
+
+    # Check that result was stored
+    assert "ppi" in pdata.stats
+    assert "TestUserPPI" in pdata.stats["ppi"]
+    assert "result" in pdata.stats["ppi"]["TestUserPPI"]
 
 def test_resolve_de_key_finds_pretty_match():
     keys = {

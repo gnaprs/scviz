@@ -37,10 +37,6 @@ from typing import (  # Meta  # Generic ABCs  # Generic
 
 from .enrichment import get_string_mappings, resolve_to_accessions, enrichment_functional, enrichment_ppi, list_enrichments, plot_enrichment_svg, get_string_network_link
 
-# TODO!: methods to write
-# easy way to assign obs, names, var to prot and pep
-# def set_prot_obs(self, obs):
-
 class pAnnData:
     """
     Class for storing protein and peptide data, with additional relational data between protein and peptide.
