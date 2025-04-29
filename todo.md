@@ -11,12 +11,15 @@
 7. implement imputation within classes (nested), not sure if can use ColumnTransformer together with SimpleImputer for this (check dev_imputation.ipynb)
 
 # TESTS
-1. Import tests most importation
+1. import tests not yet done - have test files for pd and diann already
+2. filter tests need to be checked
+3. implement quick utils check? 
 
 # FIX/BUGS
 1. sync get_uniprot_fields() with convert_identifiers() and get_string_... functions - make one combined function for all 3
 2. housekeeping csvs not installed with package - find a way to fix this
 3. get_pca_importance just needs to accept pdata input (and prot/pep) - can get uns['pca'] and var_names from it.
+4. plot_abundance stopped showing data points? check?
 
 # MAINTENANCE
 1. Check out scprep repo for possible utility functions
