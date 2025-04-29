@@ -21,8 +21,6 @@ import umap.umap_ as umap
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from pandas.testing import assert_frame_equal
-
 from .TrackedDataFrame import TrackedDataFrame
 from scviz import utils
 from scviz import setup
@@ -2086,68 +2084,115 @@ class pAnnData:
 
         self._history.append(f"{on}: Ranked {layer} data. Ranking, average and stdev stored in var.")
 
-    # TODO: imputation between samples - need to figure out how to split the data into classes before running imputation, and then splicing back together
-    def impute(self, classes = None, layer = "X", method = 'min', on = 'protein', set_X = True, **kwargs):
-        '''Function for imputation, imputes data across samples and stores it in the pdata layer X_impute_method.
-        Unfortunately, the imputers in scikit-learn only impute columns, not rows, which means ColumnTransformer+SimpleImputers won't work.
-        KNN to be implemented later.
+    def impute(self, classes=None, layer="X", method='mean', on='protein', set_X=True, **kwargs):
+        """
+        Impute missing values across samples (globally or within classes) using SimpleImputer.
 
-        Args:
-            classes (list): List of classes to impute.
-            layer (str): Layer to impute.
-            method (str): Imputation method.
+        Parameters:
+            classes (str or list): Class columns in .obs to group by.
+            layer (str): Data layer to impute from.
+            method (str): 'mean', 'median', or 'min'.
             on (str): 'protein' or 'peptide'.
-        '''
+            set_X (bool): Whether to set .X to the imputed result.
+        """
+        from sklearn.impute import SimpleImputer, KNNImputer
+        from scipy import sparse
+        from scviz import utils
+
+
         if not self._check_data(on):
-            pass
+            return
 
         adata = self.prot if on == 'protein' else self.pep
         if layer != "X" and layer not in adata.layers:
-            raise ValueError(f"Layer {layer} not found in .{on}.")
+            raise ValueError(f"Layer '{layer}' not found in .{on}.")
 
-        impute_funcs = {
-            'mean': np.nanmean,
-            'median': np.nanmedian,
-            'min': np.nanmin
-        }
-
-        if method not in impute_funcs:
-            raise ValueError(f"Unknown method: {method}")
-        
-        impute_func = impute_funcs.get(method)
         impute_data = adata.layers[layer] if layer != "X" else adata.X
-        layer_name = 'X_impute_' + method
         was_sparse = sparse.issparse(impute_data)
+        impute_data = impute_data.toarray() if was_sparse else impute_data.copy()
+        original_data = impute_data.copy()
 
-        if was_sparse:
-            impute_data = impute_data.toarray()
+        layer_name = f"X_impute_{method}"
+
+        if method not in {"mean", "median", "min","knn"}:
+            raise ValueError(f"Unsupported method: {method}")
 
         if classes is None:
-            impute_data[np.isnan(impute_data)] = np.take(impute_func(impute_data, axis=0), np.where(np.isnan(impute_data))[1])
+            # Global imputation
+            if method == 'min':
+                min_vals = np.nanmin(impute_data, axis=0)
+                min_vals = np.where(np.isnan(min_vals), 0, min_vals)
+                mask = np.isnan(impute_data)
+                impute_data[mask] = np.take(min_vals, np.where(mask)[1])
+            elif method == 'knn':
+                n_neighbors = kwargs.get('n_neighbors', 3)
+                imputer = KNNImputer(n_neighbors=n_neighbors)
+                impute_data = imputer.fit_transform(impute_data)
+            else:
+                imputer = SimpleImputer(strategy=method)
+                impute_data = imputer.fit_transform(impute_data)
 
-            print(f"Imputed data across all samples using {method}. New data stored in `{layer_name}`.")
-            self._history.append(f"{on}: Imputed layer {layer} using {method}. Imputed data stored in `{layer_name}`.")
+            print(f"ℹ️ Global imputation using '{method}'. Layer saved as '{layer_name}'.")
 
+        else:
+            # Group-wise imputation
+            if method == 'knn':
+                raise ValueError("KNN imputation is not supported for group-wise imputation.")
+
+            sample_names = utils.get_samplenames(adata, classes)
+            sample_names = np.array(sample_names)
+            unique_groups = np.unique(sample_names)
+
+            for group in unique_groups:
+                idx = np.where(sample_names == group)[0]
+                group_data = impute_data[idx, :]
+
+                if method == 'min':
+                    min_vals = np.nanmin(group_data, axis=0)
+                    min_vals = np.where(np.isnan(min_vals), 0, min_vals)
+                    mask = np.isnan(group_data)
+                    group_data[mask] = np.take(min_vals, np.where(mask)[1])
+                    imputed_group = group_data
+                else:
+                    imputer = SimpleImputer(strategy=method)
+                    imputed_group = imputer.fit_transform(group_data)
+
+                impute_data[idx, :] = imputed_group
+
+            print(f"ℹ️ Group-wise imputation using '{method}' on class(es): {classes}. Layer saved as '{layer_name}'.")
+
+        summary_lines = []
+        if classes is None:
+            num_imputed = np.sum(np.isnan(original_data) & ~np.isnan(impute_data))
+            summary_lines.append(f"✅ {num_imputed} values imputed.")
         else:
             sample_names = utils.get_samplenames(adata, classes)
-            unique_identifiers = list(set(sample_names))
-            indices_dict = {identifier: [i for i, sample in enumerate(sample_names) if sample == identifier] for identifier in unique_identifiers}
+            sample_names = np.array(sample_names)
+            unique_groups = np.unique(sample_names)
 
-            for identifier, indices in indices_dict.items():
-                subset_data = impute_data[indices,:]
-                subset_data[np.isnan(subset_data)] = np.take(impute_func(subset_data, axis=0), np.where(np.isnan(subset_data))[1])
-                impute_data[indices,:] = subset_data
+            counts_by_group = {}
+            for group in unique_groups:
+                idx = np.where(sample_names == group)[0]
+                before = original_data[idx, :]
+                after = impute_data[idx, :]
+                mask = np.isnan(before) & ~np.isnan(after)
+                counts_by_group[group] = np.sum(mask)
 
-            print(f"{on}: Imputed based on class(es): {classes} - {unique_identifiers} using {method}. New data stored in `{layer_name}`.")
-            self._history.append(f"{on}: Imputed layer {layer} based on class(es): {classes} - {unique_identifiers} using {method}. Imputed data stored in `{layer_name}`.")
+            total = sum(counts_by_group.values())
+            summary_lines.append(f"✅ {total} values imputed total.")
+            for group, count in counts_by_group.items():
+                summary_lines.append(f"   - {group}: {count} values")
 
-        if was_sparse:
-            adata.layers[layer_name] = sparse.csr_matrix(impute_data)
-        else:
-            adata.layers[layer_name] = impute_data
+        print("\n".join(summary_lines))
+
+        adata.layers[layer_name] = sparse.csr_matrix(impute_data) if was_sparse else impute_data
 
         if set_X:
-            self.set_X(layer = layer_name, on = on)
+            self.set_X(layer=layer_name, on=on)
+
+        self._history.append(
+            f"{on}: Imputed layer '{layer}' using '{method}' (grouped by {classes if classes else 'ALL'}). Stored in '{layer_name}'."
+        )
 
     def neighbor(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.pp.neighbors

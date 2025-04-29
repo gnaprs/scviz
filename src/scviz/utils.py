@@ -553,7 +553,7 @@ def get_pep_prot_mapping(pdata, return_series=False):
     return col
 
 # ----------------
-# API FUNCTIONS
+# API FUNCTIONS (STRING functions in enrichment.py)
 def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], verbose = False):
     """ Worker function to get data from Uniprot for a list of proteins, used by get_uniprot_fields(). Calls to UniProt REST API, and returns batch of maximum 1024 proteins at a time.
 
@@ -671,26 +671,6 @@ def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_nam
         full_method_df = pd.concat([full_method_df, batch_df], ignore_index=True)
     
     return full_method_df
-
-def get_string_mappings(identifiers):
-    url = "https://version-12-0.string-db.org/api/tsv-no-header/get_string_ids"
-    params = {
-        "identifiers": "\r".join(identifiers),
-        "limit": 1,
-        "echo_query": 1,
-        "caller_identity": "scviz",
-    }
-
-    response = requests.post(url, data=params)
-    response.raise_for_status()
-
-    df = pd.read_csv(io.StringIO(response.text), sep="\t", header=None)
-    df.columns = [
-        "input_identifier", "input_alias", "string_identifier", "ncbi_taxon_id",
-        "preferred_name", "annotation", "score"
-    ]
-    return df
-
 
 # ----------------
 # STATISTICAL TEST FUNCTIONS
@@ -825,80 +805,3 @@ def convert_identifiers(input_list, input_type, output_type, df):
     output_list = df.loc[df[input_type].isin(input_list), output_type].tolist()
 
     return output_list
-
-# TODO: add function to get GO enrichment, GSEA analysis (see GOATOOLS or STAGES or Enrichr?)
-# TO INTEGRATE
-def get_string_id(gene,species = 9606):
-    string_api_url = "https://version-11-5.string-db.org/api"
-    output_format = "tsv-no-header"
-    method = "get_string_ids"
-    
-    params = {
-        "identifiers" : "\r".join(gene),
-        "species" : species, 
-        "limit" : 1, 
-        "echo_query" : 1,
-    }
-    
-    request_url = "/".join([string_api_url, output_format, method])
-    results = requests.post(request_url, data=params)
-    s_id = []
-    for line in results.text.strip().split("\n"):
-        l = line.split("\t")
-        try:
-            string_id = l[2]
-            s_id.append(string_id)
-        except:
-            continue
-    
-    return s_id
-
-# TO INTEGRATE
-def get_string_annotation(gene,universe,species = 9606):
-    string_api_url = "https://version-11-5.string-db.org/api"
-    output_format = "json"
-    method = "enrichment"
-
-    params = {
-        "identifiers" : "%0d".join(gene),
-        # "background_string_identifiers": "%0d".join(universe),
-        "species" : species
-    }
-    
-    request_url = "/".join([string_api_url, output_format, method])
-    results = requests.post(request_url, data=params)
-    print(results.text)
-    try:
-        annotation = pd.read_json(results.text)
-    except:
-        annotation = pd.DataFrame()
-    return annotation
-
-# TO INTEGRATE
-def get_string_network(gene,comparison,species = 9606):
-    string_api_url = "https://version-11-5.string-db.org/api"
-    output_format = "highres_image"
-    method = "network"
-    
-    if len(gene) <= 10:
-        hide_label = 0
-    else:
-        hide_label = 1
-    
-    params = {
-        "identifiers" : "%0d".join(get_string_id(gene)),
-        "species" : species,
-        "required_score" : 700,
-        "hide_disconnected_nodes" : hide_label,
-        "block_structure_pics_in_bubbles" : 1,
-        "flat_node_design" : 1,
-        "center_node_labels" : 1
-    }
-    
-    request_url = "/".join([string_api_url, output_format, method])
-    response = requests.post(request_url, data=params)
-    
-    with open(f'{comparison}.png','wb') as file:
-        file.write(response.content)
-    
-    return True
