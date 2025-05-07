@@ -2129,7 +2129,7 @@ class pAnnData:
                 imputer = KNNImputer(n_neighbors=n_neighbors)
                 impute_data = imputer.fit_transform(impute_data)
             else:
-                imputer = SimpleImputer(strategy=method)
+                imputer = SimpleImputer(strategy=method, keep_empty_features=True)
                 impute_data = imputer.fit_transform(impute_data)
 
             print(f"ℹ️ Global imputation using '{method}'. Layer saved as '{layer_name}'.")
@@ -2310,7 +2310,7 @@ class pAnnData:
         print(f'{on}: PCA fitted on {layer} and and stored in layers["X_pca"] and uns["pca"]')
 
     def nanmissingvalues(self, on = 'protein', limit = 0.5):
-        # sets columns (proteins and peptides) with > 0.5 missing values to NaN across all samples
+        # sets columns (proteins and peptides) with > limit (default 0.5) missing values to NaN across all samples
         if not self._check_data(on):
             pass
 
