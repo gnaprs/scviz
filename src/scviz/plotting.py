@@ -77,7 +77,7 @@ def get_color(resource_type, n=None):
     
     elif resource_type == 'cmap':
         if n is None:
-            raise ValueError("Parameter 'n' must be specified when resource_type is 'cmap'")
+            n = 1  # Default to generating one colormap from the first base color
         if n > len(base_colors):
             warnings.warn(f"Requested {n} colormaps, but only {len(base_colors)} base colors. Reusing from the start.")
         cmaps = []
@@ -85,7 +85,7 @@ def get_color(resource_type, n=None):
             color = base_colors[i % len(base_colors)]
             cmap = mcolors.LinearSegmentedColormap.from_list(f'cmap_{i}', ['white', color])
             cmaps.append(cmap)
-        return cmaps
+        return cmaps if n > 1 else cmaps[0]
     
     elif resource_type == 'palette':
         return sns.color_palette(base_colors)
@@ -704,10 +704,11 @@ def plot_umap(ax, pdata, color = None, layer = "X", on = 'protein', cmap='defaul
     umap = adata.uns['umap']
 
     y = utils.get_samplenames(adata, color)
-    color_dict = {class_type: i for i, class_type in enumerate(set(y))}
+    color_dict = {class_type: i for i, class_type in enumerate(sorted(set(y)))}
     color_mapped = [color_dict[val] for val in y]
+    n_classes = len(color_dict)
     if cmap == 'default':  
-        cmap = get_color('cmap')
+        cmap = mcolors.ListedColormap(get_color('colors', n=n_classes))
     else:
         cmap = cm.get_cmap(cmap)
     norm = mcolors.Normalize(vmin=min(color_mapped), vmax=max(color_mapped))
