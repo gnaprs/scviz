@@ -439,10 +439,28 @@ def format_class_filter(classes, class_value, exact_cases=False):
     - class_value (str, list of str, or list of list): The value(s) corresponding to the class(es).
         If a string, it may be underscore-joined (e.g. 'kd_AS').
         If a list of strings (e.g. ['kd_AS', 'sc_BE']), and exact_cases=True, each will be split and zipped with classes.
+        If a list of lists (e.g. [['AS', 'kd'], ['BE', 'sc']]), each inner list is interpreted as a full set of class values.
     - exact_cases (bool): Whether to return a list of exact match dictionaries or a combined OR filter.
 
     Returns:
     - dict or list of dicts: Formatted for dictionary-style filter input.
+
+    Examples:
+    # Single class, loose match
+    format_class_filter("treatment", ["kd", "sc"])
+    → {'treatment': ['kd', 'sc']}
+
+    # Multi-class, loose match
+    format_class_filter(["cellline", "treatment"], ["AS", "kd"])
+    → {'cellline': 'AS', 'treatment': 'kd'}
+
+    # Multi-class, exact match from underscore-joined strings
+    format_class_filter(["cellline", "treatment"], ["AS_kd", "BE_sc"], exact_cases=True)
+    → [{'cellline': 'AS', 'treatment': 'kd'}, {'cellline': 'BE', 'treatment': 'sc'}]
+
+    # Multi-class, exact match from list of lists
+    format_class_filter(["cellline", "treatment"], [["AS", "kd"], ["BE", "sc"]], exact_cases=True)
+    → [{'cellline': 'AS', 'treatment': 'kd'}, {'cellline': 'BE', 'treatment': 'sc'}]
     """
 
     if isinstance(classes, str):
@@ -454,12 +472,6 @@ def format_class_filter(classes, class_value, exact_cases=False):
 
     elif isinstance(classes, list):
         if exact_cases:
-            # Handle the case where a single list is passed as one combination
-            if isinstance(class_value, list) and all(isinstance(v, str) for v in class_value):
-                if len(class_value) != len(classes):
-                    raise ValueError("Length of class_value must match the number of classes.")
-                return [{cls: val for cls, val in zip(classes, class_value)}]
-
             if isinstance(class_value, str):
                 class_value = [class_value]
 
@@ -467,11 +479,15 @@ def format_class_filter(classes, class_value, exact_cases=False):
             for entry in class_value:
                 if isinstance(entry, str):
                     values = entry.split('_')
-                else:
+                elif isinstance(entry, list):
                     values = entry
+                else:
+                    raise ValueError("Each class_value entry must be a string or a list.")
+
                 if len(values) != len(classes):
                     raise ValueError("Each class_value entry must match the number of classes.")
                 formatted.append({cls: val for cls, val in zip(classes, values)})
+
             return formatted
 
         else:
