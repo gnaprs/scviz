@@ -1,0 +1,21 @@
+digraph "packages" {
+rankdir=BT
+charset="utf-8"
+"scviz" [color="black", label="scviz", shape="box", style="solid"];
+"scviz.TrackedDataFrame" [color="black", label="scviz.TrackedDataFrame", shape="box", style="solid"];
+"scviz.enrichment" [color="black", label="scviz.enrichment", shape="box", style="solid"];
+"scviz.pAnnData" [color="black", label="scviz.pAnnData", shape="box", style="solid"];
+"scviz.plotting" [color="black", label="scviz.plotting", shape="box", style="solid"];
+"scviz.setup" [color="black", label="scviz.setup", shape="box", style="solid"];
+"scviz.utils" [color="black", label="scviz.utils", shape="box", style="solid"];
+"scviz.pAnnData" -> "scviz" [arrowhead="open", arrowtail="none"];
+"scviz.pAnnData" -> "scviz.TrackedDataFrame" [arrowhead="open", arrowtail="none"];
+"scviz.pAnnData" -> "scviz.enrichment" [arrowhead="open", arrowtail="none"];
+"scviz.pAnnData" -> "scviz.setup" [arrowhead="open", arrowtail="none"];
+"scviz.pAnnData" -> "scviz.utils" [arrowhead="open", arrowtail="none"];
+"scviz.plotting" -> "scviz" [arrowhead="open", arrowtail="none"];
+"scviz.plotting" -> "scviz.enrichment" [arrowhead="open", arrowtail="none"];
+"scviz.plotting" -> "scviz.utils" [arrowhead="open", arrowtail="none"];
+"scviz.utils" -> "scviz" [arrowhead="open", arrowtail="none"];
+"scviz.utils" -> "scviz.pAnnData" [arrowhead="open", arrowtail="none"];
+}

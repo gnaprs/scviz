@@ -5,10 +5,9 @@
 1. Add sharedPeptides function on get_CV()
 2. Update umap with uncertainty and also subset coloring
 3. Implement dot plot: expression of the indicated genes in the three clusters (dot size is percentage of cells per cluster; color is cluster average normalized expression)
-4. implement directLFQ () for normalization, double check normalization (median?) from 240731_cbr
+4. implement directLFQ () for normalization
 5. implement correlation visualization (protein corr module)
 6. implement peptide sequence characteristics (hydrophobicity, etc.)
-7. implement imputation within classes (nested), not sure if can use ColumnTransformer together with SimpleImputer for this (check dev_imputation.ipynb)
 
 # TESTS
 1. import tests not yet done - have test files for pd and diann already
@@ -20,6 +19,7 @@
 2. housekeeping csvs not installed with package - find a way to fix this
 3. get_pca_importance just needs to accept pdata input (and prot/pep) - can get uns['pca'] and var_names from it.
 4. plot_abundance stopped showing data points? check?
+5. plot_pca ellipse having issues (only showing one ellipse, not around data points)
 
 # MAINTENANCE
 1. Check out scprep repo for possible utility functions

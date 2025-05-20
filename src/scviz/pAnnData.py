@@ -11,10 +11,8 @@ import warnings
 
 from scipy import sparse
 from scipy.stats import variation, ttest_ind, mannwhitneyu, wilcoxon
-from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import MultiLabelBinarizer, normalize, FunctionTransformer
 from sklearn.decomposition import PCA
-from sklearn.impute import SimpleImputer, KNNImputer
 
 import umap.umap_ as umap
 
@@ -810,13 +808,13 @@ class pAnnData:
                 if layer not in self.prot.layers:
                     raise ValueError(f"Layer {layer} not found in protein data.")
                 self.prot.X = self.prot.layers[layer]
-                print(f"Set {on} data to layer {layer}.")
+                print(f"ℹ️ Set {on} data to layer {layer}.")
 
             else:
                 if layer not in self.pep.layers:
                     raise ValueError(f"Layer {layer} not found in peptide data.")
                 self.pep.X = self.pep.layers[layer]
-                print(f"Set {on} data to layer {layer}.")
+                print(f"ℹ️ Set {on} data to layer {layer}.")
 
             self._history.append(f"{on}: Set X to layer {layer}.")
 
@@ -2154,7 +2152,7 @@ class pAnnData:
                     group_data[mask] = np.take(min_vals, np.where(mask)[1])
                     imputed_group = group_data
                 else:
-                    imputer = SimpleImputer(strategy=method)
+                    imputer = SimpleImputer(strategy=method, keep_empty_features=True)
                     imputed_group = imputer.fit_transform(group_data)
 
                 impute_data[idx, :] = imputed_group
@@ -2329,84 +2327,203 @@ class pAnnData:
         elif on == 'peptide':
             self.pep = adata
 
-    def normalize(self, classes = None, layer = "X", method = 'sum', on = 'protein', set_X = True, **kwargs):  
+    def normalize(self, classes = None, layer = "X", method = 'sum', on = 'protein', set_X = True, force = False, use_nonmissing = False, **kwargs):  
+        """ 
+        Normalize the data across samples (globally or within groups).
+
+        Parameters:
+        - classes (str or list): Sample-level class/grouping column(s) in .obs.
+        - layer (str): Data layer to normalize from (default='X').
+        - method (str): Normalization method. Options: 'sum', 'median', 'mean', 'max', 'reference_feature', 'robust_scale', 'quantile_transform'.
+        - on (str): 'protein' or 'peptide'.
+        - set_X (bool): Whether to set .X to the normalized result.
+        - force (bool): Whether to force normalization even with bad rows.
+        - use_nonmissing (bool): If True, only use columns with no missing values across all samples when computing scaling factors.
+        - **kwargs: Additional arguments for normalization methods.
+            (e.g., reference_columns for 'reference_feature', n_neighbors for 'knn').
+            max_missing_fraction: Maximum fraction of missing values allowed in a row. Default is 0.5.
+
+        """
+        
         if not self._check_data(on):
-            pass
+            return
 
         adata = self.prot if on == 'protein' else self.pep
         if layer != "X" and layer not in adata.layers:
             raise ValueError(f"Layer {layer} not found in .{on}.")
+       
+        normalize_data = adata.layers[layer] if layer != "X" else adata.X
+        was_sparse = sparse.issparse(normalize_data)
+        normalize_data = normalize_data.toarray() if was_sparse else normalize_data.copy()
+        original_data = normalize_data.copy()
 
+        # Check for bad rows (too many missing values)
+        missing_fraction = np.isnan(normalize_data).sum(axis=1) / normalize_data.shape[1]
+        max_missing_fraction = kwargs.pop("max_missing_fraction", 0.5)
+        bad_rows_mask = missing_fraction > max_missing_fraction
+
+        if np.any(bad_rows_mask):
+            n_bad = np.sum(bad_rows_mask)
+            print(f"⚠️ {n_bad} sample(s) have >{int(max_missing_fraction*100)}% missing values.")
+            print("   Suggest running `.impute()` before normalization for more stable results.")
+            print("   Alternatively, try `use_nonmissing=True` to normalize using only consistently observed proteins.")
+            if not force:
+                print("   ➡️ Use `force=True` to proceed anyway.")
+                return
+
+        layer_name = 'X_norm_' + method
         normalize_funcs = ['sum', 'median', 'mean', 'max', 'reference_feature', 'robust_scale', 'quantile_transform']
 
         if method not in normalize_funcs:
-            raise ValueError(f"Unknown method: {method}")
-        
-        normalize_data = adata.layers[layer] if layer != "X" else adata.X
-        layer_name = 'X_norm_' + method
-        was_sparse = sparse.issparse(normalize_data)
-
-        if was_sparse:
-            normalize_data = normalize_data.toarray()
+            raise ValueError(f"Unsupported normalization method: {method}")
 
         if classes is None:
-            normalize_data = _normalize_helper(normalize_data, method, **kwargs)
-            
-            print(f"Normalized data across all samples using {method}. New data stored in `{layer_name}`.")
-            self._history.append(f"{on}: Normalized layer {layer} using {method}. Imputed data stored in `{layer_name}`.")
-                  
-        if was_sparse:
-            adata.layers[layer_name] = sparse.csr_matrix(normalize_data)
+            normalize_data = self._normalize_helper(normalize_data, method, use_nonmissing=use_nonmissing, **kwargs)
+            msg=f"ℹ️ Global normalization using '{method}'"
         else:
-            adata.layers[layer_name] = normalize_data
+            # Group-wise normalization
+            sample_names = utils.get_samplenames(adata, classes)
+            sample_names = np.array(sample_names)
+            unique_groups = np.unique(sample_names)
+
+            for group in unique_groups:
+                idx = np.where(sample_names == group)[0]
+                group_data = normalize_data[idx, :]
+
+                normalized_group = self._normalize_helper(group_data, method=method, use_nonmissing=use_nonmissing, **kwargs)
+                normalize_data[idx, :] = normalized_group
+
+            msg=f"ℹ️ Group-wise normalization using '{method}' on class(es): {classes}"
+
+        if use_nonmissing and method in {'sum', 'mean', 'median', 'max'}:
+            msg += f" (using only fully observed columns)"
+
+        msg += f". Layer saved as '{layer_name}'."
+        print(msg)
+
+        # summary printout
+        summary_lines = []
+        if classes is None:
+            summary_lines.append(f"✅ Normalized all {normalize_data.shape[0]} samples.")
+        else:
+            for group in unique_groups:
+                count = np.sum(sample_names == group)
+                summary_lines.append(f"   - {group}: {count} samples normalized")
+            summary_lines.insert(0, f"✅ Normalized {normalize_data.shape[0]} samples total.")
+        print("\n".join(summary_lines))            
+
+        adata.layers[layer_name] = sparse.csr_matrix(normalize_data) if was_sparse else normalize_data
 
         if set_X:
             self.set_X(layer = layer_name, on = on)
 
-# TODO: move to class function
-def _normalize_helper(data, method, **kwargs):
-    if method == 'sum':
-        # norm by sum: scale each row s.t. sum of each row is the same as the max sum
-        data_norm = data * (np.nansum(data, axis=1).max() / (np.nansum(data, axis=1)))[:, None]
+        # Determine if use_nonmissing note should be added
+        note = ""
+        if use_nonmissing and method in {'sum', 'mean', 'median', 'max'}:
+            note = " (using only fully observed columns)"
 
-    elif method == 'median':
-        # norm by median: scale each row s.t. median of each row is the same as the max median
-        data_norm = data * (np.nanmedian(data, axis=1).max() / (np.nanmedian(data, axis=1)))[:, None]
+        self._history.append(
+            f"{on}: Normalized layer {layer} using {method}{note} (grouped by {classes}). Stored in `{layer_name}`."
+            )
+    
+    def _normalize_helper(self, data, method, use_nonmissing, **kwargs):
+        """
+        Helper function for row-wise normalization.
 
-    elif method == 'mean':
-        # norm by mean: scale each row s.t. mean of each row is the same as the max mean
-        data_norm = data * (np.nanmean(data, axis=1).max() / (np.nanmean(data, axis=1)))[:, None]
+        Parameters:
+        - data (np.ndarray): Data matrix (samples x features).
+        - method (str): Normalization method. One of:
+            'sum', 'mean', 'median', 'max', 'reference_feature',
+            'robust_scale', 'quantile_transform'.
+        - use_nonmissing (bool): If True, only use columns with no missing values
+                                across all samples when computing scaling factors.
 
-    elif method == 'max':
-        # norm by max: scale each row s.t. max value of each row is the same as the max value
-        data_norm = data * (np.nanmax(data, axis=1).max() / (np.nanmax(data, axis=1)))[:, None]
+        Returns:
+        - np.ndarray: Normalized data.
+        """
 
-    elif method == 'reference_feature':
-        # norm by reference feature: scale each row s.t. the reference column is the same across all rows (scale to max value of reference column)
-        reference_columns = kwargs.get('reference_columns', [2])
-        scaling_factors = np.nanmean(np.nanmax(data[:, reference_columns], axis=0) / (data[:, reference_columns]), axis=1)
+        if method in {'sum', 'mean', 'median', 'max'}:
+            reducer = {
+                    'sum': np.nansum,
+                    'mean': np.nanmean,
+                    'median': np.nanmedian,
+                    'max': np.nanmax
+                }[method]
 
-        nan_rows = np.where(np.isnan(scaling_factors))[0]
-        if nan_rows.size > 0:
-            print(f"Rows ({', '.join(map(str, nan_rows))}) were normalized by mean scaling factor because reference feature was missing. Suggest imputation on reference feature by class and re-normalize.")
+            if use_nonmissing:
+                fully_observed_cols = ~np.isnan(data).any(axis=0)
+                if not np.any(fully_observed_cols):
+                    raise ValueError("No fully observed columns available for normalization with `use_nonmissing=True`.")
+                used_cols = np.where(fully_observed_cols)[0]
+                print(f"ℹ️ Normalizing using only fully observed columns: {used_cols}")
+                row_vals = reducer(data[:, fully_observed_cols], axis=1)
+            else:
+                row_vals = reducer(data, axis=1)
 
-        scaling_factors = np.where(np.isnan(scaling_factors), np.nanmean(scaling_factors), scaling_factors)
-        data_norm = data * scaling_factors[:, None]
+            scale = np.nanmax(row_vals) / row_vals
+            scale = np.where(np.isnan(scale), 1.0, scale)
+            data_norm = data * scale[:, None]
 
-    elif method == 'robust_scale':
-        # norm by robust_scale: Center to the median and component wise scale according to the interquartile range. See sklearn.preprocessing.robust_scale for more information.
-        from sklearn.preprocessing import robust_scale
-        data_norm = robust_scale(data, axis=1)
+        elif method == 'reference_feature':
+            # norm by reference feature: scale each row s.t. the reference column is the same across all rows (scale to max value of reference column)
+            reference_columns = kwargs.get('reference_columns', [2])
+            reference_method = kwargs.get('reference_method', 'median')  # default to median
 
-    elif method == 'quantile_transform':
-        # norm by quantile_transform: Transform features using quantiles information. See sklearn.preprocessing.quantile_transform for more information.
-        from sklearn.preprocessing import quantile_transform
-        data_norm = quantile_transform(data, axis=1)
+            reducer_map = {
+                'mean': np.nanmean,
+                'median': np.nanmedian,
+                'sum': np.nansum
+            }
 
-    else:
-        raise ValueError(f"Unknown method: {method}")
+            if reference_method not in reducer_map:
+                raise ValueError(f"Unsupported reference method: {reference_method}. Supported methods are: {list(reducer_map.keys())}")
+            reducer = reducer_map[reference_method]
 
-    return data_norm
+            # resolve reference column names if needed
+            if isinstance(reference_columns[0], str):
+                gene_to_acc, _ = self.get_gene_maps(on='protein')
+                resolved = utils.resolve_accessions(self.prot, reference_columns, gene_map=gene_to_acc)
+                reference_acc = [ref for ref in resolved if ref in self.prot.var.index]
+                reference_columns = [self.prot.var.index.get_loc(ref) for ref in reference_acc]
+                print(f"ℹ️ Normalizing using found reference columns: {reference_acc}")
+                self._history.append(f"Used reference_feature normalization with resolved accessions: {resolved}")
+            else:
+                reference_columns = [int(ref) for ref in reference_columns]
+                reference_acc = [self.prot.var.index[ref] for ref in reference_columns if ref < self.prot.shape[1]]
+                print(f"ℹ️ Normalizing using reference columns: {reference_acc}")
+                self._history.append(f"Used reference_feature normalization with resolved accessions: {reference_acc}")
+
+            scaling_factors = np.nanmean(np.nanmax(data[:, reference_columns], axis=0) / (data[:, reference_columns]), axis=1)
+
+            nan_rows = np.where(np.isnan(scaling_factors))[0]
+            if nan_rows.size > 0:
+                print(f"⚠️ Rows {list(nan_rows)} have all missing reference values.")
+                print("   ➡️ Falling back to row median normalization for these rows.")
+                
+                fallback = np.nanmedian(data[nan_rows, :], axis=1)
+                fallback[fallback == 0] = np.nan  # avoid division by 0
+                fallback_scale = np.nanmax(fallback) / fallback
+                fallback_scale = np.where(np.isnan(fallback_scale), 1.0, fallback_scale)  # default to 1.0 if all else fails
+
+                scaling_factors[nan_rows] = fallback_scale
+
+            scaling_factors = np.where(np.isnan(scaling_factors), np.nanmean(scaling_factors), scaling_factors)
+            data_norm = data * scaling_factors[:, None]
+
+        elif method == 'robust_scale':
+            # norm by robust_scale: Center to the median and component wise scale according to the interquartile range. See sklearn.preprocessing.robust_scale for more information.
+            from sklearn.preprocessing import robust_scale
+            data_norm = robust_scale(data, axis=1)
+
+        elif method == 'quantile_transform':
+            # norm by quantile_transform: Transform features using quantiles information. See sklearn.preprocessing.quantile_transform for more information.
+            from sklearn.preprocessing import quantile_transform
+            data_norm = quantile_transform(data, axis=1)
+
+        else:
+            raise ValueError(f"Unknown method: {method}")
+
+        return data_norm
 
 def import_data(source: str, **kwargs):
     """

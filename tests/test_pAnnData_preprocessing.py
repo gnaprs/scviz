@@ -7,14 +7,13 @@ from tests.conftest import pdata
 
 @pytest.fixture
 def pdata_preprocessing():
-    """Fixture for controlled dummy data to test imputation."""
     X = np.array([
-        [1,    np.nan, 10,   100],
-        [2,    20,     np.nan, 200],
-        [np.nan, 30,   30,   np.nan],
-        [100,  np.nan, 1000, 500],
-        [200,  400,     np.nan, np.nan],
-        [np.nan, 600,  3000, 1500],
+        [1,    np.nan, 10,   100, 500, 2.0],
+        [2,    20,     np.nan, 200, 500, 2.5],
+        [np.nan, 30,   30,   np.nan, 500, 3.0],
+        [100,  np.nan, 1000, 500, 500, 2.8],
+        [200,  400,     np.nan, np.nan, 500, 2.2],
+        [np.nan, 600,  3000, 1500, 500, 2.1],
     ])
 
     obs = pd.DataFrame({
@@ -22,7 +21,10 @@ def pdata_preprocessing():
         "treatment": ["kd", "kd", "kd", "sc", "sc", "sc"]
     }, index=[f"sample{i+1}" for i in range(6)])
 
-    var = pd.DataFrame(index=[f"P{i+1}" for i in range(4)])
+    var = pd.DataFrame({
+        "Genes": ["GAPDH", "ACTB", "TUBB", "MYH9", "HSP90", "RPLP0"]
+    }, index=[f"P{i+1}" for i in range(6)])
+
     ann = AnnData(X=X, obs=obs, var=var)
     return pAnnData.pAnnData(prot=ann)
 
@@ -91,6 +93,46 @@ def test_impute_set_X_overwrites(pdata_preprocessing):
     pdata = pdata_preprocessing
     # Save original .X
     original = pdata.prot.X.copy()
-    pdata.impute(method="mean", set_X=True)
+    pdata.impute(method="mean")
     # Check if .X was overwritten
     assert not np.allclose(original, pdata.prot.X), "Expected .X to be updated after imputation."
+
+def test_normalize_sum(pdata_preprocessing):
+    pdata = pdata_preprocessing
+    pdata.normalize(method="sum", set_X=True)
+    norm = pdata.prot.X
+    row_sums = np.nansum(norm, axis=1)
+    assert np.allclose(row_sums, row_sums[0]), "All row sums should match after sum normalization"
+
+def test_normalize_sum_use_nonmissing(pdata_preprocessing):
+    pdata = pdata_preprocessing
+    pdata.normalize(method="sum", set_X=False, use_nonmissing=True)
+    norm = pdata.prot.layers["X_norm_sum"]
+    assert norm.shape == pdata.prot.shape
+    assert np.isclose(norm[0, 0], 1.00199, atol=1e-3)
+    assert np.isclose(norm[0, 2], 10.0199, atol=1e-3)
+    assert np.isclose(norm[0, 4], 500.996, atol=1e-3)
+
+def test_reference_feature_gene_name(pdata_preprocessing):
+    pdata = pdata_preprocessing
+    pdata.normalize(method="reference_feature", reference_columns=["GAPDH", "ACTB"], reference_method="mean", set_X=False)
+    norm = pdata.prot.layers["X_norm_reference_feature"]
+    assert norm.shape == pdata.prot.shape
+    assert np.isclose(norm[0, 0], 200.0)
+    assert np.isclose(norm[0, 2], 2000.0)
+    assert np.isclose(norm[0, 4], 100000.0)
+
+def test_normalize_median_groupwise(pdata_preprocessing):
+    pdata = pdata_preprocessing
+    pdata.normalize(method="median", classes=["cellline", "treatment"], set_X=False)
+    norm = pdata.prot.layers["X_norm_median"]
+
+    # Check scaling applied correctly within BE_kd
+    assert np.isclose(norm[0, 0], 3.0)
+    assert np.isclose(norm[0, 2], 30.0)
+    assert np.isclose(norm[0, 5], 6.0)
+
+    # Check that AS_sc group is also scaled correctly
+    assert np.isclose(norm[3, 2], 1200.0)
+    assert np.isclose(norm[4, 1], 800.0)
+    assert np.isclose(norm[5, 2], 3000.0)

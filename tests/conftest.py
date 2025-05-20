@@ -1,8 +1,6 @@
 from scviz import utils as scutils
 import pytest
-
 from scviz import pAnnData
-
 from pathlib import Path
 
 def create_dummy_pAnnData():
