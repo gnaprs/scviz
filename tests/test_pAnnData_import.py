@@ -1,4 +1,43 @@
 import pytest
+from scviz import pAnnData
+from pathlib import Path
+
+def test_import_pd():
+    test_dir = Path(__file__).parent
+    prot_file = str(test_dir / 'test_pd_prot.txt')
+    pep_file = str(test_dir / 'test_pd_pep.txt')
+
+    obs_columns = ['sample', 'cellline', 'treatment']
+    pdata = pAnnData.import_proteomeDiscoverer(prot_file = prot_file, pep_file = pep_file, obs_columns=obs_columns)
+    assert pdata is not None
+    assert pdata.prot is not None
+    assert pdata.pep is not None
+    assert pdata.rs is not None
+
+def test_import_diann_old():
+    # pre diann v1.8.1
+    test_dir = Path(__file__).parent
+    diann_file = str(test_dir / 'test_diann.tsv')
+
+    obs_columns = ['name','amt','enzyme','date','MS','acquisition','method','gradient','replicate']
+    pdata = pAnnData.import_diann(diann_file, obs_columns=obs_columns)
+    assert pdata is not None
+    assert pdata.prot is not None
+    assert pdata.pep is not None
+    assert pdata.rs is not None
+
+def test_import_diann_new():
+    # post diann v1.8.1
+    test_dir = Path(__file__).parent
+    diann_file = str(test_dir / 'test_diann.parquet')
+
+    # MP_20250219_OA_DIA_FAIMS_TS25_24min_sc_LCM-Cortex_01.raw
+    obs_columns = ['name','date','MS','acquisition','FAIMS','column','gradient','amt','region','replicate']
+    pdata = pAnnData.import_diann(diann_file, obs_columns=obs_columns)
+    assert pdata is not None
+    assert pdata.prot is not None
+    assert pdata.pep is not None
+    assert pdata.rs is not None
 
 @pytest.mark.parametrize("on,direction,overwrite", [
     ('protein', 'forward', False),

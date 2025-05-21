@@ -8,18 +8,16 @@
 4. implement directLFQ () for normalization
 5. implement correlation visualization (protein corr module)
 6. implement peptide sequence characteristics (hydrophobicity, etc.)
+7. check for DIA/DDA - and suggest preprocessing methods for these?
 
 # TESTS
-1. import tests not yet done - have test files for pd and diann already
-2. filter tests need to be checked
-3. implement quick utils check? 
+1.  
 
 # FIX/BUGS
 1. sync get_uniprot_fields() with convert_identifiers() and get_string_... functions - make one combined function for all 3
 2. housekeeping csvs not installed with package - find a way to fix this
 3. get_pca_importance just needs to accept pdata input (and prot/pep) - can get uns['pca'] and var_names from it.
-4. plot_abundance stopped showing data points? check?
-5. plot_pca ellipse having issues (only showing one ellipse, not around data points)
+4. plot_pca ellipse having issues (only showing one ellipse, not around data points)
 
 # MAINTENANCE
 1. Check out scprep repo for possible utility functions

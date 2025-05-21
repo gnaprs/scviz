@@ -1,4 +1,3 @@
-from scviz import utils as scutils
 import pytest
 from scviz import pAnnData
 from pathlib import Path
