@@ -16,3 +16,5 @@ dev/*.xlsx
 dev/windy*.py
 dev/cellstore_analysis.ipynb
 dev/dia-me code.zip
+.coverage
+testing.ipynb

@@ -951,6 +951,9 @@ class pAnnData:
 
         >>> condition = "Score > 0.75"
         >>> pdata.filter_prot(condition)
+
+        >>> accessions = ['GAPDH', 'P53']
+        >>> pdata.filter_prot(accessions=accessions)
         """
 
         if not self._check_data('protein'):
@@ -1001,27 +1004,14 @@ class pAnnData:
 
         # PEPTIDES: also filter out peptides that belonged only to the filtered proteins
         if pdata.pep is not None and pdata.rs is not None:
-            if debug:
-                print("Applying peptide cleanup using RS matrix...")
+            proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names = pdata._filter_sync_peptides_to_proteins(
+                original=self, 
+                updated_prot=pdata.prot, 
+                debug=debug)
 
-            rs = pdata.rs  # csr_matrix, shape (n_proteins, n_peptides)
-            
-            # Get original axis names from unfiltered self
-            orig_prot_names = np.array(self.prot.var_names)
-            orig_pep_names = np.array(self.pep.var_names)
-
-            # Determine which protein rows to keep in RS
-            keep_set = set(pdata.prot.var_names)
-            prot_mask = np.fromiter((p in keep_set for p in orig_prot_names), dtype=bool)
-            rs_filtered = rs[prot_mask, :]
-
-            # Keep peptides that are still linked to ≥1 protein
-            pep_mask = np.array(rs_filtered.sum(axis=0)).ravel() > 0
-            peptides_to_keep = orig_pep_names[pep_mask]
-
-                # Apply filtered RS and update .prot and .pep using the helper
+            # Apply filtered RS and update .prot and .pep using the helper
             pdata._apply_rs_filter(
-                keep_proteins=pdata.prot.var_names,
+                keep_proteins=proteins_to_keep,
                 keep_peptides=peptides_to_keep,
                 orig_prot_names=orig_prot_names,
                 orig_pep_names=orig_pep_names,
@@ -1156,21 +1146,14 @@ class pAnnData:
 
             # Optional: filter peptides + rs as well
             if filtered.pep is not None and filtered.rs is not None:
-                if verbose:
-                    print("Applying RS-based peptide cleanup after protein filtering...")
-
-                orig_prot_names = np.array(self.prot.var_names)
-                orig_pep_names = np.array(self.pep.var_names)
-
-                # Mask of kept protein rows
-                keep_set = set(filtered.prot.var_names)
-                prot_mask = np.fromiter((p in keep_set for p in orig_prot_names), dtype=bool)
-                rs_filtered = self.rs[prot_mask, :]
-                pep_mask = np.array(rs_filtered.sum(axis=0)).ravel() > 0
-                peptides_to_keep = orig_pep_names[pep_mask]
+                proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names = filtered._filter_sync_peptides_to_proteins(
+                    original=self,
+                    updated_prot=filtered.prot,
+                    debug=verbose
+                )
 
                 filtered._apply_rs_filter(
-                    keep_proteins=filtered.prot.var_names,
+                    keep_proteins=proteins_to_keep,
                     keep_peptides=peptides_to_keep,
                     orig_prot_names=orig_prot_names,
                     orig_pep_names=orig_pep_names,
@@ -1190,6 +1173,32 @@ class pAnnData:
         filtered.update_summary(recompute=True)
 
         return filtered if return_copy else None
+
+    def _filter_sync_peptides_to_proteins(self, original, updated_prot, debug=None):
+        """Helper function to filter peptides based on protein filtering. Returns inputs needed for _apply_rs_filter.
+
+        Parameters:
+        - original (pAnnData): Original pAnnData object before filtering.
+        - updated_prot (adata): Updated protein data to filter against.
+        - debug: Debugging flag.
+        """
+        if debug:
+            print("Applying RS-based peptide sync-up on peptides after protein filtering...")
+        
+        # Get original axis names from unfiltered self
+        rs = original.rs
+        orig_prot_names = np.array(original.prot.var_names)
+        orig_pep_names = np.array(original.pep.var_names)
+        # Determine which protein rows to keep in RS
+        proteins_to_keep=updated_prot.var_names
+        keep_set = set(proteins_to_keep)
+        prot_mask = np.fromiter((p in keep_set for p in orig_prot_names), dtype=bool)
+        rs_filtered = rs[prot_mask, :]
+        # Keep peptides that are still linked to ≥1 protein
+        pep_mask = np.array(rs_filtered.sum(axis=0)).ravel() > 0
+        peptides_to_keep = orig_pep_names[pep_mask]
+
+        return proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names
 
     def filter_sample(self, values=None, exact_cases=False, condition=None, file_list=None, return_copy=True, debug=False, query_mode=False):
         """
