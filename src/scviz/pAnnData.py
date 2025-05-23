@@ -620,7 +620,8 @@ class pAnnData:
         unknown = len(final_genes) - found
         if verbose:
             if found:
-                print(f"✅ Recovered {found} gene names from UniProt.")
+                print(f"✅ Recovered {found} gene names from UniProt. Genes found:")
+                print("   ", ", ".join(filled[:5]) + ("..." if found > 5 else ""))
             if unknown:
                 missing_ids = self.prot.var.loc[missing_mask].index[pd.isna(filled)]
                 print(f"⚠️ {unknown} gene names still missing. Assigned as 'UNKNOWN_<accession>' for:")
@@ -762,15 +763,15 @@ class pAnnData:
         plt.show()
 
     # -----------------------------
-    # TESTS FUNCTIONS
+    # VALIDATION FUNCTIONS
 
     def _check_data(self, on):
         # check if protein or peptide data exists
-        if on not in ['protein', 'peptide']:
+        if on not in ['protein', 'peptide' , 'prot', 'pep']:
             raise ValueError("Invalid input: on must be either 'protein' or 'peptide'.")
-        elif on == 'protein' and self.prot is None:
+        elif (on == 'protein' or on == 'prot') and self.prot is None:
             raise ValueError("No protein data found in AnnData object.")
-        elif on == 'peptide' and self.pep is None:
+        elif (on == 'peptide' or on == 'pep') and self.pep is None:
             raise ValueError("No peptide data found in AnnData object.")
         else:
             return True
@@ -793,11 +794,41 @@ class pAnnData:
 
     # -----------------------------
     # EDITING FUNCTIONS
+    # def copy(self):
+    #     """
+    #     Returns a deep copy of the pAnnData object.
+    #     """
+    #     return copy.deepcopy(self)
+    
     def copy(self):
         """
-        Returns a deep copy of the pAnnData object.
+        Return a new pAnnData object with the current state of all components.
+        This avoids full deepcopy and ensures filtered state is retained.
         """
-        return copy.deepcopy(self)
+        new_obj = self.__class__.__new__(self.__class__)
+
+        # Copy core AnnData components
+        new_obj.prot = self.prot.copy() if self.prot is not None else None
+        new_obj.pep = self.pep.copy() if self.pep is not None else None
+        new_obj._rs = copy.deepcopy(self._rs)
+
+        # Copy summary and stats
+        new_obj._summary = self._summary.copy(deep=True) if self._summary is not None else None
+        new_obj._stats = copy.deepcopy(self._stats)
+        new_obj._history = copy.deepcopy(self._history)
+        new_obj._previous_summary = copy.deepcopy(self._previous_summary)
+
+        # Optional: cached maps
+        if hasattr(self, "_gene_maps_protein"):
+            new_obj._gene_maps_protein = copy.deepcopy(self._gene_maps_protein)
+        if hasattr(self, "_protein_maps_peptide"):
+            new_obj._protein_maps_peptide = copy.deepcopy(self._protein_maps_peptide)
+
+        # Copy flags
+        new_obj._summary_is_stale = self._summary_is_stale
+        return new_obj
+
+
 
     def set_X(self, layer, on = 'protein'):
         # defines which layer to set X to
@@ -818,7 +849,6 @@ class pAnnData:
 
             self._history.append(f"{on}: Set X to layer {layer}.")
 
-    # TODO: for peptide, accept peptide accession + linked protein/gene...
     def get_abundance(self, namelist=None, layer='X', on='protein',
                     classes=None, log=True, x_label='gene'):
         """
@@ -1200,7 +1230,7 @@ class pAnnData:
 
         return proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names
 
-    def filter_sample(self, values=None, exact_cases=False, condition=None, file_list=None, return_copy=True, debug=False, query_mode=False):
+    def filter_sample(self, values=None, exact_cases=False, condition=None, file_list=None, min_prot=None, return_copy=True, debug=False, query_mode=False):
         """
         Unified method to filter samples in a pAnnData object.
 
@@ -1223,6 +1253,7 @@ class pAnnData:
         - exact_cases (bool): Use exact combination matching when `values` is provided.
         - condition (str): Summary-level numeric filter condition.
         - file_list (list): List of sample identifiers to keep.
+        - min_prot (int): Minimum number of proteins required to keep a sample.
         - return_copy (bool): If True, returns a filtered copy. Otherwise modifies in place.
         - debug (bool): If True, print filter queries/messages.
 
@@ -1237,23 +1268,28 @@ class pAnnData:
         >>> pdata.filter_sample(values={'treatment': 'kd', 'cellline': 'AS'})
         >>> pdata.filter_sample(values=[{'treatment': 'kd', 'cellline': 'AS'}, {'treatment': 'sc', 'cellline': 'BE'}], exact_cases=True)
         >>> pdata.filter_sample(condition="protein_count > 1000")
+        >>> pdata.filter_sample(min_prot=1000)
         >>> pdata.filter_sample(file_list=['Sample_001', 'Sample_007'])
         """
 
         # Ensure exactly one of the filter modes is specified
-        provided = [values, condition, file_list]
+        provided = [values, condition, file_list, min_prot]
         if sum(arg is not None for arg in provided) != 1:
             raise ValueError(
                 "Invalid filter input. You must specify exactly one of the following keyword arguments:\n"
                 "- `values=...` for categorical metadata filtering,\n"
                 "- `condition=...` for summary-level condition filtering, or\n"
+                "- `min_prot=...` to filter by minimum protein count.\n"
                 "- `file_list=...` to filter by sample IDs.\n\n"
                 "Example:\n"
                 "  pdata.filter_sample(condition='protein_quant > 0.2')"
             )
 
+        if min_prot is not None:
+            condition = f"protein_count >= {min_prot}"
+
         if values is not None:
-            return self.filter_sample_values(
+            return self._filter_sample_values(
                 values=values,
                 exact_cases=exact_cases,
                 debug=debug,
@@ -1261,7 +1297,7 @@ class pAnnData:
             )
 
         if condition is not None or file_list is not None:
-            return self.filter_sample_metadata(
+            return self._filter_sample_metadata(
                 condition=condition,
                 file_list=file_list,
                 return_copy=return_copy,
@@ -1269,12 +1305,12 @@ class pAnnData:
             )
         
         if values is not None and query_mode:
-            return self.filter_sample_query(query_string=values, source='obs', return_copy=return_copy, debug=debug)
+            return self._filter_sample_query(query_string=values, source='obs', return_copy=return_copy, debug=debug)
 
         if condition is not None and query_mode:
-            return self.filter_sample_query(query_string=condition, source='summary', return_copy=return_copy, debug=debug)
+            return self._filter_sample_query(query_string=condition, source='summary', return_copy=return_copy, debug=debug)
 
-    def filter_sample_metadata(self, condition = None, return_copy = True, file_list=None, debug=False):
+    def _filter_sample_metadata(self, condition = None, return_copy = True, file_list=None, debug=False):
         """
         Filter samples in a pAnnData object based on numeric summary conditions or a file/sample list.
 
@@ -1310,6 +1346,10 @@ class pAnnData:
         pdata = self.copy() if return_copy else self
         action = "Returning a copy of" if return_copy else "Filtered and modified"
 
+        print("self.prot id:", id(self.prot)) if debug else None
+        print("pdata.prot id:", id(pdata.prot)) if debug else None
+        print("Length of pdata.prot.obs_names:", len(pdata.prot.obs_names)) if debug else None
+
         # Define the filtering logic
         if condition is not None:
             formatted_condition = self._format_filter_query(condition, pdata._summary)
@@ -1331,12 +1371,18 @@ class pAnnData:
             message = "No filtering applied. Returning original data."
             return pdata if return_copy else None
 
+        print(f"Length of index_filter: {len(index_filter)}") if debug else None
+        print(f"Length of pdata.prot.obs_names before filter: {len(pdata.prot.obs_names)}") if debug else None
+        print(f"Number of shared samples: {len(pdata.prot.obs_names.intersection(index_filter))}") if debug else None
+
         # Filter out selected samples from prot and pep
         if pdata.prot is not None:
-            pdata.prot = pdata.prot[pdata.prot.obs_names.isin(index_filter)]
+            pdata.prot = pdata.prot[pdata.prot.obs.index.isin(index_filter)]
         
         if pdata.pep is not None:
-            pdata.pep = pdata.pep[pdata.pep.obs_names.isin(index_filter)]
+            pdata.pep = pdata.pep[pdata.pep.obs.index.isin(index_filter)]
+
+        print(f"Length of pdata.prot.obs_names after filter: {len(pdata.prot.obs_names)}") if debug else None
 
         # Logging and history updates
         print(message)
@@ -1345,7 +1391,7 @@ class pAnnData:
 
         return pdata if return_copy else None
     
-    def filter_sample_values(self, values, exact_cases, debug=False, return_copy=True):
+    def _filter_sample_values(self, values, exact_cases, debug=False, return_copy=True):
         """
         Filter samples in a pAnnData object using dictionary-style categorical matching.
 
@@ -1442,7 +1488,7 @@ class pAnnData:
 
         return pdata
 
-    def filter_sample_query(self, query_string, source='obs', return_copy=True, debug=False):
+    def _filter_sample_query(self, query_string, source='obs', return_copy=True, debug=False):
         """
         Filters samples using a raw pandas-style query string on either obs or summary.
 
@@ -2533,10 +2579,74 @@ class pAnnData:
             raise ValueError(f"Unknown method: {method}")
 
         return data_norm
+    
+    # --- scanpy functions ---
+    def clean_X(self, on='prot', inplace=True, set_to=0, layer=None, to_sparse=False, backup_layer="X_preclean", verbose=True):
+        """
+        Replace NaNs in .prot.X or a specified .prot layer with a given value (default: 0).
+        Optionally saves a backup of the original data to a layer (default: 'X_preclean').
+
+        Parameters:
+        - on (str): The attribute to clean ('prot' or 'obs').
+        - inplace (bool): If True, overwrite .X or .layers[layer]. If False, return cleaned matrix.
+        - set_to (float): Value to replace NaNs with.
+        - layer (str or None): Target .prot layer to clean (default: .X).
+        - to_sparse (bool): If True, convert result to sparse.
+        - backup_layer (str or None): If inplace=True and layer=None, save .X to this layer (default: 'X_preclean').
+        - verbose (bool): Print status messages.
+
+        Returns:
+        - np.ndarray or None: Cleaned matrix if inplace=False, otherwise None.
+        """
+        if not self._check_data(on):
+            return
+        adata = self.prot if on == 'prot' else self.pep
+
+        # Choose source matrix
+        X = adata.layers[layer] if layer else adata.X
+        is_sparse = sparse.issparse(X)
+
+        # Copy for manipulation
+        X_clean = X.copy()
+        nan_count = 0
+
+        if is_sparse:
+            nan_mask = np.isnan(X_clean.data)
+            nan_count = np.sum(nan_mask)
+            if nan_count > 0:
+                X_clean.data[nan_mask] = set_to
+        else:
+            nan_mask = np.isnan(X_clean)
+            nan_count = np.sum(nan_mask)
+            X_clean[nan_mask] = set_to
+
+        if to_sparse and not is_sparse:
+            X_clean = sparse.csr_matrix(X_clean)
+
+        # Apply result
+        if inplace:
+            if layer:
+                self.prot.layers[layer] = X_clean
+            else:
+                # Save original .X if requested and not already backed up
+                if backup_layer and backup_layer not in self.prot.layers:
+                    self.prot.layers[backup_layer] = self.prot.X.copy()
+                    if verbose:
+                        print(f"ℹ️ Backed up .X to .layers['{backup_layer}']")
+                self.prot.X = X_clean
+            if verbose:
+                print(f"✅ Cleaned {'layer ' + layer if layer else '.X'}: replaced {nan_count} NaNs with {set_to}.")
+        else:
+            if verbose:
+                print(f"✅ Returning cleaned matrix: {nan_count} NaNs replaced with {set_to}.")
+            return X_clean
+
 
 def import_data(source: str, **kwargs):
     """
     Unified wrapper for importing data into a pAnnData object.
+    For pd, arguments are prot_file, pep_file, obs_columns.
+    For diann, arguments are report_file, obs_columns.
     
     Parameters:
     - source (str): The tool or data source. Options:
@@ -2875,3 +2985,183 @@ def _create_pAnnData_from_parts(
     print("✅ Import complete. Use `print(pdata)` to view the object.")
 
     return pdata
+
+def suggest_obs_from_file(source, source_type=None, delimiter=None):
+    """
+    Extract and suggest sample-level metadata fields from filenames in a Proteome Discoverer or DIA-NN report.
+
+    This function loads sample names from a DIA-NN or PD report file and parses them into tokens based on a delimiter.
+    Each token is classified into metadata categories such as 'gradient', 'amount', or 'well_position' using regex
+    patterns and fuzzy keyword matching. The result is printed and returned in a format suitable for `.obs` annotation.
+
+    Parameters:
+    - source (str or Path): Path to the input file.
+    - source_type (str, optional): Type of the source file ('diann', 'pd', etc.). Will be used to determine the file format.
+    - delimiter (str, optional): Delimiter used in the file. If not provided, will be inferred from the run names.
+
+    Returns:
+    - list of str: Suggested observation columns.
+    """
+    from pathlib import Path
+    import csv
+    from collections import Counter
+
+    source = Path(source)
+    ext = source.suffix.lower()
+
+    # --- DIA-NN ---
+    if source_type == 'diann':
+        if ext == '.csv' or ext == '.tsv':
+            df = pd.read_csv(source, sep='\t' if ext == '.tsv' else ',',
+                             usecols=['Run'], low_memory=False)  # only load needed column
+        elif ext == '.parquet':
+            df = pd.read_parquet(source, columns=['Run'], engine='pyarrow')
+        else:
+            raise ValueError(f"Unsupported file type for DIA-NN: {ext}")
+
+        fname = df['Run'].dropna().iloc[0]
+
+        if delimiter is None:
+            all_delims = re.findall(r'[^A-Za-z0-9]', fname)
+            delimiter = Counter(all_delims).most_common(1)[0][0] if all_delims else '_'
+            print(f"Auto-detecting '{delimiter}' as delimiter.")
+
+    # --- Proteome Discoverer ---
+    elif source_type == 'pd':
+        if ext in ['.txt', '.tsv']:
+            df = pd.read_csv(source, sep='\t', nrows=0)
+        elif ext == '.xlsx':
+            print("⚠️ The read_excel function is slower. Consider converting to .tsv for better performance.")
+            df = pd.read_excel(source, nrows=0)
+        else:
+            raise ValueError(f"Unsupported file type for PD: {ext}")
+
+        abundance_cols = [col for col in df.columns if re.search(r'Abundance: F\d+:', col)]
+        if not abundance_cols:
+            raise ValueError("No 'Abundance: F#:' columns found in PD file.")
+
+        # Extract metadata from first sample
+        first_col = abundance_cols[0]
+        match = re.match(r'Abundance: (F\d+): (.+)', first_col)
+        if not match:
+            raise ValueError(f"Could not parse metadata from column name: {first_col}")
+
+        file_number, meta = match.groups()
+        tokens = [file_number] + [t.strip() for t in meta.split(',') if t.strip().lower() != 'n/a']
+        fname = '_'.join(tokens)
+        delimiter = '_'
+
+    else:
+        raise ValueError("source_type must be 'pd' or 'diann'")
+
+    # --- Classify tokens ---
+    tokens = fname.split(delimiter)
+    suggestion = {}
+    obs_columns = []
+    token_label_map = []
+    multi_matched_tokens = []
+    unrecognized_tokens = []
+
+    for tok in tokens:
+        labels = _classify_subtokens(tok)
+        label = labels[0]
+        if label == "unknown??":
+            obs_columns.append(f"<{tok}?>")
+        else:
+            obs_columns.append(label)
+        token_label_map.append((tok, labels))
+        if label != "unknown??" and label not in suggestion:
+            suggestion[label] = tok
+        if "unknown??" in labels:
+            unrecognized_tokens.append(tok)
+        elif len(labels) > 1:
+            multi_matched_tokens.append((labels, tok))
+
+    # --- Print suggestions ---
+    print(f"\nFrom filename: {fname}")
+    print("Suggested .obs columns:")
+    for tok, labels in token_label_map:
+        print(f"  {' OR '.join(labels):<26}: {tok}")
+    if multi_matched_tokens:
+        print(f"\n⚠️  Multiple matched token(s): {[t for _, t in multi_matched_tokens]}")
+    if unrecognized_tokens:
+        print(f"⚠️  Unrecognized token(s): {unrecognized_tokens}")
+    if multi_matched_tokens or unrecognized_tokens:
+        print("Please manually label these.")
+
+    print("\nℹ️ Suggested obs:\nobs_columns = {}".format(obs_columns))
+
+def _classify_subtokens(token, used_labels=None, keyword_map=None):
+    """
+    Classify a token into one or more metadata categories based on keyword matching and pattern rules.
+
+    This function parses a token into subtokens (e.g., by splitting on digit/letter boundaries),
+    and attempts to classify each subtoken using:
+    - Regex patterns (e.g., for dates and well positions)
+    - Fuzzy substring matching against a user-defined keyword map
+
+    Parameters
+    ----------
+    token : str
+        The input string token to classify (e.g., "Aur60minDIA").
+    used_labels : set, optional
+        A set of already-assigned labels to avoid duplicating suggestions. Currently unused but reserved for future logic.
+    keyword_map : dict, optional
+        A dictionary where keys are metadata categories (e.g. 'gradient') and values are lists of substrings to match.
+        If None, a default keyword map will be used.
+
+    Returns
+    -------
+    labels : list of str
+        A list of matched metadata labels for the token (e.g., ['gradient', 'acquisition']).
+        If no match is found, returns ['unknown??'].
+    """
+
+    default_map = {
+        "gradient": ["min", "hr", "gradient", "short", "long", "fast", "slow"],
+        "amount": ["cell", "cells", "sc", "bulk", "ng", "ug", "pg", "fmol"],
+        "condition": ["ctrl", "stim", "wt", "ko", "kd", "scramble", "si", "drug"],
+        "sample_type": ["embryo", "brain", "liver", "cellline", "mix", "qc"],
+        "instrument": ["tims", "tof", "fusion", "exploris","astral","stellar","eclipse","OA","OE480","OE"],
+        "acquisition": ["dia", "prm", "dda", "srm"],
+        "column": ['TS25','TS15','TS8','Aur']
+    }
+
+    keyword_map = keyword_map or default_map
+    labels = set()
+
+    # Split into subtokens (case preserved), in case one token has multiple labels
+    subtokens = re.findall(r'[A-Za-z]+|\d+min|\d+(?:ng|ug|pg|fmol)|\d{6,8}', token)
+
+    for sub in subtokens:
+        # Check unmodified for regex-based rules
+        if is_date_like(sub):
+            labels.add("date")
+        elif re.match(r"[A-Ha-h]\d{1,2}$", sub):
+            labels.add("well_position")
+        else:
+            # Lowercase for keyword matches
+            sub_lower = sub.lower()
+            for label, keywords in keyword_map.items():
+                if any(kw in sub_lower for kw in keywords):
+                    labels.add(label)
+
+    if not labels:
+        labels.add("unknown??")
+    return list(labels)
+
+def is_date_like(sub):
+    patterns = [
+        ("%Y%m%d", r"20\d{6}$"),           # 20240913
+        ("%y%m%d", r"\d{6}$"),             # 250913
+        ("%d%b", r"\d{1,2}[A-Za-z]{3}$"),  # 13Aug
+        ("%b%d", r"[A-Za-z]{3}\d{1,2}$"),  # Aug13
+    ]
+    for fmt, pat in patterns:
+        if re.fullmatch(pat, sub):
+            try:
+                datetime.datetime.strptime(sub, fmt)
+                return True
+            except ValueError:
+                continue
+    return False
