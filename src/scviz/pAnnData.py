@@ -6,6 +6,9 @@ import numpy as np
 import scanpy as sc
 import datetime
 
+from collections import Counter, defaultdict
+from typing import List, Optional, Tuple, Dict
+
 import copy
 import warnings
 
@@ -21,6 +24,7 @@ import matplotlib.pyplot as plt
 
 from .TrackedDataFrame import TrackedDataFrame
 from scviz import utils
+from scviz.utils import format_log_prefix
 from scviz import setup
 
 from typing import (  # Meta  # Generic ABCs  # Generic
@@ -154,7 +158,8 @@ class pAnnData:
             mark_stale_fn=self._mark_summary_stale
         )
         self._summary_is_stale = True
-        self.update_summary(recompute=True, sync_back=True, verbose=True)
+        suppress = getattr(self, "_suppress_summary_log", False)
+        self.update_summary(recompute=True, sync_back=True, verbose=not suppress)
 
     @stats.setter
     def stats(self, value):
@@ -320,7 +325,7 @@ class pAnnData:
             summary, parent=self, mark_stale_fn=self._mark_summary_stale)
         self._previous_summary = summary.copy()
 
-    def _push_summary_to_obs(self, skip_if_contains='pep', verbose=True):
+    def _push_summary_to_obs(self, skip_if_contains='pep', verbose=False):
         """
         Push changes from .summary back into .prot.obs and .pep.obs.
         Columns containing `skip_if_contains` are ignored for .prot; same for 'prot' in .pep.
@@ -329,27 +334,29 @@ class pAnnData:
             return
 
         def update_obs_with_summary(obs, summary, skip_if_contains):
-            skipped = []
+            skipped, updated = [], []
             for col in summary.columns:
-                if skip_if_contains in col:
+                if skip_if_contains in str(col):
                     skipped.append(col)
                     continue
+                if col not in obs.columns or not obs[col].equals(summary[col]):
+                    updated.append(col)
                 obs[col] = summary[col]
-            return skipped
+            return skipped, updated
 
         if self.prot is not None:
             if not self.prot.obs.index.equals(self._summary.index):
                 raise ValueError("Mismatch: .summary and .prot.obs have different sample indices.")
-            skipped_prot = update_obs_with_summary(self.prot.obs, self._summary, skip_if_contains)
+            skipped_prot, updated_prot = update_obs_with_summary(self.prot.obs, self._summary, skip_if_contains)
         else:
-            skipped_prot = None
+            skipped_prot, updated_prot = None, []
 
         if self.pep is not None:
             if not self.pep.obs.index.equals(self._summary.index):
                 raise ValueError("Mismatch: .summary and .pep.obs have different sample indices.")
-            skipped_pep = update_obs_with_summary(self.pep.obs, self._summary, skip_if_contains='prot')
+            skipped_pep, updated_pep = update_obs_with_summary(self.pep.obs, self._summary, skip_if_contains='prot')
         else:
-            skipped_pep = None
+            skipped_pep, updated_pep = None, []
 
         msg = "Pushed summary values back to obs. "
         if skipped_prot:
@@ -361,21 +368,50 @@ class pAnnData:
         if verbose:
             print(msg)
 
+        return updated_prot, updated_pep
+
     def update_summary(self, recompute=True, sync_back=False, verbose=True):
         """
-        Update the .summary dataframe from .obs (and optionally push changes back down).
+        Update the `.summary` DataFrame to reflect current state of `.obs` and metadata.
+
+        This function ensures `.summary` stays synchronized with sample-level metadata
+        stored in `.prot.obs` / `.pep.obs`. You can choose to recompute metrics,
+        sync edits back to `.obs`, or simply refresh the merged view.
 
         Parameters:
         - recompute (bool): If True, re-calculate protein/peptide stats.
         - sync_back (bool): If True, push edited .summary values back to .prot.obs / .pep.obs. False by default, as .summary is derived.
         - verbose (bool): If True, print action messages.
+
+        Typical Usage Scenarios:
+        ------------------------
+
+        | Scenario                        | Call                         | recompute | sync_back | _summary_is_stale | Effect                                                           |
+        |---------------------------------|------------------------------|-----------|-----------|-------------------|------------------------------------------------------------------|
+        | Filtering `.prot` or `.pep`     | `.update_summary(True)`      | True      | False     | False             | Recalculate protein/peptide stats and merge into `.summary`.     |
+        | Filtering samples               | `.update_summary(False)`     | False     | False     | False             | Refresh `.summary` view of `.obs` without recomputation.         |
+        | Manual `.summary[...] = ...`    | `.update_summary()`          | True/False| True      | True              | Push edited `.summary` values back to `.obs`.                    |
+        | After setting `.summary = ...`  | `.update_summary()`          | True      | True      | True              | Sync back and recompute stats from new `.summary`.               |
+        | No changes                      | `.update_summary()`          | False     | False     | False             | No-op other than passive re-merge.                               |
+
+        Notes:
+        ------
+        - `recompute=True` triggers `_update_metrics()` from `.prot` / `.pep` data.
+        - `sync_back=True` ensures changes to `.summary` are reflected in `.obs`.
+        - `.summary_is_stale` is automatically set when `.summary` is edited directly
+        (e.g. via `TrackedDataFrame`) or when assigned via the setter.
         """
 
         # 1. Push back first if summary was edited by the user
         if sync_back or getattr(self, "_summary_is_stale", False):
-            if verbose and not sync_back:
-                print("[update_summary] .summary was stale — syncing back to obs.")
-            self._push_summary_to_obs(verbose=verbose)
+            updated_prot, updated_pep = self._push_summary_to_obs()
+            updated_cols = list(set(updated_prot + updated_pep))
+            updated_str = f" Columns updated: {', '.join(updated_cols)}." if updated_cols else ""
+
+            if verbose:
+                reason = " (marked stale)" if not sync_back else ""
+                print(f"ℹ️ [INFO] Updating summary [sync_back]: pushed edits from `.summary` to `.obs`{reason}.{updated_str}")
+
             self._summary_is_stale = False  # reset before recompute
 
         # 2. Recompute or re-merge afterward
@@ -387,9 +423,10 @@ class pAnnData:
 
         # 3. Final messaging
         if verbose and not (sync_back or self._summary_is_stale):
-            mode = []
-            if recompute: mode.append("recompute")
-            print(f"[update_summary] → Mode: {', '.join(mode) or 'norm'}")
+            if recompute:
+                print("ℹ️ [INFO] Updating summary [recompute]: Recomputed metrics and refreshed `.summary` from `.obs`.")
+            else:
+                print("ℹ️ [INFO] Updating summary [refresh]: Refreshed `.summary` view (no recompute).")
 
         # 4. Final cleanup
         self._summary_is_stale = False
@@ -586,18 +623,18 @@ class pAnnData:
 
         if gene_col not in var.columns:
             if verbose:
-                print(f"⚠️ Column '{gene_col}' not found in .prot.var.")
+                print(f"{format_log_prefix('warn')} Column '{gene_col}' not found in .prot.var.")
             return
 
         missing_mask = var[gene_col].isna()
         if not missing_mask.any():
             if verbose:
-                print("✅ No missing gene names found.")
+                print(f"{format_log_prefix('result')} No missing gene names found.")
             return
 
         accessions = var.index[missing_mask].tolist()
         if verbose:
-            print(f"🔍 {len(accessions)} proteins with missing gene names. Querying UniProt...")
+            print(f"{format_log_prefix('search')} {len(accessions)} proteins with missing gene names. Querying UniProt...")
 
         try:
             df = utils.get_uniprot_fields(
@@ -605,7 +642,7 @@ class pAnnData:
                 search_fields=["accession", "gene_primary"]
             )
         except Exception as e:
-            print(f"❌ UniProt query failed: {e}")
+            print(f"{format_log_prefix('error')} UniProt query failed: {e}")
             return
 
         gene_map = dict(zip(df["Entry"], df["Gene Names (primary)"]))
@@ -620,13 +657,17 @@ class pAnnData:
         unknown = len(final_genes) - found
         if verbose:
             if found:
-                print(f"✅ Recovered {found} gene names from UniProt. Genes found:")
-                print("   ", ", ".join(filled[:5]) + ("..." if found > 5 else ""))
+                print(f"{format_log_prefix('result')} Recovered {found} gene name(s) from UniProt. Genes found:")
+                filled_clean = [str(g) for g in filled if pd.notna(g)]
+                preview = ", ".join(filled_clean[:25])
+                if found > 25:
+                    preview += "..."
+                print("   ", preview)
             if unknown:
                 missing_ids = self.prot.var.loc[missing_mask].index[pd.isna(filled)]
-                print(f"⚠️ {unknown} gene names still missing. Assigned as 'UNKNOWN_<accession>' for:")
+                print(f"{format_log_prefix('warn')} {unknown} gene name(s) still missing. Assigned as 'UNKNOWN_<accession>' for:")
                 print("   ", ", ".join(missing_ids[:5]) + ("..." if unknown > 5 else ""))
-                print("💡 You can update these using `pdata.update_identifier_maps({'GENE': 'ACCESSION'}, on='protein', direction='reverse', overwrite=True)`")
+                print("💡 Tip: You can update these using `pdata.update_identifier_maps({'GENE': 'ACCESSION'}, on='protein', direction='reverse', overwrite=True)`")
 
     def validate(self, verbose=True):
         """
@@ -679,7 +720,7 @@ class pAnnData:
                 nnz = self.rs.nnz if sparse.issparse(self.rs) else np.count_nonzero(self.rs)
                 total = self.rs.shape[0] * self.rs.shape[1]
                 sparsity = 100 * (1 - nnz / total)
-                print(f"ℹ️  RS matrix: {rs_shape} (proteins × peptides), sparsity: {sparsity:.2f}%")
+                print(f"ℹ️ [INFO] RS matrix: {rs_shape} (proteins × peptides), sparsity: {sparsity:.2f}%")
 
                 rs  = self.rs
 
@@ -699,13 +740,13 @@ class pAnnData:
         # --- Summary of results ---
         if issues:
             if verbose:
-                print("❌ Validation failed with the following issues:")
+                print(f"{format_log_prefix('error')} Validation failed with the following issues:")
                 for issue in issues:
                     print(" -", issue)
             return False
         else:
             if verbose:
-                print("✅ pAnnData object is valid.")
+                print(f"{format_log_prefix('result')} pAnnData object is valid.")
             return True
 
     def describe_rs(self):
@@ -794,11 +835,6 @@ class pAnnData:
 
     # -----------------------------
     # EDITING FUNCTIONS
-    # def copy(self):
-    #     """
-    #     Returns a deep copy of the pAnnData object.
-    #     """
-    #     return copy.deepcopy(self)
     
     def copy(self):
         """
@@ -813,10 +849,12 @@ class pAnnData:
         new_obj._rs = copy.deepcopy(self._rs)
 
         # Copy summary and stats
-        new_obj._summary = self._summary.copy(deep=True) if self._summary is not None else None
         new_obj._stats = copy.deepcopy(self._stats)
         new_obj._history = copy.deepcopy(self._history)
         new_obj._previous_summary = copy.deepcopy(self._previous_summary)
+        new_obj._suppress_summary_log = True  # 👈 set this just before
+        new_obj.summary = self._summary.copy(deep=True) if self._summary is not None else None # go through setter to mark as stale
+        del new_obj._suppress_summary_log
 
         # Optional: cached maps
         if hasattr(self, "_gene_maps_protein"):
@@ -824,8 +862,6 @@ class pAnnData:
         if hasattr(self, "_protein_maps_peptide"):
             new_obj._protein_maps_peptide = copy.deepcopy(self._protein_maps_peptide)
 
-        # Copy flags
-        new_obj._summary_is_stale = self._summary_is_stale
         return new_obj
 
 
@@ -1001,7 +1037,7 @@ class pAnnData:
                 print(f"Formatted condition: {formatted_condition}")
             filtered_proteins = pdata.prot.var[pdata.prot.var.eval(formatted_condition)]
             pdata.prot = pdata.prot[:, filtered_proteins.index]
-            message_parts.append(f"condition: {condition} ({pdata.prot.shape[1]} proteins kept)")
+            message_parts.append(f"condition: {condition}")
 
         # 2. Filter by accession list or gene names
         if accessions is not None:
@@ -1051,9 +1087,29 @@ class pAnnData:
             message_parts.append(f"peptides filtered based on remaining protein linkage ({len(peptides_to_keep)} peptides kept)")
 
         if not message_parts:
-            message = f"{action} protein data. No filters applied."
+            message = f"{format_log_prefix('user')} Filtering proteins [failed]: {action} protein data.\n    → No filters applied."
         else:
-            message = f"{action} protein data based on {' and '.join(message_parts)}."
+            filter_type = "condition" if condition else "accession"
+            message = (
+                f"{format_log_prefix('user')} Filtering proteins [{filter_type}]:\n"
+                f"    {action} protein data based on {filter_type}:"
+            )
+
+            for part in message_parts:
+                if part.startswith("condition:"):
+                    message += f"\n    → {part}"
+                elif part.startswith("accessions:"):
+                    message += f"\n    → {part}"
+                elif part.startswith("peptides filtered"):
+                    # we'll append peptide count separately in summary below
+                    peptides_kept = int(part.split("(")[-1].split()[0])
+                else:
+                    message += f"\n    → {part}"
+
+            # Protein and peptide counts summary
+            message += f"\n    → Proteins kept: {pdata.prot.shape[1]}"
+            if pdata.pep is not None:
+                message += f"\n    → Peptides kept (linked): {pdata.pep.shape[1]}"
 
         print(message)
         pdata._append_history(message)
@@ -1147,7 +1203,7 @@ class pAnnData:
                 col = f"Found In: {g}"
                 mask &= var[col]
             if verbose:
-                print(f"File-mode: keeping {mask.sum()} / {len(mask)} features found in ALL files: {group}")
+                print(f"{format_log_prefix('user')} Filtering proteins [Found|File-mode]: keeping {mask.sum()} / {len(mask)} features found in ALL files: {group}")
 
         elif mode == "group":
             if min_ratio is None and min_count is None:
@@ -1165,7 +1221,7 @@ class pAnnData:
                 mask &= this_mask
 
             if verbose:
-                print(f"Group-mode: keeping {mask.sum()} / {len(mask)} features passing threshold across groups: {group}")
+                print(f"{format_log_prefix('user')} Filtering proteins [Found|Group-mode]: keeping {mask.sum()} / {len(mask)} features passing threshold {min_ratio if min_ratio is not None else min_count} across groups: {group}")
 
         # Apply filtering
         filtered = self.copy() if return_copy else self
@@ -1213,8 +1269,8 @@ class pAnnData:
         - debug: Debugging flag.
         """
         if debug:
-            print("Applying RS-based peptide sync-up on peptides after protein filtering...")
-        
+            print(f"{format_log_prefix('info')} Applying RS-based peptide sync-up on peptides after protein filtering...")
+
         # Get original axis names from unfiltered self
         rs = original.rs
         orig_prot_names = np.array(original.prot.var_names)
@@ -1288,7 +1344,7 @@ class pAnnData:
         if min_prot is not None:
             condition = f"protein_count >= {min_prot}"
 
-        if values is not None:
+        if values is not None and not query_mode:
             return self._filter_sample_values(
                 values=values,
                 exact_cases=exact_cases,
@@ -1296,7 +1352,7 @@ class pAnnData:
                 return_copy=return_copy
             )
 
-        if condition is not None or file_list is not None:
+        if condition is not None or file_list is not None and not query_mode:
             return self._filter_sample_metadata(
                 condition=condition,
                 file_list=file_list,
@@ -1383,6 +1439,25 @@ class pAnnData:
             pdata.pep = pdata.pep[pdata.pep.obs.index.isin(index_filter)]
 
         print(f"Length of pdata.prot.obs_names after filter: {len(pdata.prot.obs_names)}") if debug else None
+
+        # Construct formatted message
+        filter_type = "condition" if condition else "file list" if file_list else "none"
+        log_prefix = format_log_prefix("user")
+
+        if len(index_filter) == 0:
+            message = f"{log_prefix} Filtering samples [{filter_type}]:\n    → No matching samples found. No filtering applied."
+        else:
+            message = f"{log_prefix} Filtering samples [{filter_type}]:\n"
+            message += f"    {action} sample data based on {filter_type}:\n"
+            if condition:
+                message += f"    → Condition: {condition}\n"
+            elif file_list:
+                message += f"    → Files requested: {len(file_list)}\n"
+                if missing:
+                    message += f"    → Missing samples ignored: {len(missing)}\n"
+
+            message += f"    → Samples kept: {len(pdata.prot.obs)}"
+            message += f"\n    → Proteins kept: {len(pdata.prot.var)}"
 
         # Logging and history updates
         print(message)
@@ -1473,17 +1548,34 @@ class pAnnData:
             pdata.pep = adata[eval(query)]
 
         n_samples = len(pdata.prot)
-        filter_desc = (
-            f"Filtered by exact match on: {'; '.join(map(str, values))}."
-            if exact_cases else
-            f"Filtered by loose match on: {', '.join(f'{k}: {v}' for k, v in values.items())}."
-        )
-        copy_note = " Copy of the filtered AnnData object returned." if return_copy else "Filtered and modified in-place."
-        history_msg = f"{filter_desc} Number of samples kept: {n_samples}.{copy_note}"
-        pdata._append_history(history_msg)  
-        print(history_msg)
+        log_prefix = format_log_prefix("user")
+        filter_mode = "exact match" if exact_cases else "class match"
+
         if n_samples == 0:
-            print("Warning: No samples matched the filter criteria.")
+            message = (
+                f"{log_prefix} Filtering samples [{filter_mode}]:\n"
+                f"    → No matching samples found. No filtering applied."
+            )
+        else:
+            message = (
+                f"{log_prefix} Filtering samples [{filter_mode}]:\n"
+                f"    {'Returning a copy of' if return_copy else 'Filtered and modified'} sample data based on {filter_mode}:\n"
+            )
+
+            if exact_cases:
+                message += "    → Cases:\n"
+                for i, case in enumerate(values, 1):
+                    message += f"       {i}. {case}\n"
+            else:
+                for k, v in values.items():
+                    valstr = v if isinstance(v, str) else ", ".join(map(str, v))
+                    message += f"    → {k}: {valstr}\n"
+
+            message += f"    → Samples kept: {n_samples}"
+            message += f"\n    → Proteins kept: {len(pdata.prot.var)}"
+
+        print(message)
+        pdata._append_history(message)
         pdata.update_summary(recompute=False)
 
         return pdata
@@ -1530,7 +1622,7 @@ class pAnnData:
         message = f"{action} samples based on query string. Samples kept: {len(index_filter)}."
         print(message)
         pdata._append_history(message)
-        pdata._update_summary(recompute=False)
+        pdata.update_summary(recompute=False)
 
         return pdata if return_copy else None
 
@@ -1745,7 +1837,7 @@ class pAnnData:
             self.pep = self.pep[:, self.pep.var_names.isin(kept_pep_names)]
 
         if debug:
-            print(f"✅ RS matrix filtered: {prot_mask.sum()} proteins, {pep_mask.sum()} peptides retained.")
+            print(f"{format_log_prefix('result')} RS matrix filtered: {prot_mask.sum()} proteins, {pep_mask.sum()} peptides retained.")
 
 
     def export(self, filename, format = 'csv'):
@@ -1907,7 +1999,8 @@ class pAnnData:
             f"{on}: Annotated features 'found in' class combinations {classes} using threshold {threshold}."
         )
         print(
-            f"Annotated features 'found in' class combinations {classes} using threshold {threshold}.")
+            f"{format_log_prefix('user')} Annotated features: 'found in' class combinations {classes} using threshold {threshold}."
+        )
 
 
 
@@ -1993,8 +2086,8 @@ class pAnnData:
 
 
         # --- Sample filtering ---
-        pdata_case1 = self.filter_sample_values(values=group1_dict, exact_cases=True, return_copy=True)
-        pdata_case2 = self.filter_sample_values(values=group2_dict, exact_cases=True, return_copy=True)
+        pdata_case1 = self._filter_sample_values(values=group1_dict, exact_cases=True, return_copy=True)
+        pdata_case2 = self._filter_sample_values(values=group2_dict, exact_cases=True, return_copy=True)
 
         def _label(d):
             if isinstance(d, dict):
@@ -2540,21 +2633,21 @@ class pAnnData:
                 resolved = utils.resolve_accessions(self.prot, reference_columns, gene_map=gene_to_acc)
                 reference_acc = [ref for ref in resolved if ref in self.prot.var.index]
                 reference_columns = [self.prot.var.index.get_loc(ref) for ref in reference_acc]
-                print(f"ℹ️ Normalizing using found reference columns: {reference_acc}")
+                print(f"{format_log_prefix('info')} Normalizing using found reference columns: {reference_acc}")
                 self._history.append(f"Used reference_feature normalization with resolved accessions: {resolved}")
             else:
                 reference_columns = [int(ref) for ref in reference_columns]
                 reference_acc = [self.prot.var.index[ref] for ref in reference_columns if ref < self.prot.shape[1]]
-                print(f"ℹ️ Normalizing using reference columns: {reference_acc}")
+                print(f"{format_log_prefix('info')} Normalizing using reference columns: {reference_acc}")
                 self._history.append(f"Used reference_feature normalization with resolved accessions: {reference_acc}")
 
             scaling_factors = np.nanmean(np.nanmax(data[:, reference_columns], axis=0) / (data[:, reference_columns]), axis=1)
 
             nan_rows = np.where(np.isnan(scaling_factors))[0]
             if nan_rows.size > 0:
-                print(f"⚠️ Rows {list(nan_rows)} have all missing reference values.")
-                print("   ➡️ Falling back to row median normalization for these rows.")
-                
+                print(f"{format_log_prefix('warn')} Rows {list(nan_rows)} have all missing reference values.")
+                print(f"{format_log_prefix('info')} Falling back to row median normalization for these rows.")
+
                 fallback = np.nanmedian(data[nan_rows, :], axis=1)
                 fallback[fallback == 0] = np.nan  # avoid division by 0
                 fallback_scale = np.nanmax(fallback) / fallback
@@ -2632,17 +2725,17 @@ class pAnnData:
                 if backup_layer and backup_layer not in self.prot.layers:
                     self.prot.layers[backup_layer] = self.prot.X.copy()
                     if verbose:
-                        print(f"ℹ️ Backed up .X to .layers['{backup_layer}']")
+                        print(f"{format_log_prefix('info')} Backed up .X to .layers['{backup_layer}']")
                 self.prot.X = X_clean
             if verbose:
-                print(f"✅ Cleaned {'layer ' + layer if layer else '.X'}: replaced {nan_count} NaNs with {set_to}.")
+                print(f"{format_log_prefix('result')} Cleaned {'layer ' + layer if layer else '.X'}: replaced {nan_count} NaNs with {set_to}.")
         else:
             if verbose:
-                print(f"✅ Returning cleaned matrix: {nan_count} NaNs replaced with {set_to}.")
+                print(f"{format_log_prefix('result')} Returning cleaned matrix: {nan_count} NaNs replaced with {set_to}.")
             return X_clean
 
 
-def import_data(source: str, **kwargs):
+def import_data(source_type: str, **kwargs):
     """
     Unified wrapper for importing data into a pAnnData object.
     For pd, arguments are prot_file, pep_file, obs_columns.
@@ -2659,29 +2752,31 @@ def import_data(source: str, **kwargs):
     Returns:
     - pAnnData object
     """
-    source = source.lower()
+    source_type = source_type.lower()
+    if source_type in ['diann', 'dia-nn']:
+        return _import_diann(**kwargs)
 
-    if source in ['diann', 'dia-nn']:
-        return import_diann(**kwargs)
+    elif source_type in ['pd', 'proteomediscoverer', 'proteome_discoverer', 'pd2.5', 'pd24']:
+        return _import_proteomeDiscoverer(**kwargs)
 
-    elif source in ['pd', 'proteomediscoverer', 'proteome_discoverer', 'pd2.5', 'pd24']:
-        return import_proteomeDiscoverer(**kwargs)
-
-    elif source in ['fragpipe', 'fp']:
+    elif source_type in ['fragpipe', 'fp']:
         raise NotImplementedError("FragPipe import is not yet implemented. Stay tuned!")
 
-    elif source in ['spectronaut', 'sn']:
+    elif source_type in ['spectronaut', 'sn']:
         raise NotImplementedError("Spectronaut import is not yet implemented. Stay tuned!")
 
     else:
-        raise ValueError(f"❌ Unsupported import source: '{source}'. "
+        raise ValueError(f"{format_log_prefix('error')} Unsupported import source: '{source_type}'. "
                          "Valid options: 'diann', 'proteomeDiscoverer', 'fragpipe', 'spectronaut'.")
 
 def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample']):
+    return import_data(source_type='pd', prot_file=prot_file, pep_file=pep_file, obs_columns=obs_columns)
+
+def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample']):
     if not prot_file and not pep_file:
-        raise ValueError("❌ At least one of prot_file or pep_file must be provided")
-    print("--------------------------\nStarting import...\n--------------------------")
-    
+        raise ValueError(f"{format_log_prefix('error')} At least one of prot_file or pep_file must be provided")
+    print("--------------------------\n🧭 [USER] Starting import...\n--------------------------")
+
     if prot_file:
         # -----------------------------
         print(f"Source file: {prot_file} / {pep_file}")
@@ -2690,7 +2785,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         if prot_file.endswith('.txt') or prot_file.endswith('.tsv'):
             prot_all = pd.read_csv(prot_file, sep='\t')
         elif prot_file.endswith('.xlsx'):
-            print("⚠️ The read_excel function is slower compared to reading .tsv or .txt files. For improved performance, consider converting your data to .tsv or .txt format.")
+            print("💡 Tip: The read_excel function is slower compared to reading .tsv or .txt files. For improved performance, consider converting your data to .tsv or .txt format.")
             prot_all = pd.read_excel(prot_file)
         # prot_X: sparse data matrix
         prot_X = sparse.csr_matrix(prot_all.filter(regex='Abundance: F', axis=1).values).transpose()
@@ -2707,7 +2802,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         prot_obs = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
         prot_obs = pd.DataFrame(prot_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).applymap(str.strip).astype('category')
         if (prot_obs == "n/a").all().any():
-            print("⚠️ Found columns with all 'n/a'. Dropping these columns.")
+            print(f"{format_log_prefix('warn')} Found columns with all 'n/a'. Dropping these columns.")
             prot_obs = prot_obs.loc[:, ~(prot_obs == "n/a").all()]
 
         print(f"Number of files: {len(prot_obs_names)}")
@@ -2721,7 +2816,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         if pep_file.endswith('.txt') or pep_file.endswith('.tsv'):
             pep_all = pd.read_csv(pep_file, sep='\t')
         elif pep_file.endswith('.xlsx'):
-            print("⚠️ The read_excel function is slower compared to reading .tsv or .txt files. For improved performance, consider converting your data to .tsv or .txt format.")
+            print("💡 Tip: The read_excel function is slower compared to reading .tsv or .txt files. For improved performance, consider converting your data to .tsv or .txt format.")
             pep_all = pd.read_excel(pep_file)
         # pep_X: sparse data matrix
         pep_X = sparse.csr_matrix(pep_all.filter(regex='Abundance: F', axis=1).values).transpose()
@@ -2737,7 +2832,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         pep_obs = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
         pep_obs = pd.DataFrame(pep_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).applymap(str.strip).astype('category')
         if (pep_obs == "n/a").all().any():
-            print("⚠️ Found columns with all 'n/a'. Dropping these columns.")
+            print(f"{format_log_prefix('warn')} Found columns with all 'n/a'. Dropping these columns.")
             pep_obs = pep_obs.loc[:, ~(pep_obs == "n/a").all()]
 
         print(f"Peptides: {len(pep_var)}")
@@ -2767,7 +2862,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         prot_var_set = set(prot_var_names)
 
         if mlb_classes_set != prot_var_set:
-            print("⚠️ Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.")
+            print(f"{format_log_prefix('warn')} Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.")
             print(f"Overlap: {len(mlb_classes_set & prot_var_set)}")
             print(f"Unique to peptide data: {mlb_classes_set - prot_var_set}")
             print(f"Unique to protein data: {prot_var_set - mlb_classes_set}")
@@ -2789,7 +2884,10 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
 
     return pdata
 
-def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Normalised', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes']):
+def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value: str = 'PG.MaxLFQ', pep_value: str = 'Precursor.Normalised', prot_var_columns: List[str] = ['Genes', 'Master.Protein'], pep_var_columns: List[str] = ['Genes', 'Protein.Group', 'Precursor.Charge', 'Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes']):
+    return import_data(source_type='diann', report_file=report_file, obs_columns=obs_columns, prot_value=prot_value, pep_value=pep_value, prot_var_columns=prot_var_columns, pep_var_columns=pep_var_columns)
+
+def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Normalised', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes']):
     if not report_file:
         raise ValueError("Importing from DIA-NN: report.tsv or report.parquet must be provided")
     print("--------------------------\nStarting import...\n--------------------------")
@@ -2811,7 +2909,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
             if 'PG.Quantity' not in report_all.columns:
                 raise ValueError("Reports generated with DIA-NN version >2.0 do not contain PG.Quantity values, please use PG.MaxLFQ .")
         else:
-            print("⚠️ Protein value specified is not PG.MaxLFQ, please check if correct.")
+            print(f"{format_log_prefix('info')} Protein value specified is not PG.MaxLFQ, please check if correct.")
     prot_X_pivot = report_all.pivot_table(index='Master.Protein', columns='Run', values=prot_value, aggfunc='first', sort=False)
     prot_X = sparse.csr_matrix(prot_X_pivot.values).T
     # prot_var_names: protein names
@@ -2828,7 +2926,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
 
     if missing_columns:
         warnings.warn(
-            f"Warning: The following columns are missing: {', '.join(missing_columns)}. "
+            f"{format_log_prefix('warn')} The following columns are missing: {', '.join(missing_columns)}. "
         )
 
     prot_var = report_all.loc[:, existing_prot_var_columns].drop_duplicates(subset='Master.Protein').drop(columns='Master.Protein')
@@ -2857,7 +2955,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
 
     if missing_columns:
         warnings.warn(
-            f"⚠️ The following columns are missing: {', '.join(missing_columns)}. "
+            f"{format_log_prefix('warn')} The following columns are missing: {', '.join(missing_columns)}. "
             "Consider running analysis in the newer version of DIA-NN (1.8.1). "
             "Peptide-protein mapping may differ."
         )
@@ -2886,7 +2984,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     prot_var_set = set(prot_var_names)
 
     if mlb_classes_set != prot_var_set:
-        print("⚠️ Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.")
+        print(f"{format_log_prefix('warn')} Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.")
         print(f"Overlap: {len(mlb_classes_set & prot_var_set)}")
         print(f"Unique to peptide data: {mlb_classes_set - prot_var_set}")
         print(f"Unique to protein data: {prot_var_set - mlb_classes_set}")
@@ -2976,13 +3074,13 @@ def _create_pAnnData_from_parts(
 
     print("")
     if not pdata.validate():
-        print("⚠️ Validation issues found. Use `pdata.validate()` to inspect.")
+        print(f"{format_log_prefix('warn')} Validation issues found. Use `pdata.validate()` to inspect.")
 
     if history_msg:
         pdata._append_history(history_msg)
 
     print("--------------------------")
-    print("✅ Import complete. Use `print(pdata)` to view the object.")
+    print(f"{format_log_prefix('result')} Import complete. Use `print(pdata)` to view the object.")
 
     return pdata
 
@@ -3007,52 +3105,30 @@ def suggest_obs_from_file(source, source_type=None, delimiter=None):
     from collections import Counter
 
     source = Path(source)
-    ext = source.suffix.lower()
+    filenames = _extract_filenames_from_source(source, source_type=source_type)
+    if not filenames:
+        raise ValueError("No sample filenames could be extracted from the provided source.")
 
-    # --- DIA-NN ---
-    if source_type == 'diann':
-        if ext == '.csv' or ext == '.tsv':
-            df = pd.read_csv(source, sep='\t' if ext == '.tsv' else ',',
-                             usecols=['Run'], low_memory=False)  # only load needed column
-        elif ext == '.parquet':
-            df = pd.read_parquet(source, columns=['Run'], engine='pyarrow')
+    # Pick the first filename for token analysis
+    fname = filenames[0]
+
+    # Infer delimiter if not provided
+    if delimiter is None:
+        all_delims = re.findall(r'[^A-Za-z0-9]', fname)
+        delimiter = Counter(all_delims).most_common(1)[0][0] if all_delims else '_'
+        print(f"Auto-detecting '{delimiter}' as delimiter.")
+
+    if source_type == 'pd':
+        # Custom comma-based parsing for PD
+        match = re.match(r'Abundance: (F\d+): (.+)', f"Abundance: F1: {fname}")
+        if match:
+            _, meta = match.groups()
+            raw_tokens = [t.strip() for t in meta.split(',') if t.strip().lower() != 'n/a']
+            fname = meta
+            tokens = raw_tokens
+            delimiter = ','
         else:
-            raise ValueError(f"Unsupported file type for DIA-NN: {ext}")
-
-        fname = df['Run'].dropna().iloc[0]
-
-        if delimiter is None:
-            all_delims = re.findall(r'[^A-Za-z0-9]', fname)
-            delimiter = Counter(all_delims).most_common(1)[0][0] if all_delims else '_'
-            print(f"Auto-detecting '{delimiter}' as delimiter.")
-
-    # --- Proteome Discoverer ---
-    elif source_type == 'pd':
-        if ext in ['.txt', '.tsv']:
-            df = pd.read_csv(source, sep='\t', nrows=0)
-        elif ext == '.xlsx':
-            print("⚠️ The read_excel function is slower. Consider converting to .tsv for better performance.")
-            df = pd.read_excel(source, nrows=0)
-        else:
-            raise ValueError(f"Unsupported file type for PD: {ext}")
-
-        abundance_cols = [col for col in df.columns if re.search(r'Abundance: F\d+:', col)]
-        if not abundance_cols:
-            raise ValueError("No 'Abundance: F#:' columns found in PD file.")
-
-        # Extract metadata from first sample
-        first_col = abundance_cols[0]
-        match = re.match(r'Abundance: (F\d+): (.+)', first_col)
-        if not match:
-            raise ValueError(f"Could not parse metadata from column name: {first_col}")
-
-        file_number, meta = match.groups()
-        tokens = [file_number] + [t.strip() for t in meta.split(',') if t.strip().lower() != 'n/a']
-        fname = '_'.join(tokens)
-        delimiter = '_'
-
-    else:
-        raise ValueError("source_type must be 'pd' or 'diann'")
+            raise ValueError(f"Could not parse metadata from PD filename: {fname}")
 
     # --- Classify tokens ---
     tokens = fname.split(delimiter)
@@ -3083,13 +3159,13 @@ def suggest_obs_from_file(source, source_type=None, delimiter=None):
     for tok, labels in token_label_map:
         print(f"  {' OR '.join(labels):<26}: {tok}")
     if multi_matched_tokens:
-        print(f"\n⚠️  Multiple matched token(s): {[t for _, t in multi_matched_tokens]}")
+        print(f"\nMultiple matched token(s): {[t for _, t in multi_matched_tokens]}")
     if unrecognized_tokens:
-        print(f"⚠️  Unrecognized token(s): {unrecognized_tokens}")
+        print(f"Unrecognized token(s): {unrecognized_tokens}")
     if multi_matched_tokens or unrecognized_tokens:
         print("Please manually label these.")
 
-    print("\nℹ️ Suggested obs:\nobs_columns = {}".format(obs_columns))
+    print(f"\n{format_log_prefix('info_only')} Suggested obs:\nobs_columns = {obs_columns}")
 
 def _classify_subtokens(token, used_labels=None, keyword_map=None):
     """
@@ -3165,3 +3241,143 @@ def is_date_like(sub):
             except ValueError:
                 continue
     return False
+
+def _extract_filenames_from_source(source: str, source_type: Literal["diann", "pd"]) -> List[str]:
+    """
+    Extract the list of sample filenames from a DIA-NN or Proteome Discoverer report file.
+
+    Parameters
+    ----------
+    source : str
+        Path to the input file.
+    source_type : {'diann', 'pd'}
+        Source tool type.
+
+    Returns
+    -------
+    filenames : list of str
+        List of sample names (Run names for DIA-NN or column-based for PD).
+    """
+    source = Path(source)
+    ext = source.suffix.lower()
+
+    # --- DIA-NN ---
+    if source_type == "diann":
+        if ext in [".csv", ".tsv"]:
+            df = pd.read_csv(source, sep="\t" if ext == ".tsv" else ",", usecols=["Run"], low_memory=False)
+        elif ext == ".parquet":
+            df = pd.read_parquet(source, columns=["Run"], engine="pyarrow")
+        else:
+            raise ValueError(f"Unsupported file type for DIA-NN: {ext}")
+
+        filenames = df["Run"].dropna().unique().tolist()
+
+    # --- Proteome Discoverer ---
+    elif source_type == "pd":
+        if ext in [".txt", ".tsv"]:
+            df = pd.read_csv(source, sep="\t", nrows=0)
+        elif ext == ".xlsx":
+            df = pd.read_excel(source, nrows=0)
+        else:
+            raise ValueError(f"Unsupported file type for PD: {ext}")
+
+        abundance_cols = [col for col in df.columns if re.search(r"Abundance: F\d+: ", col)]
+        if not abundance_cols:
+            raise ValueError("No 'Abundance: F#:' columns found in PD file.")
+
+        filenames = []
+        for col in abundance_cols:
+            match = re.match(r"Abundance: F\d+: (.+)", col)
+            if match:
+                filenames.append(match.group(1).strip())
+
+    else:
+        raise ValueError("source_type must be 'pd' or 'diann'")
+
+    return filenames
+
+def _analyze_filename_formats(filenames, delimiter="_", group_labels=None):
+    """
+    Analyze filename structures to detect format consistency.
+
+    Parameters
+    ----------
+    filenames : list of str
+        List of sample or file names.
+    delimiter : str
+        Delimiter used to split tokens.
+    group_labels : list of str, optional
+        If provided, maps group indices to labels like ['A', 'B'].
+
+    Returns
+    -------
+    format_info : dict
+        {
+            'uniform': bool,
+            'n_tokens': list of int,
+            'group_map': dict of filename → group label
+        }
+    """
+    group_counts = defaultdict(list)
+    for fname in filenames:
+        tokens = fname.split(delimiter)
+        group_counts[len(tokens)].append(fname)
+
+    token_lengths = list(group_counts.keys())
+    uniform = len(token_lengths) == 1
+
+    if group_labels is None:
+        group_labels = [f"{n}-tokens" for n in token_lengths]
+
+    group_map = {}
+    for label, n_tok in zip(group_labels, token_lengths):
+        for fname in group_counts[n_tok]:
+            group_map[fname] = label
+
+    return {
+        "uniform": uniform,
+        "n_tokens": token_lengths,
+        "group_map": group_map
+    }
+
+def resolve_obs_columns(filenames: List[str], source_type: str, delimiter: Optional[str] = None) -> Tuple[Optional[List[str]], pd.DataFrame]:
+    """
+    Resolve observation columns from sample filenames or metadata columns.
+
+    Parameters
+    ----------
+    filenames : list of str
+        List of filenames (from DIA-NN or PD).
+    source_type : str
+        Either 'diann' or 'pd'.
+    delimiter : str, optional
+        Delimiter to split filename tokens.
+
+    Returns
+    -------
+    suggested_obs : list of str or None
+        List of suggested observation column names, or None if fallback is used.
+    obs_df : pd.DataFrame
+        DataFrame representing initial .obs with either suggested columns or fallback.
+    """
+    if delimiter is None:
+        all_delims = re.findall(r'[^A-Za-z0-9]', ''.join(filenames))
+        delimiter = Counter(all_delims).most_common(1)[0][0] if all_delims else '_'
+
+    format_info = _analyze_filename_formats(filenames, delimiter=delimiter)
+    group_map = format_info["group_map"]
+
+    if format_info["uniform"]:
+        # Auto-suggest obs_columns
+        from scviz.pAnnData import suggest_obs_from_file  # assumed import path
+        suggest_obs_from_file(filenames[0], source_type=source_type, delimiter=delimiter)
+        print("\n⚠️  Please review the suggested `obs_columns` above.")
+        print("   → If acceptable, rerun `import_data(..., obs_columns=...)` with this list.\n")
+        return None, None
+    else:
+        print(f"{len(format_info['n_tokens'])} filename formats detected. Proceeding with fallback `.obs` structure... (File Number, Parsing Type)")
+        obs = pd.DataFrame({
+            "File": list(range(1, len(filenames) + 1)),
+            "parsingType": [group_map[f] for f in filenames]
+        })
+        return ["File", "parsingType"], obs

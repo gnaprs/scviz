@@ -51,15 +51,38 @@ from scviz import pAnnData
 # ----------------
 # BASIC UTILITY FUNCTIONS
 
-def log(msg, status="info"):
-    prefix = {
-        "info": "ℹ️",
-        "warn": "⚠️",
-        "ok": "✅",
-        "fail": "❌",
-        "check": "🔍"
-    }.get(status, "")
-    print(f"{prefix} {msg}")
+def format_log_prefix(level: str) -> str:
+    """
+    Return a standardized log prefix for a given message level.
+
+    Parameters
+    ----------
+    level : str
+        One of: "user", "info", "result", "warn", "error"
+
+    Returns
+    -------
+    str
+        A formatted log prefix with emoji and label, optionally indented.
+    """
+    level = level.lower()
+    if level == "user":
+        return "🧭 [USER]"
+    elif level == "search":
+        return "     🔍 [SEARCH]"
+    elif level == "info":
+        return "     ℹ️ [INFO]"
+    elif level == "result":
+        return "     ✅ [OK]"
+    elif level == "warn":
+        return "     ⚠️ [WARN]"
+    elif level == "error":
+        return "     ❌ [ERROR]"
+    elif level == "info_only":
+        return "ℹ️"
+    else:
+        raise ValueError(f"Unknown log level: {level}")
+
 
 # ----------------
 # DATA PROCESSING FUNCTIONS
