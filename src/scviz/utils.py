@@ -51,14 +51,16 @@ from scviz import pAnnData
 # ----------------
 # BASIC UTILITY FUNCTIONS
 
-def format_log_prefix(level: str) -> str:
+def format_log_prefix(level: str, indent=None) -> str:
     """
     Return a standardized log prefix for a given message level.
 
     Parameters
     ----------
     level : str
-        One of: "user", "info", "result", "warn", "error"
+        One of: "user", "info", "result", "warn", "error", "search", "info_only".
+    indent : int or None, optional
+        Indentation level (1 = no indent, 2 = 6 spaces, 3 = 12 spaces). Default uses built-in indent.
 
     Returns
     -------
@@ -66,22 +68,37 @@ def format_log_prefix(level: str) -> str:
         A formatted log prefix with emoji and label, optionally indented.
     """
     level = level.lower()
-    if level == "user":
-        return "🧭 [USER]"
-    elif level == "search":
-        return "     🔍 [SEARCH]"
-    elif level == "info":
-        return "     ℹ️ [INFO]"
-    elif level == "result":
-        return "     ✅ [OK]"
-    elif level == "warn":
-        return "     ⚠️ [WARN]"
-    elif level == "error":
-        return "     ❌ [ERROR]"
-    elif level == "info_only":
-        return "ℹ️"
-    else:
+    base_prefixes = {
+        "user": "🧭 [USER]",
+        "search": "🔍 [SEARCH]",
+        "info": "ℹ️ [INFO]",
+        "result": "✅ [OK]",
+        "warn": "⚠️ [WARN]",
+        "error": "❌ [ERROR]",
+        "info_only": "ℹ️",
+        "filter_conditions": "    🔸 "
+    }
+
+    if level not in base_prefixes:
         raise ValueError(f"Unknown log level: {level}")
+
+    prefix = base_prefixes[level]
+
+    if indent is None:
+        # Use default built-in spacing for all except info_only
+        if level in ["info", "search", "result", "warn", "error"]:
+            return "     " + prefix
+        elif level == "user":
+            return prefix  # No indent for user
+        elif level == "info_only":
+            return prefix  # No indent
+        elif level == "filter_conditions":
+            return prefix  # No indent for filter conditions
+    else:
+        # Explicit indent override
+        indent_spaces = {1: 0, 2: 6, 3: 12}
+        space = " " * indent_spaces.get(indent, 0)
+        return f"{space}{prefix}"
 
 
 # ----------------

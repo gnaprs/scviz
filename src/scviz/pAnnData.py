@@ -1450,7 +1450,7 @@ class pAnnData:
             message = f"{log_prefix} Filtering samples [{filter_type}]:\n"
             message += f"    {action} sample data based on {filter_type}:\n"
             if condition:
-                message += f"    → Condition: {condition}\n"
+                message += f"{format_log_prefix('filter_conditions')}Condition: {condition}\n"
             elif file_list:
                 message += f"    → Files requested: {len(file_list)}\n"
                 if missing:
@@ -1563,13 +1563,14 @@ class pAnnData:
             )
 
             if exact_cases:
-                message += "    → Cases:\n"
+                message += f"{format_log_prefix('filter_conditions')}Matching any of the following cases:\n"
                 for i, case in enumerate(values, 1):
                     message += f"       {i}. {case}\n"
             else:
+                message += "   🔸 Match samples where:\n"
                 for k, v in values.items():
                     valstr = v if isinstance(v, str) else ", ".join(map(str, v))
-                    message += f"    → {k}: {valstr}\n"
+                    message += f"      - {k}: {valstr}\n"
 
             message += f"    → Samples kept: {n_samples}"
             message += f"\n    → Proteins kept: {len(pdata.prot.var)}"
@@ -1596,7 +1597,7 @@ class pAnnData:
         pdata = self.copy() if return_copy else self
         action = "Returning a copy of" if return_copy else "Filtered and modified"
 
-        print("⚠️  Advanced query mode enabled — interpreting string as a pandas-style expression.")
+        print(f"{format_log_prefix('warn',indent=1)} Advanced query mode enabled — interpreting string as a pandas-style expression.")
 
         if source == 'obs':
             df = pdata.prot.obs
@@ -1619,9 +1620,22 @@ class pAnnData:
         if pdata.pep is not None:
             pdata.pep = pdata.pep[pdata.pep.obs_names.isin(index_filter)]
 
-        message = f"{action} samples based on query string. Samples kept: {len(index_filter)}."
+        n_samples = len(pdata.prot)
+        log_prefix = format_log_prefix("user")
+        action = "Returning a copy of" if return_copy else "Filtered and modified"
+
+        message = (
+            f"{log_prefix} Filtering samples [query]:\n"
+            f"    {action} sample data based on query string:\n"
+            f"   🔸 Query: {query_string}\n"
+            f"    → Samples kept: {n_samples}\n"
+            f"    → Proteins kept: {len(pdata.prot.var)}"
+        )
+
         print(message)
-        pdata._append_history(message)
+
+        history_message = f"{action} samples based on query string. Samples kept: {len(index_filter)}."
+        pdata._append_history(history_message)
         pdata.update_summary(recompute=False)
 
         return pdata if return_copy else None
@@ -2752,7 +2766,22 @@ def import_data(source_type: str, **kwargs):
     Returns:
     - pAnnData object
     """
+    print(f"{format_log_prefix('user')} Importing data of type [{source_type}]")
+
     source_type = source_type.lower()
+    obs_columns = kwargs.pop('obs_columns', None)
+    if obs_columns is None:
+        source = kwargs.get('report_file') if 'report_file' in kwargs else kwargs.get('prot_file')
+        format_info, fallback_columns, fallback_obs = resolve_obs_columns(source, source_type)
+
+        if format_info["uniform"]:
+            # Prompt user to rerun with obs_columns
+            return None
+        else:
+            # non-uniform format, use fallback obs
+            kwargs["obs_columns"] = fallback_columns
+            kwargs["obs"] = fallback_obs
+
     if source_type in ['diann', 'dia-nn']:
         return _import_diann(**kwargs)
 
@@ -2769,13 +2798,13 @@ def import_data(source_type: str, **kwargs):
         raise ValueError(f"{format_log_prefix('error')} Unsupported import source: '{source_type}'. "
                          "Valid options: 'diann', 'proteomeDiscoverer', 'fragpipe', 'spectronaut'.")
 
-def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample']):
+def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample'], **kwargs):
     return import_data(source_type='pd', prot_file=prot_file, pep_file=pep_file, obs_columns=obs_columns)
 
-def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample']):
+def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample'], **kwargs):
     if not prot_file and not pep_file:
         raise ValueError(f"{format_log_prefix('error')} At least one of prot_file or pep_file must be provided")
-    print("--------------------------\n🧭 [USER] Starting import...\n--------------------------")
+    print("--------------------------\n🧭 [USER] Starting import [Proteome Discoverer]\n--------------------------")
 
     if prot_file:
         # -----------------------------
@@ -2884,13 +2913,13 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
 
     return pdata
 
-def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value: str = 'PG.MaxLFQ', pep_value: str = 'Precursor.Normalised', prot_var_columns: List[str] = ['Genes', 'Master.Protein'], pep_var_columns: List[str] = ['Genes', 'Protein.Group', 'Precursor.Charge', 'Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes']):
-    return import_data(source_type='diann', report_file=report_file, obs_columns=obs_columns, prot_value=prot_value, pep_value=pep_value, prot_var_columns=prot_var_columns, pep_var_columns=pep_var_columns)
+def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value: str = 'PG.MaxLFQ', pep_value: str = 'Precursor.Normalised', prot_var_columns: List[str] = ['Genes', 'Master.Protein'], pep_var_columns: List[str] = ['Genes', 'Protein.Group', 'Precursor.Charge', 'Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes'], **kwargs):
+    return import_data(source_type='diann', report_file=report_file, obs_columns=obs_columns, prot_value=prot_value, pep_value=pep_value, prot_var_columns=prot_var_columns, pep_var_columns=pep_var_columns, **kwargs)
 
-def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Normalised', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes']):
+def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, obs: Optional[pd.DataFrame] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Normalised', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes'], **kwargs):
     if not report_file:
         raise ValueError("Importing from DIA-NN: report.tsv or report.parquet must be provided")
-    print("--------------------------\nStarting import...\n--------------------------")
+    print("--------------------------\n🧭 [USER] Starting import [DIA-NN]\n--------------------------")
 
     print(f"Source file: {report_file}")
     # if csv, then use pd.read_csv, if parquet then use pd.read_parquet('example_pa.parquet', engine='pyarrow')
@@ -2931,9 +2960,9 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
 
     prot_var = report_all.loc[:, existing_prot_var_columns].drop_duplicates(subset='Master.Protein').drop(columns='Master.Protein')
     # prot_obs: sample typing from the column name
-    if obs_columns is None:
-        num_files = len(prot_X_pivot.columns)
-        prot_obs = pd.DataFrame({'File': range(1, num_files + 1)})
+    if obs is not None:
+        prot_obs = obs
+        # obs_columns = obs_columns
     else:
         prot_obs = pd.DataFrame(prot_X_pivot.columns.values, columns=['Run'])['Run'].str.split('_', expand=True).rename(columns=dict(enumerate(obs_columns)))
     
@@ -3084,7 +3113,7 @@ def _create_pAnnData_from_parts(
 
     return pdata
 
-def suggest_obs_from_file(source, source_type=None, delimiter=None):
+def suggest_obs_columns(source=None, source_type=None, filenames=None, delimiter=None):
     """
     Extract and suggest sample-level metadata fields from filenames in a Proteome Discoverer or DIA-NN report.
 
@@ -3095,6 +3124,7 @@ def suggest_obs_from_file(source, source_type=None, delimiter=None):
     Parameters:
     - source (str or Path): Path to the input file.
     - source_type (str, optional): Type of the source file ('diann', 'pd', etc.). Will be used to determine the file format.
+    - filenames (list of str, optional): Sample filenames or run names. If provided, bypasses file reading.
     - delimiter (str, optional): Delimiter used in the file. If not provided, will be inferred from the run names.
 
     Returns:
@@ -3103,9 +3133,14 @@ def suggest_obs_from_file(source, source_type=None, delimiter=None):
     from pathlib import Path
     import csv
     from collections import Counter
+    from scviz import obs_utils
 
-    source = Path(source)
-    filenames = _extract_filenames_from_source(source, source_type=source_type)
+    if filenames is None:
+        if source is None or source_type is None:
+            raise ValueError("If `filenames` is not provided, both `source` and `source_type` must be specified.")
+        source = Path(source)
+        filenames = obs_utils.get_filenames(source, source_type=source_type)
+    
     if not filenames:
         raise ValueError("No sample filenames could be extracted from the provided source.")
 
@@ -3139,7 +3174,7 @@ def suggest_obs_from_file(source, source_type=None, delimiter=None):
     unrecognized_tokens = []
 
     for tok in tokens:
-        labels = _classify_subtokens(tok)
+        labels = obs_utils.classify_subtokens(tok)
         label = labels[0]
         if label == "unknown??":
             obs_columns.append(f"<{tok}?>")
@@ -3167,180 +3202,9 @@ def suggest_obs_from_file(source, source_type=None, delimiter=None):
 
     print(f"\n{format_log_prefix('info_only')} Suggested obs:\nobs_columns = {obs_columns}")
 
-def _classify_subtokens(token, used_labels=None, keyword_map=None):
-    """
-    Classify a token into one or more metadata categories based on keyword matching and pattern rules.
+    return obs_columns
 
-    This function parses a token into subtokens (e.g., by splitting on digit/letter boundaries),
-    and attempts to classify each subtoken using:
-    - Regex patterns (e.g., for dates and well positions)
-    - Fuzzy substring matching against a user-defined keyword map
-
-    Parameters
-    ----------
-    token : str
-        The input string token to classify (e.g., "Aur60minDIA").
-    used_labels : set, optional
-        A set of already-assigned labels to avoid duplicating suggestions. Currently unused but reserved for future logic.
-    keyword_map : dict, optional
-        A dictionary where keys are metadata categories (e.g. 'gradient') and values are lists of substrings to match.
-        If None, a default keyword map will be used.
-
-    Returns
-    -------
-    labels : list of str
-        A list of matched metadata labels for the token (e.g., ['gradient', 'acquisition']).
-        If no match is found, returns ['unknown??'].
-    """
-
-    default_map = {
-        "gradient": ["min", "hr", "gradient", "short", "long", "fast", "slow"],
-        "amount": ["cell", "cells", "sc", "bulk", "ng", "ug", "pg", "fmol"],
-        "condition": ["ctrl", "stim", "wt", "ko", "kd", "scramble", "si", "drug"],
-        "sample_type": ["embryo", "brain", "liver", "cellline", "mix", "qc"],
-        "instrument": ["tims", "tof", "fusion", "exploris","astral","stellar","eclipse","OA","OE480","OE"],
-        "acquisition": ["dia", "prm", "dda", "srm"],
-        "column": ['TS25','TS15','TS8','Aur']
-    }
-
-    keyword_map = keyword_map or default_map
-    labels = set()
-
-    # Split into subtokens (case preserved), in case one token has multiple labels
-    subtokens = re.findall(r'[A-Za-z]+|\d+min|\d+(?:ng|ug|pg|fmol)|\d{6,8}', token)
-
-    for sub in subtokens:
-        # Check unmodified for regex-based rules
-        if is_date_like(sub):
-            labels.add("date")
-        elif re.match(r"[A-Ha-h]\d{1,2}$", sub):
-            labels.add("well_position")
-        else:
-            # Lowercase for keyword matches
-            sub_lower = sub.lower()
-            for label, keywords in keyword_map.items():
-                if any(kw in sub_lower for kw in keywords):
-                    labels.add(label)
-
-    if not labels:
-        labels.add("unknown??")
-    return list(labels)
-
-def is_date_like(sub):
-    patterns = [
-        ("%Y%m%d", r"20\d{6}$"),           # 20240913
-        ("%y%m%d", r"\d{6}$"),             # 250913
-        ("%d%b", r"\d{1,2}[A-Za-z]{3}$"),  # 13Aug
-        ("%b%d", r"[A-Za-z]{3}\d{1,2}$"),  # Aug13
-    ]
-    for fmt, pat in patterns:
-        if re.fullmatch(pat, sub):
-            try:
-                datetime.datetime.strptime(sub, fmt)
-                return True
-            except ValueError:
-                continue
-    return False
-
-def _extract_filenames_from_source(source: str, source_type: Literal["diann", "pd"]) -> List[str]:
-    """
-    Extract the list of sample filenames from a DIA-NN or Proteome Discoverer report file.
-
-    Parameters
-    ----------
-    source : str
-        Path to the input file.
-    source_type : {'diann', 'pd'}
-        Source tool type.
-
-    Returns
-    -------
-    filenames : list of str
-        List of sample names (Run names for DIA-NN or column-based for PD).
-    """
-    source = Path(source)
-    ext = source.suffix.lower()
-
-    # --- DIA-NN ---
-    if source_type == "diann":
-        if ext in [".csv", ".tsv"]:
-            df = pd.read_csv(source, sep="\t" if ext == ".tsv" else ",", usecols=["Run"], low_memory=False)
-        elif ext == ".parquet":
-            df = pd.read_parquet(source, columns=["Run"], engine="pyarrow")
-        else:
-            raise ValueError(f"Unsupported file type for DIA-NN: {ext}")
-
-        filenames = df["Run"].dropna().unique().tolist()
-
-    # --- Proteome Discoverer ---
-    elif source_type == "pd":
-        if ext in [".txt", ".tsv"]:
-            df = pd.read_csv(source, sep="\t", nrows=0)
-        elif ext == ".xlsx":
-            df = pd.read_excel(source, nrows=0)
-        else:
-            raise ValueError(f"Unsupported file type for PD: {ext}")
-
-        abundance_cols = [col for col in df.columns if re.search(r"Abundance: F\d+: ", col)]
-        if not abundance_cols:
-            raise ValueError("No 'Abundance: F#:' columns found in PD file.")
-
-        filenames = []
-        for col in abundance_cols:
-            match = re.match(r"Abundance: F\d+: (.+)", col)
-            if match:
-                filenames.append(match.group(1).strip())
-
-    else:
-        raise ValueError("source_type must be 'pd' or 'diann'")
-
-    return filenames
-
-def _analyze_filename_formats(filenames, delimiter="_", group_labels=None):
-    """
-    Analyze filename structures to detect format consistency.
-
-    Parameters
-    ----------
-    filenames : list of str
-        List of sample or file names.
-    delimiter : str
-        Delimiter used to split tokens.
-    group_labels : list of str, optional
-        If provided, maps group indices to labels like ['A', 'B'].
-
-    Returns
-    -------
-    format_info : dict
-        {
-            'uniform': bool,
-            'n_tokens': list of int,
-            'group_map': dict of filename → group label
-        }
-    """
-    group_counts = defaultdict(list)
-    for fname in filenames:
-        tokens = fname.split(delimiter)
-        group_counts[len(tokens)].append(fname)
-
-    token_lengths = list(group_counts.keys())
-    uniform = len(token_lengths) == 1
-
-    if group_labels is None:
-        group_labels = [f"{n}-tokens" for n in token_lengths]
-
-    group_map = {}
-    for label, n_tok in zip(group_labels, token_lengths):
-        for fname in group_counts[n_tok]:
-            group_map[fname] = label
-
-    return {
-        "uniform": uniform,
-        "n_tokens": token_lengths,
-        "group_map": group_map
-    }
-
-def resolve_obs_columns(filenames: List[str], source_type: str, delimiter: Optional[str] = None) -> Tuple[Optional[List[str]], pd.DataFrame]:
+def resolve_obs_columns(source: str, source_type: str, delimiter: Optional[str] = None) -> Tuple[Dict[str, Any], Optional[List[str]], Optional[pd.DataFrame]]:
     """
     Resolve observation columns from sample filenames or metadata columns.
 
@@ -3360,24 +3224,34 @@ def resolve_obs_columns(filenames: List[str], source_type: str, delimiter: Optio
     obs_df : pd.DataFrame
         DataFrame representing initial .obs with either suggested columns or fallback.
     """
-    if delimiter is None:
-        all_delims = re.findall(r'[^A-Za-z0-9]', ''.join(filenames))
-        delimiter = Counter(all_delims).most_common(1)[0][0] if all_delims else '_'
+    from scviz import obs_utils
+    
+    filenames = obs_utils.get_filenames(source, source_type=source_type)
+    if not filenames:
+        raise ValueError(f"{format_log_prefix('error')} No sample filenames could be extracted from the provided source: {source}.")
 
-    format_info = _analyze_filename_formats(filenames, delimiter=delimiter)
-    group_map = format_info["group_map"]
+    if delimiter is None:
+        first_fname = filenames[0]
+        all_delims = re.findall(r'[^A-Za-z0-9]', first_fname)
+        delimiter = Counter(all_delims).most_common(1)[0][0] if all_delims else '_'
+        print(f"      Auto-detecting '{delimiter}' as delimiter from first filename.")
+
+    format_info = obs_utils.analyze_filename_formats(filenames, delimiter=delimiter)
 
     if format_info["uniform"]:
-        # Auto-suggest obs_columns
-        from scviz.pAnnData import suggest_obs_from_file  # assumed import path
-        suggest_obs_from_file(filenames[0], source_type=source_type, delimiter=delimiter)
-        print("\n⚠️  Please review the suggested `obs_columns` above.")
+        # Uniform format — suggest obs_columns using classification
+        print(f"{format_log_prefix('info_only')} Filenames are uniform. Using `suggest_obs_columns()` to recommend obs_columns...")
+        obs_columns = suggest_obs_columns(filenames=filenames, source_type=source_type, delimiter=delimiter)
+        print(f"{format_log_prefix('warn')} Please review the suggested `obs_columns` above.")
         print("   → If acceptable, rerun `import_data(..., obs_columns=...)` with this list.\n")
-        return None, None
+        return format_info, obs_columns, None
     else:
-        print(f"{len(format_info['n_tokens'])} filename formats detected. Proceeding with fallback `.obs` structure... (File Number, Parsing Type)")
+        # Non-uniform format — return fallback DataFrame
+        print(f"{format_log_prefix('warn',indent=1)} {len(format_info['n_tokens'])} different filename formats detected. Proceeding with fallback `.obs` structure... (File Number, Parsing Type)")
+        
         obs = pd.DataFrame({
             "File": list(range(1, len(filenames) + 1)),
-            "parsingType": [group_map[f] for f in filenames]
+            "parsingType": [format_info['group_map'][fname] for fname in filenames]
         })
-        return ["File", "parsingType"], obs
+        obs_columns = ["File", "parsingType"]
+        return format_info, obs_columns, obs

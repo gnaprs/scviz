@@ -12,7 +12,10 @@
 8. concating multiple datasets? - see ad.concat, maybe use adata.obs_names_make_unique()
 9. consider QC metrics beyond what we already have?
 10. add gene to uniprot accession conversion function
-11. for update_summary, also print out what new columns were added (or dropped?)
+11. allow users to input "obs" for their own metadata
+
+# ENHANCEMENTS (not as important)
+1. when updating .summary/obs, move prot/pep details to the right (prioritize metadata)
 
 # TESTS
 1.  
