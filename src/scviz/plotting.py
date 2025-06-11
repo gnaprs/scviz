@@ -738,7 +738,7 @@ def plot_pca_scree(ax, pca):
 
     Parameters:
     ax (matplotlib.axes.Axes): The axes on which to plot the scree plot.
-    pca (sklearn.decomposition.PCA): The fitted PCA model.
+    pca (sklearn.decomposition.PCA or dict): The fitted PCA model, or a dict from .uns with keys: 'variance_ratio'.
 
     Returns:
     ax (matplotlib.axes.Axes): The axes with the plotted scree plot.
@@ -753,10 +753,20 @@ def plot_pca_scree(ax, pca):
     >>> fig, ax = plt.subplots(1,1)
     >>> ax, pca = scplt.plot_pca(ax, data, cases, cmap='viridis', s=20, alpha=.8, plot_pc=[1,2])
     >>> ax = scplt.plot_pca_scree(ax, pca)
+    >>> scplt.plot_pca_scree(ax, data.prot.uns['pca'])
     """
+    if isinstance(pca, dict):
+        variance_ratio = np.array(pca["variance_ratio"])
+        n_components = len(variance_ratio)
+    else:
+        variance_ratio = pca.explained_variance_ratio_
+        n_components = pca.n_components_
 
-    PC_values = np.arange(pca.n_components_) + 1
-    ax.plot(PC_values, pca.explained_variance_ratio_, 'o-', linewidth=2, color='blue')
+    PC_values = np.arange(1, n_components + 1)
+    cumulative = np.cumsum(variance_ratio)
+
+    ax.plot(PC_values, variance_ratio, 'o-', linewidth=2, label='Explained Variance', color='blue')
+    ax.plot(PC_values, cumulative, 'o--', linewidth=2, label='Cumulative Variance', color='gray')
     ax.set_title('Scree Plot')
     ax.set_xlabel('Principal Component')
     ax.set_ylabel('Variance Explained')

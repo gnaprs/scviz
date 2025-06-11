@@ -220,7 +220,7 @@ class pAnnData:
             nnz = self._rs.nnz
             total = self._rs.shape[0] * self._rs.shape[1]
             sparsity = 100 * (1 - nnz / total)
-            print(f"✅ RS matrix set: {self._rs.shape} (proteins × peptides), sparsity: {sparsity:.2f}%")
+            print(f"{format_log_prefix('result',indent=1)} RS matrix set: {self._rs.shape} (proteins × peptides), sparsity: {sparsity:.2f}%")
 
     def __repr__(self):
         if self.prot is not None:
@@ -410,7 +410,7 @@ class pAnnData:
 
             if verbose:
                 reason = " (marked stale)" if not sync_back else ""
-                print(f"ℹ️ [INFO] Updating summary [sync_back]: pushed edits from `.summary` to `.obs`{reason}.{updated_str}")
+                print(f"{format_log_prefix('update',indent=1)} Updating summary [sync_back]: pushed edits from `.summary` to `.obs`{reason}.\n{format_log_prefix('blank',indent=2)}{updated_str}")
 
             self._summary_is_stale = False  # reset before recompute
 
@@ -424,9 +424,9 @@ class pAnnData:
         # 3. Final messaging
         if verbose and not (sync_back or self._summary_is_stale):
             if recompute:
-                print("ℹ️ [INFO] Updating summary [recompute]: Recomputed metrics and refreshed `.summary` from `.obs`.")
+                print(f"{format_log_prefix('update',indent=1)} Updating summary [recompute]: Recomputed metrics and refreshed `.summary` from `.obs`.")
             else:
-                print("ℹ️ [INFO] Updating summary [refresh]: Refreshed `.summary` view (no recompute).")
+                print(f"{format_log_prefix('update',indent=1)} Updating summary [refresh]: Refreshed `.summary` view (no recompute).")
 
         # 4. Final cleanup
         self._summary_is_stale = False
@@ -720,9 +720,9 @@ class pAnnData:
                 nnz = self.rs.nnz if sparse.issparse(self.rs) else np.count_nonzero(self.rs)
                 total = self.rs.shape[0] * self.rs.shape[1]
                 sparsity = 100 * (1 - nnz / total)
-                print(f"ℹ️ [INFO] RS matrix: {rs_shape} (proteins × peptides), sparsity: {sparsity:.2f}%")
+                print(f"{format_log_prefix('info_only', indent=1)} RS matrix: {rs_shape} (proteins × peptides), sparsity: {sparsity:.2f}%")
 
-                rs  = self.rs
+                rs = self.rs
 
                 row_links = rs.getnnz(axis=1)  # peptides per protein
                 col_links = rs.getnnz(axis=0)  # proteins per peptide
@@ -875,13 +875,13 @@ class pAnnData:
                 if layer not in self.prot.layers:
                     raise ValueError(f"Layer {layer} not found in protein data.")
                 self.prot.X = self.prot.layers[layer]
-                print(f"ℹ️ Set {on} data to layer {layer}.")
+                print(f"{format_log_prefix('info_only', indent=2)} Set {on} data to layer {layer}.")
 
             else:
                 if layer not in self.pep.layers:
                     raise ValueError(f"Layer {layer} not found in peptide data.")
                 self.pep.X = self.pep.layers[layer]
-                print(f"ℹ️ Set {on} data to layer {layer}.")
+                print(f"{format_log_prefix('info_only', indent=2)} Set {on} data to layer {layer}.")
 
             self._history.append(f"{on}: Set X to layer {layer}.")
 
@@ -2072,11 +2072,11 @@ class pAnnData:
             A DataFrame containing log2 fold change, p-values, and significance labels for each protein.
 
         Examples:
-        # ✅ Legacy-style usage
+        # Legacy-style usage
         >>> pdata.de(class_type=['cellline', 'treatment'],
         ...          values=[['HCT116', 'DMSO'], ['HCT116', 'DrugX']])
 
-        # ✅ Dictionary-style usage (recommended)
+        # Dictionary-style usage (recommended)
         >>> pdata.de(values=[
         ...     {'cellline': 'HCT116', 'treatment': 'DMSO'},
         ...     {'cellline': 'HCT116', 'treatment': 'DrugX'}
@@ -2214,7 +2214,7 @@ class pAnnData:
         self._stats[comparison_string] = df_stats
         self._append_history(f"prot: DE for {class_type} {values} using {method} and fold_change_mode='{fold_change_mode}'. Stored in .stats['{comparison_string}'].")
 
-        print(f"✅ Differential expression complete: {comparison_string} | Method: {method}, FC: {fold_change_mode}")
+        print(f"{format_log_prefix('result')} Differential expression complete: {comparison_string} | Method: {method}, FC: {fold_change_mode}")
         return df_stats
 
     # TODO: Need to figure out how to make this interface with plot functions, probably do reordering by each class_value within the loop?
@@ -2292,7 +2292,7 @@ class pAnnData:
                 imputer = SimpleImputer(strategy=method, keep_empty_features=True)
                 impute_data = imputer.fit_transform(impute_data)
 
-            print(f"ℹ️ Global imputation using '{method}'. Layer saved as '{layer_name}'.")
+            print(f"{format_log_prefix('user')} Global imputation using '{method}'. Layer saved as '{layer_name}'.")
 
         else:
             # Group-wise imputation
@@ -2324,7 +2324,7 @@ class pAnnData:
         summary_lines = []
         if classes is None:
             num_imputed = np.sum(np.isnan(original_data) & ~np.isnan(impute_data))
-            summary_lines.append(f"✅ {num_imputed} values imputed.")
+            summary_lines.append(f"{format_log_prefix('result_only', indent=2)} {num_imputed} values imputed.")
         else:
             sample_names = utils.get_samplenames(adata, classes)
             sample_names = np.array(sample_names)
@@ -2339,7 +2339,7 @@ class pAnnData:
                 counts_by_group[group] = np.sum(mask)
 
             total = sum(counts_by_group.values())
-            summary_lines.append(f"✅ {total} values imputed total.")
+            summary_lines.append(f"{format_log_prefix('result_only', indent=2)} {total} values imputed total.")
             for group, count in counts_by_group.items():
                 summary_lines.append(f"   - {group}: {count} values")
 
@@ -2370,15 +2370,21 @@ class pAnnData:
         elif layer in adata.layers.keys():
             self.set_X(layer = layer, on = on)
 
+        log_prefix = format_log_prefix("user")
+        print(f"{log_prefix} Computing neighbors [{on}] using layer: {layer}")
+
         if 'pca' not in adata.uns:
-            print("PCA not found in AnnData object. Running PCA with default settings.")
+            print(f"{format_log_prefix('info_only',indent=2)} PCA not found in AnnData object. Running PCA with default settings.")
             self.pca(on = on, layer = layer)
 
         sc.pp.neighbors(adata, **kwargs)
 
         self._append_history(f'{on}: Neighbors fitted on {layer}, stored in obs["distances"] and obs["connectivities"]')
-        print(f'{on}: Neighbors fitted on {layer} and and stored in obs["distances"] and obs["connectivities"]')
-
+        print(f"{format_log_prefix('result_only',indent=2)} Neighbors computed on {layer}. Results stored in:")
+        print(f"       • obs['distances'] (pairwise distances)")
+        print(f"       • obs['connectivities'] (connectivity graph)")
+        print(f"       • uns['neighbors'] (neighbor graph metadata)")
+ 
     def leiden(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.tl.leiden with default resolution of 0.25
         if not self._check_data(on):
@@ -2389,8 +2395,11 @@ class pAnnData:
         elif on == 'peptide':
             adata = self.pep
 
+        log_prefix = format_log_prefix("user")
+        print(f"{log_prefix} Performing Leiden clustering [{on}] using layer: {layer}")
+
         if 'neighbors' not in adata.uns:
-            print("Neighbors not found in AnnData object. Running neighbors with default settings.")
+            print(f"{format_log_prefix('info_only', indent=2)} Neighbors not found in AnnData object. Running neighbors with default settings.")
             self.neighbor(on = on, layer = layer)
 
         if layer == "X":
@@ -2402,7 +2411,8 @@ class pAnnData:
         sc.tl.leiden(adata, **kwargs)
 
         self._append_history(f'{on}: Leiden clustering fitted on {layer}, stored in obs["leiden"]')
-        print(f'{on}: Leiden clustering fitted on {layer} and and stored in obs["leiden"]')
+        print(f"{format_log_prefix('result_only', indent=2)} Leiden clustering complete. Results stored in:")
+        print(f"       • obs['leiden'] (cluster labels)")
 
     def umap(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.tl.umap
@@ -2414,9 +2424,12 @@ class pAnnData:
         elif on == 'peptide':
             adata = self.pep
 
+        log_prefix = format_log_prefix("user")
+        print(f"{log_prefix} Computing UMAP [{on}] using layer: {layer}")
+
         # check if neighbor has been run before, look for distances and connectivities in obsp
         if 'neighbors' not in adata.uns:
-            print("Neighbors not found in AnnData object. Running neighbors with default settings.")
+            print(f"{format_log_prefix('info_only', indent=2)} Neighbors not found in AnnData object. Running neighbors with default settings.")
             self.neighbor(on = on, layer = layer)
 
         if layer == "X":
@@ -2428,7 +2441,9 @@ class pAnnData:
         sc.tl.umap(adata, **kwargs)
 
         self._append_history(f'{on}: UMAP fitted on {layer}, stored in obsm["X_umap"] and uns["umap"]')
-        print(f'{on}: UMAP fitted on {layer} and and stored in layers["X_umap"] and uns["umap"]')
+        print(f"{format_log_prefix('result_only', indent=2)} UMAP complete. Results stored in:")
+        print(f"       • obsm['X_umap'] (UMAP coordinates)")
+        print(f"       • uns['umap'] (UMAP settings)")
 
     def pca(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.tl.pca
@@ -2446,14 +2461,15 @@ class pAnnData:
         elif layer in adata.layers.keys():
             X = adata.layers[layer].toarray()
 
-        print(f'BEFORE: Number of samples|Number of proteins: {X.shape}')
+        log_prefix = format_log_prefix("user")
+        print(f"{log_prefix} Performing PCA [{on}] using layer: {layer}, removing NaN features.")
+        print(f"   🔸 BEFORE (samples × proteins): {X.shape}")
         Xnorm = (X - X.mean(axis=0)) / X.std(axis=0)
         nan_cols = np.isnan(Xnorm).any(axis=0)
         Xnorm = Xnorm[:, ~nan_cols]
-        print(f'AFTER: Number of samples|Number of proteins: {Xnorm.shape}')
+        print(f"   🔸 AFTER  (samples × proteins): {Xnorm.shape}")
 
         pca_data = sc.tl.pca(Xnorm, return_info=True, **kwargs)
-        
         adata.obsm['X_pca'] = pca_data[0]
         PCs = np.zeros((pca_data[1].shape[0], nan_cols.shape[0]))
         
@@ -2466,8 +2482,14 @@ class pAnnData:
 
         adata.uns['pca'] = {'PCs': PCs, 'variance_ratio': pca_data[2], 'variance': pca_data[3]}
         
+        subpdata = "prot" if on == 'protein' else "pep"
+
         self._append_history(f'{on}: PCA fitted on {layer}, stored in obsm["X_pca"] and varm["PCs"]')
-        print(f'{on}: PCA fitted on {layer} and and stored in layers["X_pca"] and uns["pca"]')
+        print(f"{format_log_prefix('result_only',indent=2)} PCA complete, fitted on {layer}. Results stored in:")
+        print(f"       • .{subpdata}.obsm['X_pca']")
+        print(f"       • .{subpdata}.uns['pca'] (includes PCs, variance, variance ratio)")
+        var_pc1, var_pc2 = pca_data[2][:2]
+        print(f"       • Variance explained by PC1/PC2: {var_pc1*100:.2f}% , {var_pc2*100:.2f}%") 
 
     def nanmissingvalues(self, on = 'protein', limit = 0.5):
         # sets columns (proteins and peptides) with > limit (default 0.5) missing values to NaN across all samples
@@ -2541,7 +2563,7 @@ class pAnnData:
 
         if classes is None:
             normalize_data = self._normalize_helper(normalize_data, method, use_nonmissing=use_nonmissing, **kwargs)
-            msg=f"ℹ️ Global normalization using '{method}'"
+            msg=f"{format_log_prefix('user')} Global normalization using '{method}'"
         else:
             # Group-wise normalization
             sample_names = utils.get_samplenames(adata, classes)
@@ -2555,7 +2577,7 @@ class pAnnData:
                 normalized_group = self._normalize_helper(group_data, method=method, use_nonmissing=use_nonmissing, **kwargs)
                 normalize_data[idx, :] = normalized_group
 
-            msg=f"ℹ️ Group-wise normalization using '{method}' on class(es): {classes}"
+            msg=f"{format_log_prefix('info_only')} Group-wise normalization using '{method}' on class(es): {classes}"
 
         if use_nonmissing and method in {'sum', 'mean', 'median', 'max'}:
             msg += f" (using only fully observed columns)"
@@ -2566,13 +2588,13 @@ class pAnnData:
         # summary printout
         summary_lines = []
         if classes is None:
-            summary_lines.append(f"✅ Normalized all {normalize_data.shape[0]} samples.")
+            summary_lines.append(f"{format_log_prefix('result_only', indent=2)} Normalized all {normalize_data.shape[0]} samples.")
         else:
             for group in unique_groups:
                 count = np.sum(sample_names == group)
                 summary_lines.append(f"   - {group}: {count} samples normalized")
-            summary_lines.insert(0, f"✅ Normalized {normalize_data.shape[0]} samples total.")
-        print("\n".join(summary_lines))            
+            summary_lines.insert(0, f"{format_log_prefix('result_only', indent=2)} Normalized {normalize_data.shape[0]} samples total.")
+        print("\n".join(summary_lines))
 
         adata.layers[layer_name] = sparse.csr_matrix(normalize_data) if was_sparse else normalize_data
 
@@ -2804,7 +2826,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
 def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample'], **kwargs):
     if not prot_file and not pep_file:
         raise ValueError(f"{format_log_prefix('error')} At least one of prot_file or pep_file must be provided")
-    print("--------------------------\n🧭 [USER] Starting import [Proteome Discoverer]\n--------------------------")
+    print("--------------------------\nStarting import [Proteome Discoverer]\n--------------------------")
 
     if prot_file:
         # -----------------------------
@@ -2919,7 +2941,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
 def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, obs: Optional[pd.DataFrame] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Normalised', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes'], **kwargs):
     if not report_file:
         raise ValueError("Importing from DIA-NN: report.tsv or report.parquet must be provided")
-    print("--------------------------\n🧭 [USER] Starting import [DIA-NN]\n--------------------------")
+    print("--------------------------\nStarting import [DIA-NN]\n--------------------------")
 
     print(f"Source file: {report_file}")
     # if csv, then use pd.read_csv, if parquet then use pd.read_parquet('example_pa.parquet', engine='pyarrow')
@@ -3247,7 +3269,7 @@ def resolve_obs_columns(source: str, source_type: str, delimiter: Optional[str] 
         return format_info, obs_columns, None
     else:
         # Non-uniform format — return fallback DataFrame
-        print(f"{format_log_prefix('warn',indent=1)} {len(format_info['n_tokens'])} different filename formats detected. Proceeding with fallback `.obs` structure... (File Number, Parsing Type)")
+        print(f"{format_log_prefix('warn',indent=2)} {len(format_info['n_tokens'])} different filename formats detected. Proceeding with fallback `.obs` structure... (File Number, Parsing Type)")
         
         obs = pd.DataFrame({
             "File": list(range(1, len(filenames) + 1)),

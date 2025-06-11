@@ -27,7 +27,7 @@ Todo:
     * Add functions to get GO enrichment and GSEA analysis (see GOATOOLS or STAGES).
 """
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from decimal import Decimal
 from operator import index
 from os import access
@@ -76,7 +76,11 @@ def format_log_prefix(level: str, indent=None) -> str:
         "warn": "⚠️ [WARN]",
         "error": "❌ [ERROR]",
         "info_only": "ℹ️",
-        "filter_conditions": "    🔸 "
+        "filter_conditions": "     🔸 ",
+        "result_only": "✅",
+        "blank": "",
+        "update": "🔄 [UPDATE]",
+        "update_only": "🔄"
     }
 
     if level not in base_prefixes:
@@ -88,18 +92,13 @@ def format_log_prefix(level: str, indent=None) -> str:
         # Use default built-in spacing for all except info_only
         if level in ["info", "search", "result", "warn", "error"]:
             return "     " + prefix
-        elif level == "user":
-            return prefix  # No indent for user
-        elif level == "info_only":
-            return prefix  # No indent
-        elif level == "filter_conditions":
-            return prefix  # No indent for filter conditions
+        else:
+            return prefix  # Default case, no indent (e.g. info_only)
     else:
         # Explicit indent override
-        indent_spaces = {1: 0, 2: 6, 3: 12}
+        indent_spaces = {1: 0, 2: 5, 3: 10}
         space = " " * indent_spaces.get(indent, 0)
         return f"{space}{prefix}"
-
 
 # ----------------
 # DATA PROCESSING FUNCTIONS
@@ -752,37 +751,43 @@ def pairwise_log2fc(data1, data2):
     median_fc = np.nanmedian(pairwise_ratios.reshape(-1, data1.shape[1]), axis=0)
     return median_fc
 
-def get_pca_importance(model, initial_feature_names, n=1):
+def get_pca_importance(model: Union[dict, 'sklearn.decomposition.PCA'], initial_feature_names: List[str], n: int = 1) -> pd.DataFrame:
     """
     Get the most important feature for each principal component in a PCA model.
 
     Args:
-        model (sklearn.decomposition.PCA): The PCA model.
+        model (sklearn.decomposition.PCA): Either a fitted sklearn.decomposition.PCA model, or a dict with key 'PCs' (array-like, shape: n_components x n_features)
         initial_feature_names (list): The initial feature names. Typically adata.var_names.
         n (int): The number of top features to return for each principal component.
 
         
     Returns:
-        df (pd.DataFrame): A DataFrame containing the most important feature for each principal component.
+        df (pd.DataFrame): A DataFrame with one row per principal component, listing the top contributing features.
 
     Example:
         >>> from scviz import utils as scutils
-        >>> pca = PCA(n_components=5)
-        >>> pca.fit(data)
-        >>> df = scutils.get_pca_importance(pca)
+        >>> pdata.pca(n_components=5)
+        >>> df = scutils.get_pca_importance(pdata.prot.uns['pca'], pdata.prot.var_names, n=5)
     """
 
-    # number of components
-    n_pcs= model['PCs'].shape[0]
+    if isinstance(model, dict):
+        pcs = np.asarray(model["PCs"])  # shape: n_components x n_features
+    else:
+        pcs = np.asarray(model.components_)  # shape: n_components x n_features
 
-    # get the index of the most important feature on EACH component
-    most_important = [np.abs(model['PCs'][i]).argsort()[-n:][::-1] for i in range(n_pcs)]
-    most_important_names = [[initial_feature_names[idx] for idx in most_important[i]] for i in range(n_pcs)]
+    n_pcs = pcs.shape[0]
 
+    most_important = [
+        np.abs(pcs[i]).argsort()[-n:][::-1] for i in range(n_pcs)
+    ]
+    most_important_names = [
+        [initial_feature_names[idx] for idx in row] for row in most_important
+    ]
 
-    dic = {'PC{}'.format(i): most_important_names[i] for i in range(n_pcs)}
-    df = pd.DataFrame(dic.items(), columns=['Principal Component', 'Top Features'])
-
+    result = {
+        f"PC{i + 1}": most_important_names[i] for i in range(n_pcs)
+    }
+    df = pd.DataFrame(result.items(), columns=["Principal Component", "Top Features"])
     return df
 
 # ----------------
