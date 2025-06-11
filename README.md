@@ -1,3 +1,5 @@
+[![ci](https://github.com/gnaprs/scviz/actions/workflows/ci.yml/badge.svg)](https://github.com/gnaprs/scviz/actions/workflows/ci.yml)
+
 # scviz
 The `scviz` package is a Python library designed for scientific visualization of single cell proteomics data, with plans to support more data types in the future.
 
