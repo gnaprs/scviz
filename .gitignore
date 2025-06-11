@@ -5,7 +5,8 @@
 dist/
 src/scviz/__pycache__/
 tests/__pycache__/
-docs/
+docs/inspiration
+docs/unfinished
 CHANGELOG.md
 .vscode/
 dev/*.csv
