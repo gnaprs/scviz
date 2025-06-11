@@ -1,0 +1,115 @@
+site_name: scviz
+site_description: "Automatic documentation from sources, for MkDocs."
+site_url: https://sitename.example
+repo_url: "https://github.com/gnaprs/scviz"
+repo_name: "gnaprs/scviz"
+theme:
+  name: material
+  font:
+    text: Source Sans 3
+    code: Roboto Mono
+  logo: assets/logo.png
+  favicon: assets/logo.png
+  features:
+    - navigation.footer
+  palette:
+    # Dark Mode
+    - scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Dark mode
+      primary: blue
+      accent: deep orange
+
+    # Light Mode
+    - scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Light mode
+      primary: blue
+      accent: deep orange
+
+markdown_extensions:
+  - attr_list
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/gnaprs
+    - icon: fontawesome/brands/linkedin
+      link: https://linkedin.com/in/marionpang
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/scviz/
+plugins:
+  - mkdocstrings
+
+copyright: Copyright &copy; 2025 Marion Pang
+
+nav:
+  - Home:
+      - Overview: index.md
+      - Changelog: changelog.md
+      # - Credits: credits.md
+      # - License: license.md
+  # - Getting started:
+      # - Installation: installation.md
+      # - Quickstart: quickstart.md
+  - Usage:
+      - Tutorial: code-examples.md
+      - Admonitions: admonitions.md
+      - Content-Tabs: content-tabs.md
+      - Diagram: diagram.md
+  - API reference:
+      - scviz: reference/plotting.md
+      # - scviz.utils: reference/scviz.utils.md
+      # - scviz.renderers: reference/scviz.renderers.md
+  - Author's website: https://gnaprs.github.io/
+# nav:
+# - Home:
+#   - Overview: index.md
+#   - Changelog: changelog.md
+#   - Credits: credits.md
+#   - License: license.md
+# - Usage:
+#   - usage/index.md
+#   - Theming: usage/theming.md
+#   - Handlers: usage/handlers.md
+#   - All handlers:
+#     - C: https://mkdocstrings.github.io/c/
+#     - Crystal: https://mkdocstrings.github.io/crystal/
+#     - Python: https://mkdocstrings.github.io/python/
+#     - Python (Legacy): https://mkdocstrings.github.io/python-legacy/
+#     - Shell: https://mkdocstrings.github.io/shell/
+#     - TypeScript: https://mkdocstrings.github.io/typescript/
+#     - VBA: https://pypi.org/project/mkdocstrings-vba
+#   - Guides:
+#     - Recipes: recipes.md
+#     - Troubleshooting: troubleshooting.md
+# - API reference: reference/mkdocstrings.md
+# - Development:
+#   - Contributing: contributing.md
+#   - Code of Conduct: code_of_conduct.md
+#   - Coverage report: coverage.md
+# - Insiders:
+#   - insiders/index.md
+#   - Getting started:
+#     - Installation: insiders/installation.md
+#     - Changelog: insiders/changelog.md
+# - Author's website: https://pawamoy.github.io/
