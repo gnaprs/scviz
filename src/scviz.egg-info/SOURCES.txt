@@ -1,7 +1,9 @@
 LICENSE
 README.md
 pyproject.toml
+src/scviz/TrackedDataFrame.py
 src/scviz/__init__.py
+src/scviz/enrichment.py
 src/scviz/pAnnData.py
 src/scviz/plotting.py
 src/scviz/setup.py
@@ -11,5 +13,10 @@ src/scviz.egg-info/SOURCES.txt
 src/scviz.egg-info/dependency_links.txt
 src/scviz.egg-info/requires.txt
 src/scviz.egg-info/top_level.txt
+tests/test_enrichment.py
+tests/test_pAnnData_filtering.py
+tests/test_pAnnData_import.py
+tests/test_pAnnData_preprocessing.py
+tests/test_pAnnData_summary.py
 tests/test_plotting.py
 tests/test_utils.py

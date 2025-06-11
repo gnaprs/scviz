@@ -27,7 +27,7 @@ Todo:
     * Add functions to get GO enrichment and GSEA analysis (see GOATOOLS or STAGES).
 """
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from decimal import Decimal
 from operator import index
 from os import access
@@ -51,15 +51,54 @@ from scviz import pAnnData
 # ----------------
 # BASIC UTILITY FUNCTIONS
 
-def log(msg, status="info"):
-    prefix = {
-        "info": "ℹ️",
-        "warn": "⚠️",
-        "ok": "✅",
-        "fail": "❌",
-        "check": "🔍"
-    }.get(status, "")
-    print(f"{prefix} {msg}")
+def format_log_prefix(level: str, indent=None) -> str:
+    """
+    Return a standardized log prefix for a given message level.
+
+    Parameters
+    ----------
+    level : str
+        One of: "user", "info", "result", "warn", "error", "search", "info_only".
+    indent : int or None, optional
+        Indentation level (1 = no indent, 2 = 6 spaces, 3 = 12 spaces). Default uses built-in indent.
+
+    Returns
+    -------
+    str
+        A formatted log prefix with emoji and label, optionally indented.
+    """
+    level = level.lower()
+    base_prefixes = {
+        "user": "🧭 [USER]",
+        "search": "🔍 [SEARCH]",
+        "info": "ℹ️ [INFO]",
+        "result": "✅ [OK]",
+        "warn": "⚠️ [WARN]",
+        "error": "❌ [ERROR]",
+        "info_only": "ℹ️",
+        "filter_conditions": "     🔸 ",
+        "result_only": "✅",
+        "blank": "",
+        "update": "🔄 [UPDATE]",
+        "update_only": "🔄"
+    }
+
+    if level not in base_prefixes:
+        raise ValueError(f"Unknown log level: {level}")
+
+    prefix = base_prefixes[level]
+
+    if indent is None:
+        # Use default built-in spacing for all except info_only
+        if level in ["info", "search", "result", "warn", "error"]:
+            return "     " + prefix
+        else:
+            return prefix  # Default case, no indent (e.g. info_only)
+    else:
+        # Explicit indent override
+        indent_spaces = {1: 0, 2: 5, 3: 10}
+        space = " " * indent_spaces.get(indent, 0)
+        return f"{space}{prefix}"
 
 # ----------------
 # DATA PROCESSING FUNCTIONS
@@ -177,80 +216,112 @@ def get_adata(pdata, on = 'protein'):
     else:
         raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
 
-def get_abundance(pdata, namelist=None, layer='X', on='protein',
-                  classes=None, log=True, x_label='gene'):
+def get_abundance(pdata, *args, **kwargs):
     """
-    Extract long-form abundance DataFrame from a pAnnData object.
+    Wrapper to extract abundance from either pAnnData or AnnData.
+
+    If pdata is a pAnnData object, calls pdata.get_abundance().
+    If pdata is an AnnData object, calls the internal logic directly.
 
     Parameters:
-        pdata: pAnnData object
-        namelist: list of accessions or genes to extract (optional)
-        layer: which data layer to use (default: 'X')
-        on: 'protein' or 'peptide'
-        classes: obs column or list of columns to group by
-        log: whether to apply log2 transform
-        x_label: 'gene' or 'accession'
+        pdata: pAnnData or AnnData
+        *args, **kwargs: passed to get_abundance
 
     Returns:
-        pd.DataFrame with abundance + metadata
+        pd.DataFrame
     """
-    import numpy as np
-    import pandas as pd
+    if hasattr(pdata, "get_abundance"):
+        return pdata.get_abundance(*args, **kwargs)
+    else:
+        # Fall back to internal logic (can move to a private function if cleaner)
+        return _get_abundance_from_adata(pdata, *args, **kwargs)
 
-    adata = get_adata(pdata, on)
+def _get_abundance_from_adata(adata, namelist=None, layer='X', log=True,
+                               x_label='gene', classes=None, gene_col="Genes"):
+    """
+    Abundance extraction for plain AnnData, including gene/accession support.
+    """
 
     # Resolve gene names → accessions
     if namelist:
-        gene_to_accession = {}
-        if "Genes" in adata.var.columns:
-            for acc, gene in zip(adata.var_names, adata.var["Genes"]):
-                if pd.notna(gene):
-                    gene_to_accession[str(gene)] = acc
-        resolved, unmatched = [], []
-        for name in namelist:
-            if name in adata.var_names:
-                resolved.append(name)
-            elif name in gene_to_accession:
-                resolved.append(gene_to_accession[name])
-            else:
-                unmatched.append(name)
-        if not resolved:
-            raise ValueError("No valid names in `namelist`.")
-        if unmatched:
-            print("[get_abundance] Warning: Unmatched names:")
-            for u in unmatched:
-                print(f"  - {u}")
+        resolved = resolve_accessions(adata, namelist, gene_col=gene_col)
         adata = adata[:, resolved]
 
-    # Extract data matrix
+    # Extract matrix
     X = adata.layers[layer] if layer in adata.layers else adata.X
     if hasattr(X, "toarray"):
         X = X.toarray()
 
-    # Melt into long format
     df = pd.DataFrame(X, columns=adata.var_names, index=adata.obs_names).reset_index()
     df = df.melt(id_vars="index", var_name="accession", value_name="abundance")
     df = df.rename(columns={"index": "cell"})
 
-    # Merge obs metadata
     df = df.merge(adata.obs.reset_index(), left_on="cell", right_on="index")
 
-    # Annotate gene (if available)
     gene_map = adata.var["Genes"].to_dict() if "Genes" in adata.var else {}
     df['gene'] = df['accession'].map(gene_map)
     df['x_label_name'] = df['gene'].fillna(df['accession']) if x_label == 'gene' else df['accession']
 
-    # Annotate class grouping
     if classes:
         df['class'] = df[classes] if isinstance(classes, str) else df[classes].astype(str).agg('_'.join, axis=1)
     else:
         df['class'] = 'all'
 
-    # Log2 transform
     if log:
         df['log2_abundance'] = np.log2(np.clip(df['abundance'], 1e-6, None))
 
     return df
+
+def resolve_accessions(adata, namelist, gene_col="Genes", gene_map=None):
+    """
+    Resolve gene or accession names to accession IDs from .var_names.
+
+    Parameters:
+        adata: AnnData or pAnnData object
+        namelist: list of input names (genes or accessions)
+        gene_col: column in .var containing gene names (default: "Genes")
+        gene_map: optional precomputed map of gene → accession
+
+    Returns:
+        List of resolved accessions
+    """
+    import pandas as pd
+
+    if not namelist:
+        return None
+
+    var_names = adata.var_names.astype(str)
+
+    # Use passed-in gene_map or build one
+    if gene_map is None:
+        gene_map = {}
+        if gene_col in adata.var.columns:
+            for acc, gene in zip(var_names, adata.var[gene_col]):
+                if pd.notna(gene):
+                    gene_map[str(gene)] = acc
+
+    resolved, unmatched = [], []
+    for name in namelist:
+        name = str(name)
+        if name in var_names:
+            resolved.append(name)
+        elif name in gene_map:
+            resolved.append(gene_map[name])
+        else:
+            unmatched.append(name)
+
+    if not resolved:
+        raise ValueError(
+            f"No valid names found in `namelist`: {namelist}.\n"
+            f"Check against .var_names or '{gene_col}' column."
+        )
+
+    if unmatched:
+        print("[resolve_accessions] Warning: Unmatched names:")
+        for u in unmatched:
+            print(f"  - {u}")
+
+    return resolved
 
 def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True, debug=False):
     """
@@ -407,10 +478,28 @@ def format_class_filter(classes, class_value, exact_cases=False):
     - class_value (str, list of str, or list of list): The value(s) corresponding to the class(es).
         If a string, it may be underscore-joined (e.g. 'kd_AS').
         If a list of strings (e.g. ['kd_AS', 'sc_BE']), and exact_cases=True, each will be split and zipped with classes.
+        If a list of lists (e.g. [['AS', 'kd'], ['BE', 'sc']]), each inner list is interpreted as a full set of class values.
     - exact_cases (bool): Whether to return a list of exact match dictionaries or a combined OR filter.
 
     Returns:
     - dict or list of dicts: Formatted for dictionary-style filter input.
+
+    Examples:
+    # Single class, loose match
+    format_class_filter("treatment", ["kd", "sc"])
+    → {'treatment': ['kd', 'sc']}
+
+    # Multi-class, loose match
+    format_class_filter(["cellline", "treatment"], ["AS", "kd"])
+    → {'cellline': 'AS', 'treatment': 'kd'}
+
+    # Multi-class, exact match from underscore-joined strings
+    format_class_filter(["cellline", "treatment"], ["AS_kd", "BE_sc"], exact_cases=True)
+    → [{'cellline': 'AS', 'treatment': 'kd'}, {'cellline': 'BE', 'treatment': 'sc'}]
+
+    # Multi-class, exact match from list of lists
+    format_class_filter(["cellline", "treatment"], [["AS", "kd"], ["BE", "sc"]], exact_cases=True)
+    → [{'cellline': 'AS', 'treatment': 'kd'}, {'cellline': 'BE', 'treatment': 'sc'}]
     """
 
     if isinstance(classes, str):
@@ -422,12 +511,6 @@ def format_class_filter(classes, class_value, exact_cases=False):
 
     elif isinstance(classes, list):
         if exact_cases:
-            # Handle the case where a single list is passed as one combination
-            if isinstance(class_value, list) and all(isinstance(v, str) for v in class_value):
-                if len(class_value) != len(classes):
-                    raise ValueError("Length of class_value must match the number of classes.")
-                return [{cls: val for cls, val in zip(classes, class_value)}]
-
             if isinstance(class_value, str):
                 class_value = [class_value]
 
@@ -435,11 +518,15 @@ def format_class_filter(classes, class_value, exact_cases=False):
             for entry in class_value:
                 if isinstance(entry, str):
                     values = entry.split('_')
-                else:
+                elif isinstance(entry, list):
                     values = entry
+                else:
+                    raise ValueError("Each class_value entry must be a string or a list.")
+
                 if len(values) != len(classes):
                     raise ValueError("Each class_value entry must match the number of classes.")
                 formatted.append({cls: val for cls, val in zip(classes, values)})
+
             return formatted
 
         else:
@@ -521,7 +608,7 @@ def get_pep_prot_mapping(pdata, return_series=False):
     return col
 
 # ----------------
-# EXPLORATION FUNCTIONS
+# API FUNCTIONS (STRING functions in enrichment.py)
 def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], verbose = False):
     """ Worker function to get data from Uniprot for a list of proteins, used by get_uniprot_fields(). Calls to UniProt REST API, and returns batch of maximum 1024 proteins at a time.
 
@@ -664,6 +751,47 @@ def pairwise_log2fc(data1, data2):
     median_fc = np.nanmedian(pairwise_ratios.reshape(-1, data1.shape[1]), axis=0)
     return median_fc
 
+def get_pca_importance(model: Union[dict, 'sklearn.decomposition.PCA'], initial_feature_names: List[str], n: int = 1) -> pd.DataFrame:
+    """
+    Get the most important feature for each principal component in a PCA model.
+
+    Args:
+        model (sklearn.decomposition.PCA): Either a fitted sklearn.decomposition.PCA model, or a dict with key 'PCs' (array-like, shape: n_components x n_features)
+        initial_feature_names (list): The initial feature names. Typically adata.var_names.
+        n (int): The number of top features to return for each principal component.
+
+        
+    Returns:
+        df (pd.DataFrame): A DataFrame with one row per principal component, listing the top contributing features.
+
+    Example:
+        >>> from scviz import utils as scutils
+        >>> pdata.pca(n_components=5)
+        >>> df = scutils.get_pca_importance(pdata.prot.uns['pca'], pdata.prot.var_names, n=5)
+    """
+
+    if isinstance(model, dict):
+        pcs = np.asarray(model["PCs"])  # shape: n_components x n_features
+    else:
+        pcs = np.asarray(model.components_)  # shape: n_components x n_features
+
+    n_pcs = pcs.shape[0]
+
+    most_important = [
+        np.abs(pcs[i]).argsort()[-n:][::-1] for i in range(n_pcs)
+    ]
+    most_important_names = [
+        [initial_feature_names[idx] for idx in row] for row in most_important
+    ]
+
+    result = {
+        f"PC{i + 1}": most_important_names[i] for i in range(n_pcs)
+    }
+    df = pd.DataFrame(result.items(), columns=["Principal Component", "Top Features"])
+    return df
+
+# ----------------
+# TO FIX
 # TODO: fix with pdata.summary maybe call stats_ttest instead
 def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_results=False, test_variable='total_count'):
     """
@@ -709,169 +837,6 @@ def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_resu
     ttest_df = pd.DataFrame(ttest_params, columns=['Group1', 'Group2', 'T-statistic', 'P-value', 'N1', 'N2'])
     return ttest_df
 
-def get_pca_importance(model, initial_feature_names, n=1):
-    """
-    Get the most important feature for each principal component in a PCA model.
-
-    Args:
-        model (sklearn.decomposition.PCA): The PCA model.
-        initial_feature_names (list): The initial feature names. Typically adata.var_names.
-        n (int): The number of top features to return for each principal component.
-
-        
-    Returns:
-        df (pd.DataFrame): A DataFrame containing the most important feature for each principal component.
-
-    Example:
-        >>> from scviz import utils as scutils
-        >>> pca = PCA(n_components=5)
-        >>> pca.fit(data)
-        >>> df = scutils.get_pca_importance(pca)
-    """
-
-    # number of components
-    n_pcs= model['PCs'].shape[0]
-
-    # get the index of the most important feature on EACH component
-    most_important = [np.abs(model['PCs'][i]).argsort()[-n:][::-1] for i in range(n_pcs)]
-    most_important_names = [[initial_feature_names[idx] for idx in most_important[i]] for i in range(n_pcs)]
-
-
-    dic = {'PC{}'.format(i): most_important_names[i] for i in range(n_pcs)}
-    df = pd.DataFrame(dic.items(), columns=['Principal Component', 'Top Features'])
-
-    return df
-
-# ----------------
-# TO FIX
-# TODO: fix
-def get_query(pdata, search_term, search_on = 'gene', on = 'protein'):
-    valid_search_terms = ['gene', 'protein', 'description', 'pathway', 'all']
-
-    # If search is a list, remove duplicates and check if it includes all terms
-    if isinstance(search, list):
-        search = list(set(search))  # Remove duplicates
-        if set(valid_search_terms[:-1]).issubset(set(search)):  # Check if it includes all terms
-            print('All search terms included. Using search term \'all\'.')
-            search = 'all'
-        elif not all(term in valid_search_terms for term in search):  # Check if all terms are valid
-            raise ValueError(f'Invalid search term. Please use one of the following: {valid_search_terms}')
-    # If search is a single term, check if it's valid
-    elif search not in valid_search_terms:
-        raise ValueError(f'Invalid search term. Please use one of the following: {valid_search_terms}')
-
-    if on == 'protein':
-        adata = pdata.prot
-    elif on == 'peptide':
-        adata = pdata.pep
-
-    if search_on == 'gene':
-        return adata[adata.var['Gene Symbol'] == search_term]
-    elif search_on == 'protein':
-        return adata[adata.var['Accession'] == search_term]
-    elif search_on == 'description':
-        return adata[adata.var['Description'] == search_term]
-    elif search_on == 'pathway':
-        return adata[adata.var['WikiPathways'] == search_term]
-
-# TODO: fix to work with panndata, just need to search through .vars and identify whether keyword is in any column
-def get_abundance_query(pdata, cases, genelist, search='gene', on = 'protein'):
-    """
-    Search and extract protein abundance data based on a specific gene list.
-
-    This function searches and extracts protein abundance data for specified cases based on a specific gene list. The search can be performed on 'gene', 'protein', 'description', 'pathway', or 'all'. It also accepts a list of terms.
-
-    Args:
-        pdata (pandas.DataFrame): The protein data.
-        cases (list): The cases to include in the search.
-        genelist (list): The genes to include in the search. Can also be accession numbers, descriptions, or pathways.
-        search (str): The search term to use. Can be 'gene', 'protein', 'description', 'pathway', or 'all'. Also accepts list of terms.
-
-    Returns:
-        matched_features_data (pandas.DataFrame): Extracted protein abundance data, along with matched search features and the respective genes they were matched to.
-        combined_abundance_data (pandas.DataFrame): Protein abundance data per sample for matching genes.
-
-    Raises:
-        ValueError: If the search term is not valid. Valid search terms are 'gene', 'protein', 'description', 'pathway', 'all', or a list of these.
-
-    Example:
-        >>> from scviz import utils as scutils
-        >>> import pandas as pd
-        >>> cases = [['head'],['heart'],['tail']]
-        >>> matched_features, combined_abundance = scutils.get_abundance_query(data, cases, gene_list.Gene, search=["gene","pathway","description"])
-    """
-
-    # TODO: WILL NEED TO USE get_uniprot_fields TO GET ANNOTATED DATA
-
-    valid_search_terms = ['gene', 'protein', 'description', 'pathway', 'all']
-
-    # If search is a list, remove duplicates and check if it includes all terms
-    if isinstance(search, list):
-        search = list(set(search))  # Remove duplicates
-        if set(valid_search_terms[:-1]).issubset(set(search)):  # Check if it includes all terms
-            print('All search terms included. Using search term \'all\'.')
-            search = 'all'
-        elif not all(term in valid_search_terms for term in search):  # Check if all terms are valid
-            raise ValueError(f'Invalid search term. Please use one of the following: {valid_search_terms}')
-    # If search is a single term, check if it's valid
-    elif search not in valid_search_terms:
-        raise ValueError(f'Invalid search term. Please use one of the following: {valid_search_terms}')
-
-    # ------------------------------------------------------------------------------------------------
-    data_abundance = data.copy()
-    data = data.copy()
-
-    for case in cases:
-        vars = ['Abundance: '] + case
-        append_string = '_'.join(vars[1:])
-        cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-        data['Average: '+append_string] = data[cols].mean(axis=1, skipna=True)
-        data['Stdev: '+append_string] = data[cols].std(axis=1, skipna=True)
-
-    case_col = [data.columns.get_loc('Average: '+'_'.join(case)) for case in cases]
-
-    search_to_column = {
-        'gene': 'Gene Symbol',
-        'protein': 'Accession',
-        'description': 'Description',
-        'pathway': 'WikiPathways',
-        'all': ['Gene Symbol', 'Accession', 'Description', 'WikiPathways']
-    }
-
-    # search can be a single term or a list of terms
-    columns = [search_to_column[term] for term in (search if isinstance(search, list) else [search]) if term != 'all']
-    if 'all' in (search if isinstance(search, list) else [search]):
-        columns.extend(search_to_column['all'])
-
-    for column in columns:
-        data[f'Matched in {column}'] = data[column].apply(lambda x: [])
-
-        for gene in genelist:
-            regex = rf"\b{re.escape(gene)}\b"
-            data[f'Matched in {column}'] = data.apply(lambda row: row[f'Matched in {column}'] + [gene] if isinstance(row[column], str) and re.search(regex, row[column], re.IGNORECASE) else row[f'Matched in {column}'], axis=1)
-
-    data = data[data.filter(regex='Matched').apply(any, axis=1)]
-    data.set_index('Gene Symbol', inplace=True)
-
-    if data.shape[0] == 0:
-        raise ValueError('No data to plot. Please check the gene list and the search parameters.')
-
-    num_new_cols = len(search) if isinstance(search, list) else (4 if search == 'all' else 1)
-    case_col.extend(range(len(data.columns) - (num_new_cols-1), len(data.columns) + 1))
-    matched_features_data = data.iloc[:,[i-1 for i in case_col]]
-    matched_features_data = matched_features_data.dropna(how='all')
-
-    data_abundance.set_index('Gene Symbol', inplace=True)
-    data_abundance = data_abundance.loc[data.index]
-    combined_abundance_data = pd.DataFrame()
-
-    for case in cases:
-        vars = ['Abundance: '] + case
-        cols = [col for col in data.columns if all([re.search(r'\b{}\b'.format(var), col) for var in vars])]
-        combined_abundance_data = pd.concat([combined_abundance_data, data_abundance[cols]], axis=1)
-
-    return matched_features_data, combined_abundance_data
-
 # TODO: sync with get_uniprot_fields
 def convert_identifiers(input_list, input_type, output_type, df):
     """
@@ -901,80 +866,3 @@ def convert_identifiers(input_list, input_type, output_type, df):
     output_list = df.loc[df[input_type].isin(input_list), output_type].tolist()
 
     return output_list
-
-# TODO: add function to get GO enrichment, GSEA analysis (see GOATOOLS or STAGES or Enrichr?)
-# TO INTEGRATE
-def get_string_id(gene,species = 9606):
-    string_api_url = "https://version-11-5.string-db.org/api"
-    output_format = "tsv-no-header"
-    method = "get_string_ids"
-    
-    params = {
-        "identifiers" : "\r".join(gene),
-        "species" : species, 
-        "limit" : 1, 
-        "echo_query" : 1,
-    }
-    
-    request_url = "/".join([string_api_url, output_format, method])
-    results = requests.post(request_url, data=params)
-    s_id = []
-    for line in results.text.strip().split("\n"):
-        l = line.split("\t")
-        try:
-            string_id = l[2]
-            s_id.append(string_id)
-        except:
-            continue
-    
-    return s_id
-
-# TO INTEGRATE
-def get_string_annotation(gene,universe,species = 9606):
-    string_api_url = "https://version-11-5.string-db.org/api"
-    output_format = "json"
-    method = "enrichment"
-
-    params = {
-        "identifiers" : "%0d".join(gene),
-        # "background_string_identifiers": "%0d".join(universe),
-        "species" : species
-    }
-    
-    request_url = "/".join([string_api_url, output_format, method])
-    results = requests.post(request_url, data=params)
-    print(results.text)
-    try:
-        annotation = pd.read_json(results.text)
-    except:
-        annotation = pd.DataFrame()
-    return annotation
-
-# TO INTEGRATE
-def get_string_network(gene,comparison,species = 9606):
-    string_api_url = "https://version-11-5.string-db.org/api"
-    output_format = "highres_image"
-    method = "network"
-    
-    if len(gene) <= 10:
-        hide_label = 0
-    else:
-        hide_label = 1
-    
-    params = {
-        "identifiers" : "%0d".join(get_string_id(gene)),
-        "species" : species,
-        "required_score" : 700,
-        "hide_disconnected_nodes" : hide_label,
-        "block_structure_pics_in_bubbles" : 1,
-        "flat_node_design" : 1,
-        "center_node_labels" : 1
-    }
-    
-    request_url = "/".join([string_api_url, output_format, method])
-    response = requests.post(request_url, data=params)
-    
-    with open(f'{comparison}.png','wb') as file:
-        file.write(response.content)
-    
-    return True

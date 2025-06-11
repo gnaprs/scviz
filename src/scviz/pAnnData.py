@@ -6,24 +6,25 @@ import numpy as np
 import scanpy as sc
 import datetime
 
+from collections import Counter, defaultdict
+from typing import List, Optional, Tuple, Dict
+
 import copy
 import warnings
 
 from scipy import sparse
 from scipy.stats import variation, ttest_ind, mannwhitneyu, wilcoxon
-from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import MultiLabelBinarizer, normalize, FunctionTransformer
 from sklearn.decomposition import PCA
-from sklearn.impute import SimpleImputer, KNNImputer
 
 import umap.umap_ as umap
 
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from pandas.testing import assert_frame_equal
-
+from .TrackedDataFrame import TrackedDataFrame
 from scviz import utils
+from scviz.utils import format_log_prefix
 from scviz import setup
 
 from typing import (  # Meta  # Generic ABCs  # Generic
@@ -34,9 +35,7 @@ from typing import (  # Meta  # Generic ABCs  # Generic
     List
 )
 
-# TODO!: methods to write
-# easy way to assign obs, names, var to prot and pep
-# def set_prot_obs(self, obs):
+from .enrichment import get_string_mappings, resolve_to_accessions, enrichment_functional, enrichment_ppi, list_enrichments, plot_enrichment_svg, get_string_network_link
 
 class pAnnData:
     """
@@ -83,6 +82,7 @@ class pAnnData:
         self._history = []
         self._summary = pd.DataFrame()
         self._stats = {}
+        self._summary_is_stale = False
 
     # -----------------------------
     # SETTERS/GETTERS    
@@ -104,6 +104,10 @@ class pAnnData:
 
     @property
     def summary(self):
+        if not hasattr(self, "_summary"):
+            raise AttributeError("Summary has not been initialized.")
+        if getattr(self, "_summary_is_stale", False):
+            print("[summary] ⚠️ Warning: .summary has been modified. Run `(pdata).update_summary()` to sync changes back to .obs.")
         return self._summary
     
     @property
@@ -117,6 +121,18 @@ class pAnnData:
         elif self.pep is not None and 'metadata' in self.pep.uns:
             return self.pep.uns['metadata']
         return {}
+    
+    @property
+    def _cached_identifier_maps_protein(self):
+        if not hasattr(self, "_gene_maps_protein"):
+            self._gene_maps_protein = self._build_identifier_maps(self.prot)
+        return self._gene_maps_protein
+
+    @property
+    def _cached_identifier_maps_peptide(self):
+        if not hasattr(self, "_protein_maps_peptide"):
+            self._protein_maps_peptide = self._build_identifier_maps(self.pep)
+        return self._protein_maps_peptide
 
     @prot.setter
     def prot(self, value: ad.AnnData):
@@ -136,12 +152,30 @@ class pAnnData:
 
     @summary.setter
     def summary(self, value: pd.DataFrame):
-        self._summary = value
-        self._update_obs()
+        self._summary = TrackedDataFrame(
+            value,
+            parent=self,
+            mark_stale_fn=self._mark_summary_stale
+        )
+        self._summary_is_stale = True
+        suppress = getattr(self, "_suppress_summary_log", False)
+        self.update_summary(recompute=True, sync_back=True, verbose=not suppress)
 
     @stats.setter
     def stats(self, value):
         self._stats = value
+
+    # -----------------------------
+    # ALIASSES
+
+    # STRING RELATED
+    get_string_mappings = get_string_mappings
+    resolve_to_accessions = resolve_to_accessions
+    enrichment_functional = enrichment_functional
+    enrichment_ppi = enrichment_ppi
+    list_enrichments = list_enrichments
+    plot_enrichment_svg = plot_enrichment_svg
+    get_string_network_link = get_string_network_link
 
     # -----------------------------
     # UTILITY FUNCTIONS
@@ -186,9 +220,7 @@ class pAnnData:
             nnz = self._rs.nnz
             total = self._rs.shape[0] * self._rs.shape[1]
             sparsity = 100 * (1 - nnz / total)
-            print(f"✅ RS matrix set: {self._rs.shape} (proteins × peptides), sparsity: {sparsity:.2f}%")
-
-
+            print(f"{format_log_prefix('result',indent=1)} RS matrix set: {self._rs.shape} (proteins × peptides), sparsity: {sparsity:.2f}%")
 
     def __repr__(self):
         if self.prot is not None:
@@ -224,76 +256,8 @@ class pAnnData:
     def _has_data(self):
         return self.prot is not None or self.pep is not None
 
-    # def _update_summary(self):
-    #     if self.prot is not None:
-    #         # note: missing values is 1-protein_quant
-    #         self.prot.obs['protein_quant'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1) / self.prot.X.shape[1]
-    #         self.prot.obs['protein_count'] = np.sum(~np.isnan(self.prot.X.toarray()), axis=1)
-    #         self.prot.obs['protein_abundance_sum'] = np.nansum(self.prot.X.toarray(), axis=1)
-            
-    #         if 'X_mbr' in self.prot.layers:
-    #             self.prot.obs['mbr_count'] = (self.prot.layers['X_mbr'] == 'Peak Found').sum(axis=1)
-    #             self.prot.obs['high_count'] = (self.prot.layers['X_mbr'] == 'High').sum(axis=1)
-
-    #     if self.pep is not None:
-    #         # note: missing values is 1-peptide_quant
-    #         self.pep.obs['peptide_quant'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1) / self.pep.X.shape[1]
-    #         self.pep.obs['peptide_count'] = np.sum(~np.isnan(self.pep.X.toarray()), axis=1)
-    #         self.pep.obs['peptide_abundance_sum'] = np.nansum(self.pep.X.toarray(), axis=1)
-
-    #         if 'X_mbr' in self.pep.layers:
-    #             self.pep.obs['mbr_count'] = (self.pep.layers['X_mbr'] == 'Peak Found').sum(axis=1)
-    #             self.pep.obs['high_count'] = (self.pep.layers['X_mbr'] == 'High').sum(axis=1)
-        
-    #     if self.prot is not None:
-    #         self._summary = self.prot.obs.copy()
-    #         if self.pep is not None:
-    #             for col in self.pep.obs.columns:
-    #                 if col not in self._summary.columns:
-    #                     self._summary[col] = self.pep.obs[col]
-    #     else:
-    #         self._summary = self.pep.obs.copy()
-
-    #     self._previous_summary = self._summary.copy()
-        
-    # def _update_obs(self):
-    #     # function to update obs with summary data (if user edited summary data)
-    #     if not self._has_data():
-    #         return
-
-    #     def update_obs_with_summary(obs, summary, ignore_keyword):
-    #         ignored_columns = []
-    #         for col in summary.columns:
-    #             if ignore_keyword in col:
-    #                 ignored_columns.append(col)
-    #                 continue
-    #             obs[col] = summary[col]
-    #         return ignored_columns
-            
-
-    #     if self.prot is not None:
-    #         if not self.prot.obs.index.equals(self._summary.index):
-    #             raise ValueError("Index of summary does not match index of prot.obs")
-    #         ignored_columns_prot = update_obs_with_summary(self.prot.obs, self._summary, "pep")
-    #     else:
-    #         ignored_columns_prot = None
-    #     if self.pep is not None:
-    #         if not self.pep.obs.index.equals(self._summary.index):
-    #             raise ValueError("Index of summary does not match index of pep.obs")
-    #         ignored_columns_pep = update_obs_with_summary(self.pep.obs, self._summary, "prot")
-    #     else:
-    #         ignored_columns_pep = None
-
-    #     history_statement = "Updated obs with summary data. "
-    #     if ignored_columns_prot:
-    #         history_statement += f"Ignored columns in prot.obs: {', '.join(ignored_columns_prot)}. "
-    #     if ignored_columns_pep:
-    #         history_statement += f"Ignored columns in pep.obs: {', '.join(ignored_columns_pep)}. "
-    #     self._history.append(history_statement)
-
     def _update_metrics(self):
         """Compute per-sample and RS-derived metrics for prot and pep data."""
-        
         if self.prot is not None:
             X = self.prot.X.toarray()
             self.prot.obs['protein_quant'] = np.sum(~np.isnan(X), axis=1) / X.shape[1]
@@ -316,10 +280,10 @@ class pAnnData:
 
         # RS metrics for prot.var
         if self.rs is not None and self.prot is not None:
-            rs = self.rs.toarray() if sparse.issparse(self.rs) else self.rs
-            peptides_per_protein = rs.sum(axis=1).astype(int)
-            unique_mask = rs.sum(axis=0) == 1
-            unique_counts = rs[:, unique_mask].sum(axis=1).astype(int)
+            rs = self.rs  # leave it sparse
+            peptides_per_protein = rs.getnnz(axis=1)
+            unique_mask = rs.getnnz(axis=0) == 1
+            unique_counts = rs[:, unique_mask].getnnz(axis=1)
             self.prot.var['peptides_per_protein'] = peptides_per_protein
             self.prot.var['unique_peptides'] = unique_counts
 
@@ -356,10 +320,12 @@ class pAnnData:
         else:
             summary = pd.DataFrame()
 
-        self._summary = summary
+        
+        self._summary = TrackedDataFrame(
+            summary, parent=self, mark_stale_fn=self._mark_summary_stale)
         self._previous_summary = summary.copy()
 
-    def _push_summary_to_obs(self, skip_if_contains='pep', verbose=True):
+    def _push_summary_to_obs(self, skip_if_contains='pep', verbose=False):
         """
         Push changes from .summary back into .prot.obs and .pep.obs.
         Columns containing `skip_if_contains` are ignored for .prot; same for 'prot' in .pep.
@@ -368,27 +334,29 @@ class pAnnData:
             return
 
         def update_obs_with_summary(obs, summary, skip_if_contains):
-            skipped = []
+            skipped, updated = [], []
             for col in summary.columns:
-                if skip_if_contains in col:
+                if skip_if_contains in str(col):
                     skipped.append(col)
                     continue
+                if col not in obs.columns or not obs[col].equals(summary[col]):
+                    updated.append(col)
                 obs[col] = summary[col]
-            return skipped
+            return skipped, updated
 
         if self.prot is not None:
             if not self.prot.obs.index.equals(self._summary.index):
                 raise ValueError("Mismatch: .summary and .prot.obs have different sample indices.")
-            skipped_prot = update_obs_with_summary(self.prot.obs, self._summary, skip_if_contains)
+            skipped_prot, updated_prot = update_obs_with_summary(self.prot.obs, self._summary, skip_if_contains)
         else:
-            skipped_prot = None
+            skipped_prot, updated_prot = None, []
 
         if self.pep is not None:
             if not self.pep.obs.index.equals(self._summary.index):
                 raise ValueError("Mismatch: .summary and .pep.obs have different sample indices.")
-            skipped_pep = update_obs_with_summary(self.pep.obs, self._summary, skip_if_contains='prot')
+            skipped_pep, updated_pep = update_obs_with_summary(self.pep.obs, self._summary, skip_if_contains='prot')
         else:
-            skipped_pep = None
+            skipped_pep, updated_pep = None, []
 
         msg = "Pushed summary values back to obs. "
         if skipped_prot:
@@ -400,30 +368,244 @@ class pAnnData:
         if verbose:
             print(msg)
 
+        return updated_prot, updated_pep
+
     def update_summary(self, recompute=True, sync_back=False, verbose=True):
         """
-        Update the .summary dataframe from .obs (and optionally push changes back down).
+        Update the `.summary` DataFrame to reflect current state of `.obs` and metadata.
+
+        This function ensures `.summary` stays synchronized with sample-level metadata
+        stored in `.prot.obs` / `.pep.obs`. You can choose to recompute metrics,
+        sync edits back to `.obs`, or simply refresh the merged view.
 
         Parameters:
         - recompute (bool): If True, re-calculate protein/peptide stats.
         - sync_back (bool): If True, push edited .summary values back to .prot.obs / .pep.obs. False by default, as .summary is derived.
         - verbose (bool): If True, print action messages.
+
+        Typical Usage Scenarios:
+        ------------------------
+
+        | Scenario                        | Call                         | recompute | sync_back | _summary_is_stale | Effect                                                           |
+        |---------------------------------|------------------------------|-----------|-----------|-------------------|------------------------------------------------------------------|
+        | Filtering `.prot` or `.pep`     | `.update_summary(True)`      | True      | False     | False             | Recalculate protein/peptide stats and merge into `.summary`.     |
+        | Filtering samples               | `.update_summary(False)`     | False     | False     | False             | Refresh `.summary` view of `.obs` without recomputation.         |
+        | Manual `.summary[...] = ...`    | `.update_summary()`          | True/False| True      | True              | Push edited `.summary` values back to `.obs`.                    |
+        | After setting `.summary = ...`  | `.update_summary()`          | True      | True      | True              | Sync back and recompute stats from new `.summary`.               |
+        | No changes                      | `.update_summary()`          | False     | False     | False             | No-op other than passive re-merge.                               |
+
+        Notes:
+        ------
+        - `recompute=True` triggers `_update_metrics()` from `.prot` / `.pep` data.
+        - `sync_back=True` ensures changes to `.summary` are reflected in `.obs`.
+        - `.summary_is_stale` is automatically set when `.summary` is edited directly
+        (e.g. via `TrackedDataFrame`) or when assigned via the setter.
         """
+
+        # 1. Push back first if summary was edited by the user
+        if sync_back or getattr(self, "_summary_is_stale", False):
+            updated_prot, updated_pep = self._push_summary_to_obs()
+            updated_cols = list(set(updated_prot + updated_pep))
+            updated_str = f" Columns updated: {', '.join(updated_cols)}." if updated_cols else ""
+
+            if verbose:
+                reason = " (marked stale)" if not sync_back else ""
+                print(f"{format_log_prefix('update',indent=1)} Updating summary [sync_back]: pushed edits from `.summary` to `.obs`{reason}.\n{format_log_prefix('blank',indent=2)}{updated_str}")
+
+            self._summary_is_stale = False  # reset before recompute
+
+        # 2. Recompute or re-merge afterward
         if recompute:
             self._update_metrics()
         self._merge_obs()
         self._update_summary_metrics()
-        if sync_back:
-            self._push_summary_to_obs(verbose=verbose)
-        elif verbose:
-            mode = []
-            if recompute: mode.append("recompute")
-            if sync_back: mode.append("sync_back")
-            print(f"[update_summary] → Mode: {', '.join(mode) or 'norm'}")
+        self.refresh_identifier_maps()
+
+        # 3. Final messaging
+        if verbose and not (sync_back or self._summary_is_stale):
+            if recompute:
+                print(f"{format_log_prefix('update',indent=1)} Updating summary [recompute]: Recomputed metrics and refreshed `.summary` from `.obs`.")
+            else:
+                print(f"{format_log_prefix('update',indent=1)} Updating summary [refresh]: Refreshed `.summary` view (no recompute).")
+
+        # 4. Final cleanup
+        self._summary_is_stale = False
 
     def _update_summary(self):
         print("⚠️  Legacy _update_summary() called — consider switching to update_summary()")
         self.update_summary(recompute=True, sync_back=False, verbose=False)
+
+    def _build_identifier_maps(self, adata, gene_col="Genes"):
+        """
+        Builds bidirectional mapping for:
+        - protein: gene ↔ accession
+        - peptide: peptide ↔ protein accession
+
+        Returns: (forward, reverse)
+        """
+        from pandas import notna
+
+        forward = {}
+        reverse = {}
+
+        if adata is self.prot:
+            if gene_col in adata.var.columns:
+                for acc, gene in zip(adata.var_names, adata.var[gene_col]):
+                    if notna(gene):
+                        gene = str(gene)
+                        forward[gene] = acc
+                        reverse[acc] = gene
+
+        elif adata is self.pep:
+            try:
+                prot_acc_col = utils.get_pep_prot_mapping(self)
+                pep_to_prot = adata.var[prot_acc_col]
+                for pep, prot in zip(adata.var_names, pep_to_prot):
+                    if notna(prot):
+                        forward[prot] = pep
+                        reverse[pep] = prot
+            except Exception as e:
+                warnings.warn(f"Could not build peptide-to-protein map: {e}")
+
+        return forward, reverse
+
+    def refresh_identifier_maps(self):
+        """
+        Refresh all gene/accession map caches.
+        """
+        for attr in ["_gene_maps_protein", "_protein_maps_peptide"]:
+            if hasattr(self, attr):
+                delattr(self, attr)
+
+    def get_identifier_maps(self, on='protein'):
+        """
+        Returns identifier mapping dictionaries:
+        - on='protein': (gene → accession, accession → gene)
+        - on='peptide': (protein accession → peptide, peptide → protein accession)
+
+        Alias: get_gene_maps() for compatibility.
+        """
+        if on == 'protein':
+            return self._cached_identifier_maps_protein
+        elif on == 'peptide':
+            return self._cached_identifier_maps_peptide
+        else:
+            raise ValueError(f"Invalid value for 'on': {on}. Must be 'protein' or 'peptide'.")
+
+    # TODO: add peptide remapping to var, but need to also update rs if you do this.
+    def update_identifier_maps(self, mapping, on='protein', direction='forward', overwrite=False, verbose=True):
+        """
+        Update cached identifier maps with user-supplied mappings.
+
+        Parameters:
+            mapping (dict): Dictionary of mappings to add.
+            on (str): 'protein' or 'peptide' — which set of maps to update.
+            direction (str): 'forward' or 'reverse'.
+                - For 'protein':
+                    forward: gene → accession
+                    reverse: accession → gene
+                - For 'peptide':
+                    forward: protein accession → peptide
+                    reverse: peptide → protein accession
+            overwrite (bool): If True, overwrite existing entries.
+            verbose (bool): If True, print a summary of the update.
+
+        This updates both the forward and reverse maps to maintain consistency.
+
+        Examples:
+        ---------
+        # Add new gene-to-accession mappings (protein)
+        pdata.update_identifier_maps({'MYGENE1': 'P00001', 'MYGENE2': 'P00002'}, on='protein', direction='forward')
+
+        # Add peptide → protein mappings
+        pdata.update_identifier_maps({'PEPTIDE_ABC': 'P12345'}, on='peptide', direction='reverse')
+
+        # Overwrite a protein → gene mapping
+        pdata.update_identifier_maps({'P12345': 'NEWGENE'}, on='protein', direction='reverse', overwrite=True)
+        """
+        if on == 'protein':
+            forward, reverse = self._cached_identifier_maps_protein
+        elif on == 'peptide':
+            forward, reverse = self._cached_identifier_maps_peptide
+        else:
+            raise ValueError(f"Invalid value for 'on': {on}. Must be 'protein' or 'peptide'.")
+
+        source_map = forward if direction == 'forward' else reverse
+        target_map = reverse if direction == 'forward' else forward
+
+        added, updated, skipped = 0, 0, 0
+
+        for key, val in mapping.items():
+            if key in source_map:
+                if overwrite:
+                    source_map[key] = val
+                    target_map[val] = key
+                    updated += 1
+                else:
+                    skipped += 1
+            else:
+                source_map[key] = val
+                target_map[val] = key
+                added += 1
+
+        message = (
+            f"[update_identifier_maps] Updated '{on}' ({direction}): "
+            f"{added} added, {updated} overwritten, {skipped} skipped."
+        )
+
+        if verbose:
+            print(message)
+        self._append_history(message)
+
+        # Update .prot.var["Genes"] if updating protein identifier reverse map (accession → gene)
+        if on == 'protein' and direction == 'reverse':
+            updated_var_count = 0
+            updated_accessions = []
+
+            for acc, gene in mapping.items():
+                if acc in self.prot.var_names:
+                    self.prot.var.at[acc, "Genes"] = gene
+                    updated_accessions.append(acc)
+                    updated_var_count += 1
+
+            if updated_var_count > 0:
+                var_message = (
+                    f"🔁 Updated `.prot.var['Genes']` for {updated_var_count} entries from custom mapping. "
+                    f"(View details in `pdata.metadata['identifier_map_history']`)"
+                )
+                if verbose:
+                    print(var_message)
+                self._append_history(var_message)
+
+        # Log detailed update history for all cases
+        import datetime
+
+        record = {
+            'on': on,
+            'direction': direction,
+            'input_mapping': dict(mapping),  # shallow copy
+            'overwrite': overwrite,
+            'timestamp': datetime.datetime.now().isoformat(timespec='seconds'),
+            'summary': {
+                'added': added,
+                'updated': updated,
+                'skipped': skipped,
+            }
+        }
+
+        if on == 'protein' and direction == 'reverse':
+            record['updated_var_column'] = {
+                'column': 'Genes',
+                'accessions': updated_accessions,
+                'n_updated': updated_var_count
+            }
+
+        self.metadata.setdefault("identifier_map_history", []).append(record)
+
+    get_gene_maps = get_identifier_maps
+
+    def _mark_summary_stale(self):
+        self._summary_is_stale = True
 
     def _append_history(self, action):
         self._history.append(action)
@@ -441,18 +623,18 @@ class pAnnData:
 
         if gene_col not in var.columns:
             if verbose:
-                print(f"⚠️ Column '{gene_col}' not found in .prot.var.")
+                print(f"{format_log_prefix('warn')} Column '{gene_col}' not found in .prot.var.")
             return
 
         missing_mask = var[gene_col].isna()
         if not missing_mask.any():
             if verbose:
-                print("✅ No missing gene names found.")
+                print(f"{format_log_prefix('result')} No missing gene names found.")
             return
 
         accessions = var.index[missing_mask].tolist()
         if verbose:
-            print(f"🔍 {len(accessions)} proteins with missing gene names. Querying UniProt...")
+            print(f"{format_log_prefix('search')} {len(accessions)} proteins with missing gene names. Querying UniProt...")
 
         try:
             df = utils.get_uniprot_fields(
@@ -460,7 +642,7 @@ class pAnnData:
                 search_fields=["accession", "gene_primary"]
             )
         except Exception as e:
-            print(f"❌ UniProt query failed: {e}")
+            print(f"{format_log_prefix('error')} UniProt query failed: {e}")
             return
 
         gene_map = dict(zip(df["Entry"], df["Gene Names (primary)"]))
@@ -475,11 +657,17 @@ class pAnnData:
         unknown = len(final_genes) - found
         if verbose:
             if found:
-                print(f"✅ Recovered {found} gene names from UniProt.")
+                print(f"{format_log_prefix('result')} Recovered {found} gene name(s) from UniProt. Genes found:")
+                filled_clean = [str(g) for g in filled if pd.notna(g)]
+                preview = ", ".join(filled_clean[:25])
+                if found > 25:
+                    preview += "..."
+                print("   ", preview)
             if unknown:
                 missing_ids = self.prot.var.loc[missing_mask].index[pd.isna(filled)]
-                print(f"⚠️ {unknown} gene names still missing. Assigned as 'UNKNOWN_<accession>' for:")
+                print(f"{format_log_prefix('warn')} {unknown} gene name(s) still missing. Assigned as 'UNKNOWN_<accession>' for:")
                 print("   ", ", ".join(missing_ids[:5]) + ("..." if unknown > 5 else ""))
+                print("💡 Tip: You can update these using `pdata.update_identifier_maps({'GENE': 'ACCESSION'}, on='protein', direction='reverse', overwrite=True)`")
 
     def validate(self, verbose=True):
         """
@@ -532,17 +720,16 @@ class pAnnData:
                 nnz = self.rs.nnz if sparse.issparse(self.rs) else np.count_nonzero(self.rs)
                 total = self.rs.shape[0] * self.rs.shape[1]
                 sparsity = 100 * (1 - nnz / total)
-                print(f"ℹ️  RS matrix: {rs_shape} (proteins × peptides), sparsity: {sparsity:.2f}%")
+                print(f"{format_log_prefix('info_only', indent=1)} RS matrix: {rs_shape} (proteins × peptides), sparsity: {sparsity:.2f}%")
 
-                # Work with dense binary matrix (RS is always binary)
-                rs_dense = self.rs.toarray() if sparse.issparse(self.rs) else self.rs
+                rs = self.rs
 
-                row_links = rs_dense.sum(axis=1)  # peptides per protein
-                col_links = rs_dense.sum(axis=0)  # proteins per peptide
+                row_links = rs.getnnz(axis=1)  # peptides per protein
+                col_links = rs.getnnz(axis=0)  # proteins per peptide
 
                 # Unique peptides (linked to only 1 protein)
                 unique_peptides_mask = col_links == 1
-                unique_counts = rs_dense[:, unique_peptides_mask].sum(axis=1)  # unique peptides per protein
+                unique_counts = rs[:, unique_peptides_mask].getnnz(axis=1)  # unique peptides per protein
 
                 # Summary stats
                 print(f"   - Proteins with ≥2 *unique* linked peptides: {(unique_counts >= 2).sum()}/{rs_shape[0]}")
@@ -553,13 +740,13 @@ class pAnnData:
         # --- Summary of results ---
         if issues:
             if verbose:
-                print("❌ Validation failed with the following issues:")
+                print(f"{format_log_prefix('error')} Validation failed with the following issues:")
                 for issue in issues:
                     print(" -", issue)
             return False
         else:
             if verbose:
-                print("✅ pAnnData object is valid.")
+                print(f"{format_log_prefix('result')} pAnnData object is valid.")
             return True
 
     def describe_rs(self):
@@ -572,13 +759,13 @@ class pAnnData:
             print("⚠️ No RS matrix set.")
             return None
 
-        rs = self.rs.toarray() if sparse.issparse(self.rs) else self.rs
+        rs = self.rs
 
         # peptides per protein
-        peptides_per_protein = rs.sum(axis=1).astype(int)
+        peptides_per_protein = rs.getnnz(axis=1)
         # unique peptides per protein (those mapped only to this protein)
-        unique_peptides = (rs.sum(axis=0) == 1)
-        unique_counts = rs[:, unique_peptides].sum(axis=1).astype(int)
+        unique_mask = rs.getnnz(axis=0) == 1
+        unique_counts = rs[:, unique_mask].getnnz(axis=1)
 
         summary_df = pd.DataFrame({
             "peptides_per_protein": peptides_per_protein,
@@ -586,7 +773,6 @@ class pAnnData:
         }, index=self.prot.var_names if self.prot is not None else range(rs.shape[0]))
 
         return summary_df
-
 
     def plot_rs(self, figsize=(10, 4)):
         """
@@ -598,9 +784,9 @@ class pAnnData:
             print("⚠️ No RS matrix to plot.")
             return
 
-        rs_dense = self.rs.toarray() if sparse.issparse(self.rs) else self.rs
-        prot_links = rs_dense.sum(axis=1)
-        pep_links = rs_dense.sum(axis=0)
+        rs = self.rs
+        prot_links = rs.getnnz(axis=1)
+        pep_links = rs.getnnz(axis=0)
 
         fig, axes = plt.subplots(1, 2, figsize=figsize)
 
@@ -617,149 +803,16 @@ class pAnnData:
         plt.tight_layout()
         plt.show()
 
-    def filter_rs(
-        self,
-        min_peptides_per_protein=None,
-        min_unique_peptides_per_protein=2,
-        max_proteins_per_peptide=None,
-        return_copy=True,
-        preset=None,
-        validate_after=True
-    ):
-        """
-        Filters the RS matrix and associated .prot and .pep data.
-
-        Parameters:
-        - min_peptides_per_protein (int, optional): Keep proteins with ≥ this many total peptides
-        - min_unique_peptides_per_protein (int, optional): Keep proteins with ≥ this many unique peptides (default: 2)
-        - max_proteins_per_peptide (int, optional): Remove peptides mapped to > this many proteins
-        - return_copy (bool): Return a filtered copy if True (default), otherwise modify in place
-        - preset (str or dict, optional): Use a predefined filtering strategy:
-            * "default" → unique_peptides ≥ 2
-            * "lenient" → total peptides ≥ 2
-            * dict → custom filter dictionary (same keys as above)
-        - validate_after (bool): If True (default), run self.validate() after filtering
-
-        Returns:
-        - pAnnData: Filtered copy (if return_copy=True), or None
-
-        Side effects:
-        - Adds `.prot.uns['filter_rs']` dictionary with protein/peptide indices kept and summary
-        """
-        if self.rs is None:
-            print("⚠️ No RS matrix to filter.")
-            return self if return_copy else None
-
-        # --- Apply preset if given ---
-        if preset:
-            if preset == "default":
-                min_peptides_per_protein = None
-                min_unique_peptides_per_protein = 2
-                max_proteins_per_peptide = None
-            elif preset == "lenient":
-                min_peptides_per_protein = 2
-                min_unique_peptides_per_protein = None
-                max_proteins_per_peptide = None
-            elif isinstance(preset, dict):
-                min_peptides_per_protein = preset.get("min_peptides_per_protein", min_peptides_per_protein)
-                min_unique_peptides_per_protein = preset.get("min_unique_peptides_per_protein", min_unique_peptides_per_protein)
-                max_proteins_per_peptide = preset.get("max_proteins_per_peptide", max_proteins_per_peptide)
-            else:
-                raise ValueError(f"Unknown RS filtering preset: {preset}")
-
-        pdata = self.copy() if return_copy else self
-
-        rs = pdata.rs.toarray() if sparse.issparse(pdata.rs) else pdata.rs
-
-        # --- Step 1: Peptide filter (max proteins per peptide) ---
-        if max_proteins_per_peptide is not None:
-            peptide_links = rs.sum(axis=0)
-            keep_peptides = peptide_links <= max_proteins_per_peptide
-            rs = rs[:, keep_peptides]
-        else:
-            keep_peptides = np.ones(rs.shape[1], dtype=bool)
-
-        # --- Step 2: Protein filters ---
-        is_unique = rs.sum(axis=0) == 1
-        unique_counts = rs[:, is_unique].sum(axis=1)
-        peptide_counts = rs.sum(axis=1)
-
-        keep_proteins = np.ones(rs.shape[0], dtype=bool)
-        if min_peptides_per_protein is not None:
-            keep_proteins &= (peptide_counts >= min_peptides_per_protein)
-        if min_unique_peptides_per_protein is not None:
-            keep_proteins &= (unique_counts >= min_unique_peptides_per_protein)
-
-        rs_filtered = rs[keep_proteins, :]
-
-        # --- Step 3: Re-filter peptides now unmapped ---
-        keep_peptides_final = rs_filtered.sum(axis=0) > 0
-        rs_filtered = rs_filtered[:, keep_peptides_final]
-
-        # --- Apply filtered RS ---
-        pdata._set_RS(rs_filtered, validate=False)
-
-        # --- Filter .prot and .pep ---
-        if pdata.prot is not None:
-            pdata.prot = pdata.prot[:, keep_proteins]
-        if pdata.pep is not None:
-            original_peptides = keep_peptides.nonzero()[0]
-            final_peptides = original_peptides[keep_peptides_final]
-            pdata.pep = pdata.pep[:, final_peptides]
-
-        # --- History and summary ---
-        n_prot_before = self.prot.shape[1] if self.prot is not None else rs.shape[0]
-        n_pep_before = self.pep.shape[1] if self.pep is not None else rs.shape[1]
-        n_prot_after = rs_filtered.shape[0]
-        n_pep_after = rs_filtered.shape[1]
-
-        n_prot_dropped = n_prot_before - n_prot_after
-        n_pep_dropped = n_pep_before - n_pep_after
-        
-        msg = "🧪 Filtered RS"
-        if preset:
-            msg += f" using preset '{preset}'"
-        if min_peptides_per_protein is not None:
-            msg += f", min peptides per protein: {min_peptides_per_protein}"
-        if min_unique_peptides_per_protein is not None:
-            msg += f", min unique peptides: {min_unique_peptides_per_protein}"
-        if max_proteins_per_peptide is not None:
-            msg += f", max proteins per peptide: {max_proteins_per_peptide}"
-        msg += (
-            f". Proteins: {n_prot_before} → {n_prot_after} (dropped {n_prot_dropped}), "
-            f"Peptides: {n_pep_before} → {n_pep_after} (dropped {n_pep_dropped})."
-        )
-
-        pdata._append_history(msg)
-        print(msg)
-        pdata.update_summary()
-
-        # --- Save filter indices to .uns ---
-        protein_indices = list(pdata.prot.var_names) if pdata.prot is not None else []
-        peptide_indices = list(pdata.pep.var_names) if pdata.pep is not None else []
-        pdata.prot.uns['filter_rs'] = {
-            "kept_proteins": protein_indices,
-            "kept_peptides": peptide_indices,
-            "n_proteins": len(protein_indices),
-            "n_peptides": len(peptide_indices),
-            "description": msg
-        }
-
-        if validate_after:
-            pdata.validate(verbose=True)
-
-        return pdata if return_copy else None
-
     # -----------------------------
-    # TESTS FUNCTIONS
+    # VALIDATION FUNCTIONS
 
     def _check_data(self, on):
         # check if protein or peptide data exists
-        if on not in ['protein', 'peptide']:
+        if on not in ['protein', 'peptide' , 'prot', 'pep']:
             raise ValueError("Invalid input: on must be either 'protein' or 'peptide'.")
-        elif on == 'protein' and self.prot is None:
+        elif (on == 'protein' or on == 'prot') and self.prot is None:
             raise ValueError("No protein data found in AnnData object.")
-        elif on == 'peptide' and self.pep is None:
+        elif (on == 'peptide' or on == 'pep') and self.pep is None:
             raise ValueError("No peptide data found in AnnData object.")
         else:
             return True
@@ -782,11 +835,36 @@ class pAnnData:
 
     # -----------------------------
     # EDITING FUNCTIONS
+    
     def copy(self):
         """
-        Returns a deep copy of the pAnnData object.
+        Return a new pAnnData object with the current state of all components.
+        This avoids full deepcopy and ensures filtered state is retained.
         """
-        return copy.deepcopy(self)
+        new_obj = self.__class__.__new__(self.__class__)
+
+        # Copy core AnnData components
+        new_obj.prot = self.prot.copy() if self.prot is not None else None
+        new_obj.pep = self.pep.copy() if self.pep is not None else None
+        new_obj._rs = copy.deepcopy(self._rs)
+
+        # Copy summary and stats
+        new_obj._stats = copy.deepcopy(self._stats)
+        new_obj._history = copy.deepcopy(self._history)
+        new_obj._previous_summary = copy.deepcopy(self._previous_summary)
+        new_obj._suppress_summary_log = True  # 👈 set this just before
+        new_obj.summary = self._summary.copy(deep=True) if self._summary is not None else None # go through setter to mark as stale
+        del new_obj._suppress_summary_log
+
+        # Optional: cached maps
+        if hasattr(self, "_gene_maps_protein"):
+            new_obj._gene_maps_protein = copy.deepcopy(self._gene_maps_protein)
+        if hasattr(self, "_protein_maps_peptide"):
+            new_obj._protein_maps_peptide = copy.deepcopy(self._protein_maps_peptide)
+
+        return new_obj
+
+
 
     def set_X(self, layer, on = 'protein'):
         # defines which layer to set X to
@@ -797,19 +875,127 @@ class pAnnData:
                 if layer not in self.prot.layers:
                     raise ValueError(f"Layer {layer} not found in protein data.")
                 self.prot.X = self.prot.layers[layer]
-                print(f"Set {on} data to layer {layer}.")
+                print(f"{format_log_prefix('info_only', indent=2)} Set {on} data to layer {layer}.")
 
             else:
                 if layer not in self.pep.layers:
                     raise ValueError(f"Layer {layer} not found in peptide data.")
                 self.pep.X = self.pep.layers[layer]
-                print(f"Set {on} data to layer {layer}.")
+                print(f"{format_log_prefix('info_only', indent=2)} Set {on} data to layer {layer}.")
 
             self._history.append(f"{on}: Set X to layer {layer}.")
 
+    def get_abundance(self, namelist=None, layer='X', on='protein',
+                    classes=None, log=True, x_label='gene'):
+        """
+        Extract long-form abundance DataFrame from a pAnnData object.
+
+        Parameters:
+            pdata: pAnnData object
+            namelist: list of accessions or genes to extract (optional)
+            layer: which data layer to use (default: 'X')
+            on: 'protein' or 'peptide'
+            classes: obs column or list of columns to group by
+            log: whether to apply log2 transform
+            x_label: 'gene' or 'accession'
+
+        Returns:
+            pd.DataFrame with abundance + metadata
+        """
+
+        gene_to_acc, _ = self.get_gene_maps(on='protein' if on == 'peptide' else on)
+
+
+        if on == 'peptide' and namelist:
+            pep_names = self.pep.var_names.astype(str)
+            matched_peptides = [name for name in namelist if name in pep_names]
+            non_peptides = [name for name in namelist if name not in matched_peptides]
+
+            adata = None
+            if len(matched_peptides) < len(namelist):
+                filtered = self.filter_prot(accessions=non_peptides, return_copy=True)
+                adata = filtered.pep
+
+            if matched_peptides:
+                direct_peps = self.pep[:, matched_peptides]
+                adata = direct_peps if adata is None else adata.concatenate(direct_peps, join='outer')
+
+            if adata is None or adata.n_vars == 0:
+                raise ValueError("No matching peptides found from the provided `namelist`.")
+
+            adata = adata[:, ~adata.var_names.duplicated()]
+
+        else:
+            adata = utils.get_adata(self, on)
+
+            if namelist:
+                resolved = utils.resolve_accessions(adata, namelist, gene_map=gene_to_acc)
+                adata = adata[:, resolved]
+
+        # Extract the abundance matrix
+        X = adata.layers[layer] if layer in adata.layers else adata.X
+        if hasattr(X, "toarray"):
+            X = X.toarray()
+
+        # Melt into long form
+        df = pd.DataFrame(X, columns=adata.var_names, index=adata.obs_names).reset_index()
+        df = df.melt(id_vars="index", var_name="accession", value_name="abundance")
+        df = df.rename(columns={"index": "cell"})
+
+        # Merge obs metadata
+        df = df.merge(adata.obs.reset_index(), left_on="cell", right_on="index")
+
+        _, pep_to_prot = self.get_gene_maps(on='peptide')  # peptide → protein map
+        _, acc_to_gene = self.get_gene_maps(on='protein')  # protein accession → gene
+        # Map to gene names
+        if on == 'peptide':
+            try:
+                df['protein_accession'] = df['accession'].map(pep_to_prot)
+                df['gene'] = df['protein_accession'].map(acc_to_gene)
+
+                # Report unmapped peptides
+                unmapped = df[df['gene'].isna()]['accession'].unique().tolist()
+                if unmapped:
+                    print(f"[get_abundance] {len(unmapped)} peptides could not be mapped to genes: {unmapped}")
+            except Exception as e:
+                print(f"[get_abundance] Mapping error: {e}")
+                df['gene'] = None
+        else:
+            df['gene'] = df['accession'].map(acc_to_gene)
+        
+        # Determine x-axis label
+        if x_label == 'gene':
+            df['x_label_name'] = df['gene'].fillna(df['accession'])
+        elif x_label == 'accession':
+            if on == 'protein':
+                df['x_label_name'] = df['accession']
+            elif on == 'peptide':
+                try:
+                    mapping_col = utils.get_pep_prot_mapping(self)
+                    pep_to_prot = self.pep.var[mapping_col].to_dict()
+                    df['x_label_name'] = df['protein_accession']
+                except Exception as e:
+                    warnings.warn(f"Could not map peptides to accessions: {e}")
+                    df['x_label_name'] = df['accession']
+        else:
+            df['x_label_name'] = df['accession']  # fallback
+
+        # Annotate class/grouping
+        if classes:
+            df['class'] = df[classes] if isinstance(classes, str) else df[classes].astype(str).agg('_'.join, axis=1)
+        else:
+            df['class'] = 'all'
+
+        # Log transform
+        if log:
+            df['log2_abundance'] = np.log2(np.clip(df['abundance'], 1e-6, None))
+
+        return df
+
     def filter_prot(self, condition = None, accessions=None, return_copy = 'True', debug=False):
         """
-        Filters the protein data based on a protein metadata condition or a list of accession numbers.
+        Filters the protein data based on a protein metadata condition or a list of accession numbers/gene name.
+        Also removes peptides that are linked only to removed proteins and updates the RS matrix accordingly.
 
         Parameters:
         - condition (str): A condition string to filter protein metadata. Can include:
@@ -831,6 +1017,9 @@ class pAnnData:
 
         >>> condition = "Score > 0.75"
         >>> pdata.filter_prot(condition)
+
+        >>> accessions = ['GAPDH', 'P53']
+        >>> pdata.filter_prot(accessions=accessions)
         """
 
         if not self._check_data('protein'):
@@ -841,106 +1030,263 @@ class pAnnData:
 
         message_parts = []
 
-        # Filter by condition
+        # 1. Filter by condition OR
         if condition is not None:
             formatted_condition = self._format_filter_query(condition, pdata.prot.var)
             if debug:
                 print(f"Formatted condition: {formatted_condition}")
             filtered_proteins = pdata.prot.var[pdata.prot.var.eval(formatted_condition)]
             pdata.prot = pdata.prot[:, filtered_proteins.index]
-            message_parts.append(f"condition: {condition} ({pdata.prot.shape[1]} proteins kept)")
+            message_parts.append(f"condition: {condition}")
 
-        # Filter by accession list
+        # 2. Filter by accession list or gene names
         if accessions is not None:
-            existing = pdata.prot.var_names
-            present = [acc for acc in accessions if acc in existing]
-            missing = [acc for acc in accessions if acc not in existing]
+            gene_map, _ = pdata.get_gene_maps(on='protein')
 
-            if missing:
-                warnings.warn(f"The following accession(s) were not found and will be ignored: {missing}")
+            resolved, unmatched = [], []
+            var_names = pdata.prot.var_names.astype(str)
 
-            pdata.prot = pdata.prot[:, pdata.prot.var_names.isin(present)]
-            message_parts.append(f"accessions: {len(present)} found / {len(accessions)} requested")
+            for name in accessions:
+                name = str(name)
+                if name in var_names:
+                    resolved.append(name)
+                elif name in gene_map:
+                    resolved.append(gene_map[name])
+                else:
+                    unmatched.append(name)
+
+            if unmatched:
+                warnings.warn(
+                    f"The following accession(s) or gene name(s) were not found and will be ignored: {unmatched}"
+                )
+
+            if not resolved:
+                warnings.warn("No matching accessions found. No proteins will be retained.")
+                pdata.prot = pdata.prot[:, []]
+                message_parts.append("accessions: 0 matched")
+            else:
+                pdata.prot = pdata.prot[:, pdata.prot.var_names.isin(resolved)]
+                message_parts.append(f"accessions: {len(resolved)} matched / {len(accessions)} requested")
+
+        # PEPTIDES: also filter out peptides that belonged only to the filtered proteins
+        if pdata.pep is not None and pdata.rs is not None:
+            proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names = pdata._filter_sync_peptides_to_proteins(
+                original=self, 
+                updated_prot=pdata.prot, 
+                debug=debug)
+
+            # Apply filtered RS and update .prot and .pep using the helper
+            pdata._apply_rs_filter(
+                keep_proteins=proteins_to_keep,
+                keep_peptides=peptides_to_keep,
+                orig_prot_names=orig_prot_names,
+                orig_pep_names=orig_pep_names,
+                debug=debug
+            )
+
+            message_parts.append(f"peptides filtered based on remaining protein linkage ({len(peptides_to_keep)} peptides kept)")
 
         if not message_parts:
-            message = f"{action} protein data. No filters applied."
+            message = f"{format_log_prefix('user')} Filtering proteins [failed]: {action} protein data.\n    → No filters applied."
         else:
-            message = f"{action} protein data based on {' and '.join(message_parts)}."
+            filter_type = "condition" if condition else "accession"
+            message = (
+                f"{format_log_prefix('user')} Filtering proteins [{filter_type}]:\n"
+                f"    {action} protein data based on {filter_type}:"
+            )
 
-            # TODO: also filter out peptides that belong to the filtered proteins
-            # if pdata.pep is not None:
-            # need to filter out peptides that belonged only to the filtered proteins, need to use rs matrix for this
-            # can start from pdata.prot.var.eval(formatted_condition) to get the rows that we're keeping
-            #     pdata.pep = pdata.pep[filtered_queries.index]
+            for part in message_parts:
+                if part.startswith("condition:"):
+                    message += f"\n    → {part}"
+                elif part.startswith("accessions:"):
+                    message += f"\n    → {part}"
+                elif part.startswith("peptides filtered"):
+                    # we'll append peptide count separately in summary below
+                    peptides_kept = int(part.split("(")[-1].split()[0])
+                else:
+                    message += f"\n    → {part}"
+
+            # Protein and peptide counts summary
+            message += f"\n    → Proteins kept: {pdata.prot.shape[1]}"
+            if pdata.pep is not None:
+                message += f"\n    → Peptides kept (linked): {pdata.pep.shape[1]}"
 
         print(message)
         pdata._append_history(message)
         pdata.update_summary(recompute=True)
         return pdata if return_copy else None
 
-    def filter_prot_found(self, group, min_ratio=None, min_count=None, on='protein', return_copy=True, debug=False):
+    def filter_prot_found(self, group, min_ratio=None, min_count=None, on='protein', return_copy=True, verbose=True):
         """
-        Filters proteins or peptides based on the 'Found In' ratio for a given class grouping.
+        Filters proteins or peptides based on the 'Found In' ratio for a given class grouping or file-level detection.
 
         Parameters:
-        - group (str): Group label as used in 'Found In: {group} ratio' (e.g. 'HCT116_DMSO').
-        - min_ratio (float): Minimum proportion of samples (0.0 - 1.0) in which the feature must be found.
-        - min_count (int): Minimum number of samples the feature must be found in (alternative to ratio).
+        - group (str or list): Group label as used in 'Found In: {group} ratio' (e.g. 'HCT116_DMSO') or file(s) (e.g., ['F1', 'F2']).
+        - min_ratio (float): Minimum proportion of samples (0.0 - 1.0) in which the feature must be found (ignored for file-based). 
+        - min_count (int): Minimum number of samples the feature must be found in (alternative to ratio) (ignored for file-based).
         - on (str): 'protein' or 'peptide'
         - return_copy (bool): Return a filtered copy (default=True)
-        - debug (bool): If True, prints verbose info
+        - verbose (bool): If True, prints verbose info
 
         Returns:
         - Filtered pAnnData object (if `return_copy=True`), else modifies in place.
+        
+        Example:
+        # Filter proteins found in both AS_sc and AS_kd with at least 2 samples each
+        >>> pdata.filter_prot_found(group=["AS_sc", "AS_kd"], min_count=2)
+        # Filter proteins found in all 3 input files
+        >>> pdata.filter_prot_found(group=["F1", "F2", "F3"])
         """
         if not self._check_data(on):
             return
 
-        if min_ratio is None and min_count is None:
-            raise ValueError("You must specify either `min_ratio` or `min_count`.")
-
         adata = self.prot if on == 'protein' else self.pep
         var = adata.var
 
-        ratio_col = f"Found In: {group} ratio"
-        if ratio_col not in var.columns:
-            raise ValueError(f"{ratio_col} not found. Did you run `annotate_found(classes=...)` first?")
+        # Normalize group to list
+        if isinstance(group, str):
+            group = [group]
+        if not isinstance(group, (list, tuple)):
+            raise TypeError("`group` must be a string or list of strings.")
 
-        # Parse ratio strings like '4/6' → (4, 6)
-        ratio_split = var[ratio_col].str.split("/", expand=True).astype(float)
-        var["_found_count"] = ratio_split[0]
-        var["_total_count"] = ratio_split[1]
-        var["_found_ratio"] = var["_found_count"] / var["_total_count"]
+        # Determine filtering mode: group vs file
+        group_metrics = adata.uns.get(f"found_metrics_{on}")
 
-        if min_ratio is not None:
-            mask = var["_found_ratio"] >= min_ratio
+        group_cols_exist = (
+            group_metrics is not None and
+            all((g, "count") in group_metrics.columns and (g, "ratio") in group_metrics.columns for g in group)
+        )
+        file_cols_exist = []
+        for g in group:
+            has_file_col = f"Found In: {g}" in var.columns
+            has_ratio_col = f"Found In: {g} ratio" in var.columns
+            file_cols_exist.append(has_file_col and not has_ratio_col)
+
+        # Determine mode or handle ambiguity
+        if group_cols_exist and all(file_cols_exist):
+            raise ValueError(
+                f"Ambiguous input: some items in {group} appear to be both files and groups.\n"
+                "Please separate group-based and file-based filters into separate calls."
+            )
+        elif group_cols_exist:
+            mode = "group"
+        elif all(file_cols_exist):
+            mode = "file"
         else:
-            mask = var["_found_count"] >= min_count
+            # Prepare helpful error message for missing entries
+            missing = []
+            for g in group:
+                group_missing = (
+                    group_metrics is None or
+                    (g, "count") not in group_metrics.columns or
+                    (g, "ratio") not in group_metrics.columns
+                )
+                file_missing = f"Found In: {g}" not in var.columns
 
-        kept = mask.sum()
-        total = len(mask)
-        if debug:
-            print(f"Keeping {kept} / {total} {on}s based on group '{group}' and threshold.")
+                if group_missing and file_missing:
+                    missing.append(g)
 
+            message = (
+                f"The following group(s)/file(s) could not be found: {missing}\n"
+                "→ If these are group names, make sure you ran:\n"
+                f"   pdata.annotate_found(classes={group})\n"
+                "→ If these are file names, ensure 'Found In: <file>' columns exist.\n"
+            )
+
+            raise ValueError(message)
+
+        # Apply filtering
+        mask = np.ones(len(var), dtype=bool)
+
+        if mode == "file":
+            for g in group:
+                col = f"Found In: {g}"
+                mask &= var[col]
+            if verbose:
+                print(f"{format_log_prefix('user')} Filtering proteins [Found|File-mode]: keeping {mask.sum()} / {len(mask)} features found in ALL files: {group}")
+
+        elif mode == "group":
+            if min_ratio is None and min_count is None:
+                raise ValueError("You must specify either `min_ratio` or `min_count` when filtering by group.")
+
+            for g in group:
+                count_series = group_metrics[(g, "count")]
+                ratio_series = group_metrics[(g, "ratio")]
+
+                if min_ratio is not None:
+                    this_mask = ratio_series >= min_ratio
+                else:
+                    this_mask = count_series >= min_count
+
+                mask &= this_mask
+
+            if verbose:
+                print(f"{format_log_prefix('user')} Filtering proteins [Found|Group-mode]: keeping {mask.sum()} / {len(mask)} features passing threshold {min_ratio if min_ratio is not None else min_count} across groups: {group}")
+
+        # Apply filtering
         filtered = self.copy() if return_copy else self
         adata_filtered = adata[:, mask.values]
+
         if on == 'protein':
             filtered.prot = adata_filtered
+
+            # Optional: filter peptides + rs as well
+            if filtered.pep is not None and filtered.rs is not None:
+                proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names = filtered._filter_sync_peptides_to_proteins(
+                    original=self,
+                    updated_prot=filtered.prot,
+                    debug=verbose
+                )
+
+                filtered._apply_rs_filter(
+                    keep_proteins=proteins_to_keep,
+                    keep_peptides=peptides_to_keep,
+                    orig_prot_names=orig_prot_names,
+                    orig_pep_names=orig_pep_names,
+                    debug=verbose
+                )
+
         else:
             filtered.pep = adata_filtered
-
-        # Clean up temp columns
-        var.drop(columns=["_found_count", "_total_count", "_found_ratio"], inplace=True)
+            # Optionally, we could also remove proteins no longer linked to any peptides,
+            # but that's less common and we can leave it out unless requested.
 
         filtered._append_history(
-            f"{on}: Filtered by detection in group '{group}' using {'min_ratio=' + str(min_ratio) if min_ratio else 'min_count=' + str(min_count)}."
+            f"{on}: Filtered by detection in {mode} group(s) {group} using " +
+            (f"min_ratio={min_ratio}" if mode == "group" and min_ratio is not None else f"min_count={min_count}" if mode == "group" else "ALL files")
+            + "."
         )
         filtered.update_summary(recompute=True)
 
         return filtered if return_copy else None
 
+    def _filter_sync_peptides_to_proteins(self, original, updated_prot, debug=None):
+        """Helper function to filter peptides based on protein filtering. Returns inputs needed for _apply_rs_filter.
 
-    def filter_sample(self, values=None, exact_cases=False, condition=None, file_list=None, return_copy=True, debug=False, query_mode=False):
+        Parameters:
+        - original (pAnnData): Original pAnnData object before filtering.
+        - updated_prot (adata): Updated protein data to filter against.
+        - debug: Debugging flag.
+        """
+        if debug:
+            print(f"{format_log_prefix('info')} Applying RS-based peptide sync-up on peptides after protein filtering...")
+
+        # Get original axis names from unfiltered self
+        rs = original.rs
+        orig_prot_names = np.array(original.prot.var_names)
+        orig_pep_names = np.array(original.pep.var_names)
+        # Determine which protein rows to keep in RS
+        proteins_to_keep=updated_prot.var_names
+        keep_set = set(proteins_to_keep)
+        prot_mask = np.fromiter((p in keep_set for p in orig_prot_names), dtype=bool)
+        rs_filtered = rs[prot_mask, :]
+        # Keep peptides that are still linked to ≥1 protein
+        pep_mask = np.array(rs_filtered.sum(axis=0)).ravel() > 0
+        peptides_to_keep = orig_pep_names[pep_mask]
+
+        return proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names
+
+    def filter_sample(self, values=None, exact_cases=False, condition=None, file_list=None, min_prot=None, return_copy=True, debug=False, query_mode=False):
         """
         Unified method to filter samples in a pAnnData object.
 
@@ -963,6 +1309,7 @@ class pAnnData:
         - exact_cases (bool): Use exact combination matching when `values` is provided.
         - condition (str): Summary-level numeric filter condition.
         - file_list (list): List of sample identifiers to keep.
+        - min_prot (int): Minimum number of proteins required to keep a sample.
         - return_copy (bool): If True, returns a filtered copy. Otherwise modifies in place.
         - debug (bool): If True, print filter queries/messages.
 
@@ -977,31 +1324,36 @@ class pAnnData:
         >>> pdata.filter_sample(values={'treatment': 'kd', 'cellline': 'AS'})
         >>> pdata.filter_sample(values=[{'treatment': 'kd', 'cellline': 'AS'}, {'treatment': 'sc', 'cellline': 'BE'}], exact_cases=True)
         >>> pdata.filter_sample(condition="protein_count > 1000")
+        >>> pdata.filter_sample(min_prot=1000)
         >>> pdata.filter_sample(file_list=['Sample_001', 'Sample_007'])
         """
 
         # Ensure exactly one of the filter modes is specified
-        provided = [values, condition, file_list]
+        provided = [values, condition, file_list, min_prot]
         if sum(arg is not None for arg in provided) != 1:
             raise ValueError(
                 "Invalid filter input. You must specify exactly one of the following keyword arguments:\n"
                 "- `values=...` for categorical metadata filtering,\n"
                 "- `condition=...` for summary-level condition filtering, or\n"
+                "- `min_prot=...` to filter by minimum protein count.\n"
                 "- `file_list=...` to filter by sample IDs.\n\n"
                 "Example:\n"
                 "  pdata.filter_sample(condition='protein_quant > 0.2')"
             )
 
-        if values is not None:
-            return self.filter_sample_values(
+        if min_prot is not None:
+            condition = f"protein_count >= {min_prot}"
+
+        if values is not None and not query_mode:
+            return self._filter_sample_values(
                 values=values,
                 exact_cases=exact_cases,
                 debug=debug,
                 return_copy=return_copy
             )
 
-        if condition is not None or file_list is not None:
-            return self.filter_sample_metadata(
+        if condition is not None or file_list is not None and not query_mode:
+            return self._filter_sample_metadata(
                 condition=condition,
                 file_list=file_list,
                 return_copy=return_copy,
@@ -1009,12 +1361,12 @@ class pAnnData:
             )
         
         if values is not None and query_mode:
-            return self.filter_sample_query(query_string=values, source='obs', return_copy=return_copy, debug=debug)
+            return self._filter_sample_query(query_string=values, source='obs', return_copy=return_copy, debug=debug)
 
         if condition is not None and query_mode:
-            return self.filter_sample_query(query_string=condition, source='summary', return_copy=return_copy, debug=debug)
+            return self._filter_sample_query(query_string=condition, source='summary', return_copy=return_copy, debug=debug)
 
-    def filter_sample_metadata(self, condition = None, return_copy = True, file_list=None, debug=False):
+    def _filter_sample_metadata(self, condition = None, return_copy = True, file_list=None, debug=False):
         """
         Filter samples in a pAnnData object based on numeric summary conditions or a file/sample list.
 
@@ -1050,6 +1402,10 @@ class pAnnData:
         pdata = self.copy() if return_copy else self
         action = "Returning a copy of" if return_copy else "Filtered and modified"
 
+        print("self.prot id:", id(self.prot)) if debug else None
+        print("pdata.prot id:", id(pdata.prot)) if debug else None
+        print("Length of pdata.prot.obs_names:", len(pdata.prot.obs_names)) if debug else None
+
         # Define the filtering logic
         if condition is not None:
             formatted_condition = self._format_filter_query(condition, pdata._summary)
@@ -1071,12 +1427,37 @@ class pAnnData:
             message = "No filtering applied. Returning original data."
             return pdata if return_copy else None
 
+        print(f"Length of index_filter: {len(index_filter)}") if debug else None
+        print(f"Length of pdata.prot.obs_names before filter: {len(pdata.prot.obs_names)}") if debug else None
+        print(f"Number of shared samples: {len(pdata.prot.obs_names.intersection(index_filter))}") if debug else None
+
         # Filter out selected samples from prot and pep
         if pdata.prot is not None:
-            pdata.prot = pdata.prot[pdata.prot.obs_names.isin(index_filter)]
+            pdata.prot = pdata.prot[pdata.prot.obs.index.isin(index_filter)]
         
         if pdata.pep is not None:
-            pdata.pep = pdata.pep[pdata.pep.obs_names.isin(index_filter)]
+            pdata.pep = pdata.pep[pdata.pep.obs.index.isin(index_filter)]
+
+        print(f"Length of pdata.prot.obs_names after filter: {len(pdata.prot.obs_names)}") if debug else None
+
+        # Construct formatted message
+        filter_type = "condition" if condition else "file list" if file_list else "none"
+        log_prefix = format_log_prefix("user")
+
+        if len(index_filter) == 0:
+            message = f"{log_prefix} Filtering samples [{filter_type}]:\n    → No matching samples found. No filtering applied."
+        else:
+            message = f"{log_prefix} Filtering samples [{filter_type}]:\n"
+            message += f"    {action} sample data based on {filter_type}:\n"
+            if condition:
+                message += f"{format_log_prefix('filter_conditions')}Condition: {condition}\n"
+            elif file_list:
+                message += f"    → Files requested: {len(file_list)}\n"
+                if missing:
+                    message += f"    → Missing samples ignored: {len(missing)}\n"
+
+            message += f"    → Samples kept: {len(pdata.prot.obs)}"
+            message += f"\n    → Proteins kept: {len(pdata.prot.var)}"
 
         # Logging and history updates
         print(message)
@@ -1085,7 +1466,7 @@ class pAnnData:
 
         return pdata if return_copy else None
     
-    def filter_sample_values(self, values, exact_cases, debug=False, return_copy=True):
+    def _filter_sample_values(self, values, exact_cases, debug=False, return_copy=True):
         """
         Filter samples in a pAnnData object using dictionary-style categorical matching.
 
@@ -1167,22 +1548,40 @@ class pAnnData:
             pdata.pep = adata[eval(query)]
 
         n_samples = len(pdata.prot)
-        filter_desc = (
-            f"Filtered by exact match on: {'; '.join(map(str, values))}."
-            if exact_cases else
-            f"Filtered by loose match on: {', '.join(f'{k}: {v}' for k, v in values.items())}."
-        )
-        copy_note = " Copy of the filtered AnnData object returned." if return_copy else "Filtered and modified in-place."
-        history_msg = f"{filter_desc} Number of samples kept: {n_samples}.{copy_note}"
-        pdata._append_history(history_msg)  
-        print(history_msg)
+        log_prefix = format_log_prefix("user")
+        filter_mode = "exact match" if exact_cases else "class match"
+
         if n_samples == 0:
-            print("Warning: No samples matched the filter criteria.")
+            message = (
+                f"{log_prefix} Filtering samples [{filter_mode}]:\n"
+                f"    → No matching samples found. No filtering applied."
+            )
+        else:
+            message = (
+                f"{log_prefix} Filtering samples [{filter_mode}]:\n"
+                f"    {'Returning a copy of' if return_copy else 'Filtered and modified'} sample data based on {filter_mode}:\n"
+            )
+
+            if exact_cases:
+                message += f"{format_log_prefix('filter_conditions')}Matching any of the following cases:\n"
+                for i, case in enumerate(values, 1):
+                    message += f"       {i}. {case}\n"
+            else:
+                message += "   🔸 Match samples where:\n"
+                for k, v in values.items():
+                    valstr = v if isinstance(v, str) else ", ".join(map(str, v))
+                    message += f"      - {k}: {valstr}\n"
+
+            message += f"    → Samples kept: {n_samples}"
+            message += f"\n    → Proteins kept: {len(pdata.prot.var)}"
+
+        print(message)
+        pdata._append_history(message)
         pdata.update_summary(recompute=False)
 
         return pdata
 
-    def filter_sample_query(self, query_string, source='obs', return_copy=True, debug=False):
+    def _filter_sample_query(self, query_string, source='obs', return_copy=True, debug=False):
         """
         Filters samples using a raw pandas-style query string on either obs or summary.
 
@@ -1198,7 +1597,7 @@ class pAnnData:
         pdata = self.copy() if return_copy else self
         action = "Returning a copy of" if return_copy else "Filtered and modified"
 
-        print("⚠️  Advanced query mode enabled — interpreting string as a pandas-style expression.")
+        print(f"{format_log_prefix('warn',indent=1)} Advanced query mode enabled — interpreting string as a pandas-style expression.")
 
         if source == 'obs':
             df = pdata.prot.obs
@@ -1221,12 +1620,238 @@ class pAnnData:
         if pdata.pep is not None:
             pdata.pep = pdata.pep[pdata.pep.obs_names.isin(index_filter)]
 
-        message = f"{action} samples based on query string. Samples kept: {len(index_filter)}."
+        n_samples = len(pdata.prot)
+        log_prefix = format_log_prefix("user")
+        action = "Returning a copy of" if return_copy else "Filtered and modified"
+
+        message = (
+            f"{log_prefix} Filtering samples [query]:\n"
+            f"    {action} sample data based on query string:\n"
+            f"   🔸 Query: {query_string}\n"
+            f"    → Samples kept: {n_samples}\n"
+            f"    → Proteins kept: {len(pdata.prot.var)}"
+        )
+
         print(message)
-        pdata._append_history(message)
-        pdata._update_summary(recompute=False)
+
+        history_message = f"{action} samples based on query string. Samples kept: {len(index_filter)}."
+        pdata._append_history(history_message)
+        pdata.update_summary(recompute=False)
 
         return pdata if return_copy else None
+
+    def filter_rs(
+        self,
+        min_peptides_per_protein=None,
+        min_unique_peptides_per_protein=2,
+        max_proteins_per_peptide=None,
+        return_copy=True,
+        preset=None,
+        validate_after=True
+    ):
+        """
+        Filters the RS matrix and associated .prot and .pep data.
+
+        Parameters:
+        - min_peptides_per_protein (int, optional): Keep proteins with ≥ this many total peptides
+        - min_unique_peptides_per_protein (int, optional): Keep proteins with ≥ this many unique peptides (default: 2)
+        - max_proteins_per_peptide (int, optional): Remove peptides mapped to > this many proteins
+        - return_copy (bool): Return a filtered copy if True (default), otherwise modify in place
+        - preset (str or dict, optional): Use a predefined filtering strategy:
+            * "default" → unique_peptides ≥ 2
+            * "lenient" → total peptides ≥ 2
+            * dict → custom filter dictionary (same keys as above)
+        - validate_after (bool): If True (default), run self.validate() after filtering
+
+        Returns:
+        - pAnnData: Filtered copy (if return_copy=True), or None
+
+        Side effects:
+        - Adds `.prot.uns['filter_rs']` dictionary with protein/peptide indices kept and summary
+        """
+        if self.rs is None:
+            print("⚠️ No RS matrix to filter.")
+            return self if return_copy else None
+
+        # --- Apply preset if given ---
+        if preset:
+            if preset == "default":
+                min_peptides_per_protein = None
+                min_unique_peptides_per_protein = 2
+                max_proteins_per_peptide = None
+            elif preset == "lenient":
+                min_peptides_per_protein = 2
+                min_unique_peptides_per_protein = None
+                max_proteins_per_peptide = None
+            elif isinstance(preset, dict):
+                min_peptides_per_protein = preset.get("min_peptides_per_protein", min_peptides_per_protein)
+                min_unique_peptides_per_protein = preset.get("min_unique_peptides_per_protein", min_unique_peptides_per_protein)
+                max_proteins_per_peptide = preset.get("max_proteins_per_peptide", max_proteins_per_peptide)
+            else:
+                raise ValueError(f"Unknown RS filtering preset: {preset}")
+
+        pdata = self.copy() if return_copy else self
+
+        rs = pdata.rs
+
+        # --- Step 1: Peptide filter (max proteins per peptide) ---
+        if max_proteins_per_peptide is not None:
+            peptide_links = rs.getnnz(axis=0)
+            keep_peptides = peptide_links <= max_proteins_per_peptide
+            rs = rs[:, keep_peptides]
+        else:
+            keep_peptides = np.ones(rs.shape[1], dtype=bool)
+
+        # --- Step 2: Protein filters ---
+        is_unique = rs.getnnz(axis=0) == 1
+        unique_counts = rs[:, is_unique].getnnz(axis=1)
+        peptide_counts = rs.getnnz(axis=1)
+
+        keep_proteins = np.ones(rs.shape[0], dtype=bool)
+        if min_peptides_per_protein is not None:
+            keep_proteins &= (peptide_counts >= min_peptides_per_protein)
+        if min_unique_peptides_per_protein is not None:
+            keep_proteins &= (unique_counts >= min_unique_peptides_per_protein)
+
+        rs_filtered = rs[keep_proteins, :]
+
+        # --- Step 3: Re-filter peptides now unmapped ---
+        keep_peptides_final = rs_filtered.getnnz(axis=0) > 0
+        rs_filtered = rs_filtered[:, keep_peptides_final]
+
+        # --- Apply filtered RS ---
+        pdata._set_RS(rs_filtered, validate=False)
+
+        # --- Filter .prot and .pep ---
+        if pdata.prot is not None:
+            pdata.prot = pdata.prot[:, keep_proteins]
+        if pdata.pep is not None:
+            original_peptides = keep_peptides.nonzero()[0]
+            final_peptides = original_peptides[keep_peptides_final]
+            pdata.pep = pdata.pep[:, final_peptides]
+
+        # --- History and summary ---
+        n_prot_before = self.prot.shape[1] if self.prot is not None else rs.shape[0]
+        n_pep_before = self.pep.shape[1] if self.pep is not None else rs.shape[1]
+        n_prot_after = rs_filtered.shape[0]
+        n_pep_after = rs_filtered.shape[1]
+
+        n_prot_dropped = n_prot_before - n_prot_after
+        n_pep_dropped = n_pep_before - n_pep_after
+        
+        msg = "🧪 Filtered RS"
+        if preset:
+            msg += f" using preset '{preset}'"
+        if min_peptides_per_protein is not None:
+            msg += f", min peptides per protein: {min_peptides_per_protein}"
+        if min_unique_peptides_per_protein is not None:
+            msg += f", min unique peptides: {min_unique_peptides_per_protein}"
+        if max_proteins_per_peptide is not None:
+            msg += f", max proteins per peptide: {max_proteins_per_peptide}"
+        msg += (
+            f". Proteins: {n_prot_before} → {n_prot_after} (dropped {n_prot_dropped}), "
+            f"Peptides: {n_pep_before} → {n_pep_after} (dropped {n_pep_dropped})."
+        )
+
+        pdata._append_history(msg)
+        print(msg)
+        pdata.update_summary()
+
+        # --- Save filter indices to .uns ---
+        protein_indices = list(pdata.prot.var_names) if pdata.prot is not None else []
+        peptide_indices = list(pdata.pep.var_names) if pdata.pep is not None else []
+        pdata.prot.uns['filter_rs'] = {
+            "kept_proteins": protein_indices,
+            "kept_peptides": peptide_indices,
+            "n_proteins": len(protein_indices),
+            "n_peptides": len(peptide_indices),
+            "description": msg
+        }
+
+        if validate_after:
+            pdata.validate(verbose=True)
+
+        return pdata if return_copy else None
+
+    def _apply_rs_filter(
+        self,
+        keep_proteins=None,
+        keep_peptides=None,
+        orig_prot_names=None,
+        orig_pep_names=None,
+        debug=True
+    ):
+        """
+        Applies filtering to .prot, .pep, and .rs based on provided boolean masks or lists of names.
+        Allows explicitly passing original axis names to avoid mismatches when working with a filtered copy.
+
+        Parameters:
+        - keep_proteins: list of protein names or boolean mask (length = original RS rows)
+        - keep_peptides: list of peptide names or boolean mask (length = original RS cols)
+        - orig_prot_names: list/array of protein names corresponding to RS rows
+        - orig_pep_names: list/array of peptide names corresponding to RS cols
+        - debug (bool): Print filtering info
+        """
+
+        if self.rs is None:
+            raise ValueError("No RS matrix to filter.")
+
+        from scipy.sparse import issparse
+
+        rs = self.rs
+
+        # Use provided names or fallback to current .prot/.pep
+        prot_names = np.array(orig_prot_names) if orig_prot_names is not None else np.array(self.prot.var_names)
+        pep_names = np.array(orig_pep_names) if orig_pep_names is not None else np.array(self.pep.var_names)
+
+        if rs.shape[0] != len(prot_names) or rs.shape[1] != len(pep_names):
+            raise ValueError(
+                f"RS shape {rs.shape} does not match provided protein/peptide names "
+                f"({len(prot_names)} proteins, {len(pep_names)} peptides). "
+                "Did you forget to pass the original names?"
+            )
+
+        # --- Normalize protein mask ---
+        if keep_proteins is None:
+            prot_mask = np.ones(rs.shape[0], dtype=bool)
+        elif isinstance(keep_proteins, (list, np.ndarray, pd.Index)) and isinstance(keep_proteins[0], str):
+            keep_set = set(keep_proteins)
+            prot_mask = np.fromiter((p in keep_set for p in prot_names), dtype=bool)
+        elif isinstance(keep_proteins, (list, np.ndarray)) and isinstance(keep_proteins[0], (bool, np.bool_)):
+            prot_mask = np.asarray(keep_proteins)
+        else:
+            raise TypeError("keep_proteins must be a list of str or a boolean mask.")
+
+        # --- Normalize peptide mask ---
+        if keep_peptides is None:
+            pep_mask = np.ones(rs.shape[1], dtype=bool)
+        elif isinstance(keep_peptides, (list, np.ndarray, pd.Index)) and isinstance(keep_peptides[0], str):
+            keep_set = set(keep_peptides)
+            pep_mask = np.fromiter((p in keep_set for p in pep_names), dtype=bool)
+        elif isinstance(keep_peptides, (list, np.ndarray)) and isinstance(keep_peptides[0], (bool, np.bool_)):
+            pep_mask = np.asarray(keep_peptides)
+        else:
+            raise TypeError("keep_peptides must be a list of str or a boolean mask.")
+
+        # --- Final safety check ---
+        if len(prot_mask) != rs.shape[0] or len(pep_mask) != rs.shape[1]:
+            raise ValueError("Mismatch between mask lengths and RS matrix dimensions.")
+
+        # --- Apply to RS ---
+        self._set_RS(rs[prot_mask, :][:, pep_mask], validate=False)
+
+        # --- Apply to .prot and .pep ---
+        kept_prot_names = np.array(orig_prot_names)[prot_mask]
+        kept_pep_names = np.array(orig_pep_names)[pep_mask]
+
+        if self.prot is not None:
+            self.prot = self.prot[:, self.prot.var_names.isin(kept_prot_names)]
+
+        if self.pep is not None:
+            self.pep = self.pep[:, self.pep.var_names.isin(kept_pep_names)]
+
+        if debug:
+            print(f"{format_log_prefix('result')} RS matrix filtered: {prot_mask.sum()} proteins, {pep_mask.sum()} peptides retained.")
 
 
     def export(self, filename, format = 'csv'):
@@ -1352,6 +1977,10 @@ class pAnnData:
 
         found_df = data > threshold
 
+        # Prepare or retrieve existing numeric storage in .uns
+        metrics_key = f"found_metrics_{on}"
+        metrics_df = adata.uns.get(metrics_key, pd.DataFrame(index=adata.var_names))
+
         if classes is not None:
             classes_list = utils.get_classlist(adata, classes=classes)
 
@@ -1363,14 +1992,30 @@ class pAnnData:
                     continue
 
                 sub_found = found_df[class_samples]
+                count = sub_found.sum(axis=1)
+                ratio = count / len(class_samples)
+
+                # Store display-friendly annotations in .var
                 var[f"Found In: {class_value}"] = sub_found.any(axis=1)
                 var[f"Found In: {class_value} ratio"] = sub_found.sum(axis=1).astype(str) + "/" + str(len(class_samples))
+                
+                # Store numeric data in .uns
+                metrics_df[(class_value, "count")] = count
+                metrics_df[(class_value, "ratio")] = ratio
+
+            # Store updated versions back into .uns
+            metrics_df.columns = pd.MultiIndex.from_tuples(metrics_df.columns)
+            metrics_df = metrics_df.sort_index(axis=1)
+            adata.uns[metrics_key] = metrics_df
+
 
         self._history.append(
             f"{on}: Annotated features 'found in' class combinations {classes} using threshold {threshold}."
         )
         print(
-            f"Annotated features 'found in' class combinations {classes} using threshold {threshold}.")
+            f"{format_log_prefix('user')} Annotated features: 'found in' class combinations {classes} using threshold {threshold}."
+        )
+
 
 
     # -----------------------------
@@ -1427,11 +2072,11 @@ class pAnnData:
             A DataFrame containing log2 fold change, p-values, and significance labels for each protein.
 
         Examples:
-        # ✅ Legacy-style usage
+        # Legacy-style usage
         >>> pdata.de(class_type=['cellline', 'treatment'],
         ...          values=[['HCT116', 'DMSO'], ['HCT116', 'DrugX']])
 
-        # ✅ Dictionary-style usage (recommended)
+        # Dictionary-style usage (recommended)
         >>> pdata.de(values=[
         ...     {'cellline': 'HCT116', 'treatment': 'DMSO'},
         ...     {'cellline': 'HCT116', 'treatment': 'DrugX'}
@@ -1455,8 +2100,8 @@ class pAnnData:
 
 
         # --- Sample filtering ---
-        pdata_case1 = self.filter_sample_values(values=group1_dict, exact_cases=True, return_copy=True)
-        pdata_case2 = self.filter_sample_values(values=group2_dict, exact_cases=True, return_copy=True)
+        pdata_case1 = self._filter_sample_values(values=group1_dict, exact_cases=True, return_copy=True)
+        pdata_case2 = self._filter_sample_values(values=group2_dict, exact_cases=True, return_copy=True)
 
         def _label(d):
             if isinstance(d, dict):
@@ -1555,7 +2200,7 @@ class pAnnData:
         df_stats['p_value'] = pvals
         df_stats['test_statistic'] = stats
 
-        df_stats['-log10(p_value)'] = -np.log10(df_stats['p_value'].replace(0, np.nan))
+        df_stats['-log10(p_value)'] = -np.log10(df_stats['p_value'].replace(0, np.nan).astype(float))
         df_stats['significance_score'] = df_stats['-log10(p_value)'] * df_stats['log2fc']
         df_stats['significance'] = 'not significant'
         df_stats.loc[(df_stats['p_value'] < pval) & (df_stats['log2fc'] > log2fc), 'significance'] = 'upregulated'
@@ -1569,7 +2214,7 @@ class pAnnData:
         self._stats[comparison_string] = df_stats
         self._append_history(f"prot: DE for {class_type} {values} using {method} and fold_change_mode='{fold_change_mode}'. Stored in .stats['{comparison_string}'].")
 
-        print(f"✅ Differential expression complete: {comparison_string} | Method: {method}, FC: {fold_change_mode}")
+        print(f"{format_log_prefix('result')} Differential expression complete: {comparison_string} | Method: {method}, FC: {fold_change_mode}")
         return df_stats
 
     # TODO: Need to figure out how to make this interface with plot functions, probably do reordering by each class_value within the loop?
@@ -1599,68 +2244,115 @@ class pAnnData:
 
         self._history.append(f"{on}: Ranked {layer} data. Ranking, average and stdev stored in var.")
 
-    # TODO: imputation between samples - need to figure out how to split the data into classes before running imputation, and then splicing back together
-    def impute(self, classes = None, layer = "X", method = 'min', on = 'protein', set_X = True, **kwargs):
-        '''Function for imputation, imputes data across samples and stores it in the pdata layer X_impute_method.
-        Unfortunately, the imputers in scikit-learn only impute columns, not rows, which means ColumnTransformer+SimpleImputers won't work.
-        KNN to be implemented later.
+    def impute(self, classes=None, layer="X", method='mean', on='protein', set_X=True, **kwargs):
+        """
+        Impute missing values across samples (globally or within classes) using SimpleImputer.
 
-        Args:
-            classes (list): List of classes to impute.
-            layer (str): Layer to impute.
-            method (str): Imputation method.
+        Parameters:
+            classes (str or list): Class columns in .obs to group by.
+            layer (str): Data layer to impute from.
+            method (str): 'mean', 'median', or 'min'.
             on (str): 'protein' or 'peptide'.
-        '''
+            set_X (bool): Whether to set .X to the imputed result.
+        """
+        from sklearn.impute import SimpleImputer, KNNImputer
+        from scipy import sparse
+        from scviz import utils
+
+
         if not self._check_data(on):
-            pass
+            return
 
         adata = self.prot if on == 'protein' else self.pep
         if layer != "X" and layer not in adata.layers:
-            raise ValueError(f"Layer {layer} not found in .{on}.")
+            raise ValueError(f"Layer '{layer}' not found in .{on}.")
 
-        impute_funcs = {
-            'mean': np.nanmean,
-            'median': np.nanmedian,
-            'min': np.nanmin
-        }
-
-        if method not in impute_funcs:
-            raise ValueError(f"Unknown method: {method}")
-        
-        impute_func = impute_funcs.get(method)
         impute_data = adata.layers[layer] if layer != "X" else adata.X
-        layer_name = 'X_impute_' + method
         was_sparse = sparse.issparse(impute_data)
+        impute_data = impute_data.toarray() if was_sparse else impute_data.copy()
+        original_data = impute_data.copy()
 
-        if was_sparse:
-            impute_data = impute_data.toarray()
+        layer_name = f"X_impute_{method}"
+
+        if method not in {"mean", "median", "min","knn"}:
+            raise ValueError(f"Unsupported method: {method}")
 
         if classes is None:
-            impute_data[np.isnan(impute_data)] = np.take(impute_func(impute_data, axis=0), np.where(np.isnan(impute_data))[1])
+            # Global imputation
+            if method == 'min':
+                min_vals = np.nanmin(impute_data, axis=0)
+                min_vals = np.where(np.isnan(min_vals), 0, min_vals)
+                mask = np.isnan(impute_data)
+                impute_data[mask] = np.take(min_vals, np.where(mask)[1])
+            elif method == 'knn':
+                n_neighbors = kwargs.get('n_neighbors', 3)
+                imputer = KNNImputer(n_neighbors=n_neighbors)
+                impute_data = imputer.fit_transform(impute_data)
+            else:
+                imputer = SimpleImputer(strategy=method, keep_empty_features=True)
+                impute_data = imputer.fit_transform(impute_data)
 
-            print(f"Imputed data across all samples using {method}. New data stored in `{layer_name}`.")
-            self._history.append(f"{on}: Imputed layer {layer} using {method}. Imputed data stored in `{layer_name}`.")
+            print(f"{format_log_prefix('user')} Global imputation using '{method}'. Layer saved as '{layer_name}'.")
 
+        else:
+            # Group-wise imputation
+            if method == 'knn':
+                raise ValueError("KNN imputation is not supported for group-wise imputation.")
+
+            sample_names = utils.get_samplenames(adata, classes)
+            sample_names = np.array(sample_names)
+            unique_groups = np.unique(sample_names)
+
+            for group in unique_groups:
+                idx = np.where(sample_names == group)[0]
+                group_data = impute_data[idx, :]
+
+                if method == 'min':
+                    min_vals = np.nanmin(group_data, axis=0)
+                    min_vals = np.where(np.isnan(min_vals), 0, min_vals)
+                    mask = np.isnan(group_data)
+                    group_data[mask] = np.take(min_vals, np.where(mask)[1])
+                    imputed_group = group_data
+                else:
+                    imputer = SimpleImputer(strategy=method, keep_empty_features=True)
+                    imputed_group = imputer.fit_transform(group_data)
+
+                impute_data[idx, :] = imputed_group
+
+            print(f"ℹ️ Group-wise imputation using '{method}' on class(es): {classes}. Layer saved as '{layer_name}'.")
+
+        summary_lines = []
+        if classes is None:
+            num_imputed = np.sum(np.isnan(original_data) & ~np.isnan(impute_data))
+            summary_lines.append(f"{format_log_prefix('result_only', indent=2)} {num_imputed} values imputed.")
         else:
             sample_names = utils.get_samplenames(adata, classes)
-            unique_identifiers = list(set(sample_names))
-            indices_dict = {identifier: [i for i, sample in enumerate(sample_names) if sample == identifier] for identifier in unique_identifiers}
+            sample_names = np.array(sample_names)
+            unique_groups = np.unique(sample_names)
 
-            for identifier, indices in indices_dict.items():
-                subset_data = impute_data[indices,:]
-                subset_data[np.isnan(subset_data)] = np.take(impute_func(subset_data, axis=0), np.where(np.isnan(subset_data))[1])
-                impute_data[indices,:] = subset_data
+            counts_by_group = {}
+            for group in unique_groups:
+                idx = np.where(sample_names == group)[0]
+                before = original_data[idx, :]
+                after = impute_data[idx, :]
+                mask = np.isnan(before) & ~np.isnan(after)
+                counts_by_group[group] = np.sum(mask)
 
-            print(f"{on}: Imputed based on class(es): {classes} - {unique_identifiers} using {method}. New data stored in `{layer_name}`.")
-            self._history.append(f"{on}: Imputed layer {layer} based on class(es): {classes} - {unique_identifiers} using {method}. Imputed data stored in `{layer_name}`.")
+            total = sum(counts_by_group.values())
+            summary_lines.append(f"{format_log_prefix('result_only', indent=2)} {total} values imputed total.")
+            for group, count in counts_by_group.items():
+                summary_lines.append(f"   - {group}: {count} values")
 
-        if was_sparse:
-            adata.layers[layer_name] = sparse.csr_matrix(impute_data)
-        else:
-            adata.layers[layer_name] = impute_data
+        print("\n".join(summary_lines))
+
+        adata.layers[layer_name] = sparse.csr_matrix(impute_data) if was_sparse else impute_data
 
         if set_X:
-            self.set_X(layer = layer_name, on = on)
+            self.set_X(layer=layer_name, on=on)
+
+        self._history.append(
+            f"{on}: Imputed layer '{layer}' using '{method}' (grouped by {classes if classes else 'ALL'}). Stored in '{layer_name}'."
+        )
 
     def neighbor(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.pp.neighbors
@@ -1678,15 +2370,21 @@ class pAnnData:
         elif layer in adata.layers.keys():
             self.set_X(layer = layer, on = on)
 
+        log_prefix = format_log_prefix("user")
+        print(f"{log_prefix} Computing neighbors [{on}] using layer: {layer}")
+
         if 'pca' not in adata.uns:
-            print("PCA not found in AnnData object. Running PCA with default settings.")
+            print(f"{format_log_prefix('info_only',indent=2)} PCA not found in AnnData object. Running PCA with default settings.")
             self.pca(on = on, layer = layer)
 
         sc.pp.neighbors(adata, **kwargs)
 
         self._append_history(f'{on}: Neighbors fitted on {layer}, stored in obs["distances"] and obs["connectivities"]')
-        print(f'{on}: Neighbors fitted on {layer} and and stored in obs["distances"] and obs["connectivities"]')
-
+        print(f"{format_log_prefix('result_only',indent=2)} Neighbors computed on {layer}. Results stored in:")
+        print(f"       • obs['distances'] (pairwise distances)")
+        print(f"       • obs['connectivities'] (connectivity graph)")
+        print(f"       • uns['neighbors'] (neighbor graph metadata)")
+ 
     def leiden(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.tl.leiden with default resolution of 0.25
         if not self._check_data(on):
@@ -1697,8 +2395,11 @@ class pAnnData:
         elif on == 'peptide':
             adata = self.pep
 
+        log_prefix = format_log_prefix("user")
+        print(f"{log_prefix} Performing Leiden clustering [{on}] using layer: {layer}")
+
         if 'neighbors' not in adata.uns:
-            print("Neighbors not found in AnnData object. Running neighbors with default settings.")
+            print(f"{format_log_prefix('info_only', indent=2)} Neighbors not found in AnnData object. Running neighbors with default settings.")
             self.neighbor(on = on, layer = layer)
 
         if layer == "X":
@@ -1710,7 +2411,8 @@ class pAnnData:
         sc.tl.leiden(adata, **kwargs)
 
         self._append_history(f'{on}: Leiden clustering fitted on {layer}, stored in obs["leiden"]')
-        print(f'{on}: Leiden clustering fitted on {layer} and and stored in obs["leiden"]')
+        print(f"{format_log_prefix('result_only', indent=2)} Leiden clustering complete. Results stored in:")
+        print(f"       • obs['leiden'] (cluster labels)")
 
     def umap(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.tl.umap
@@ -1722,9 +2424,12 @@ class pAnnData:
         elif on == 'peptide':
             adata = self.pep
 
+        log_prefix = format_log_prefix("user")
+        print(f"{log_prefix} Computing UMAP [{on}] using layer: {layer}")
+
         # check if neighbor has been run before, look for distances and connectivities in obsp
         if 'neighbors' not in adata.uns:
-            print("Neighbors not found in AnnData object. Running neighbors with default settings.")
+            print(f"{format_log_prefix('info_only', indent=2)} Neighbors not found in AnnData object. Running neighbors with default settings.")
             self.neighbor(on = on, layer = layer)
 
         if layer == "X":
@@ -1736,7 +2441,9 @@ class pAnnData:
         sc.tl.umap(adata, **kwargs)
 
         self._append_history(f'{on}: UMAP fitted on {layer}, stored in obsm["X_umap"] and uns["umap"]')
-        print(f'{on}: UMAP fitted on {layer} and and stored in layers["X_umap"] and uns["umap"]')
+        print(f"{format_log_prefix('result_only', indent=2)} UMAP complete. Results stored in:")
+        print(f"       • obsm['X_umap'] (UMAP coordinates)")
+        print(f"       • uns['umap'] (UMAP settings)")
 
     def pca(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.tl.pca
@@ -1754,14 +2461,15 @@ class pAnnData:
         elif layer in adata.layers.keys():
             X = adata.layers[layer].toarray()
 
-        print(f'BEFORE: Number of samples|Number of proteins: {X.shape}')
+        log_prefix = format_log_prefix("user")
+        print(f"{log_prefix} Performing PCA [{on}] using layer: {layer}, removing NaN features.")
+        print(f"   🔸 BEFORE (samples × proteins): {X.shape}")
         Xnorm = (X - X.mean(axis=0)) / X.std(axis=0)
         nan_cols = np.isnan(Xnorm).any(axis=0)
         Xnorm = Xnorm[:, ~nan_cols]
-        print(f'AFTER: Number of samples|Number of proteins: {Xnorm.shape}')
+        print(f"   🔸 AFTER  (samples × proteins): {Xnorm.shape}")
 
         pca_data = sc.tl.pca(Xnorm, return_info=True, **kwargs)
-        
         adata.obsm['X_pca'] = pca_data[0]
         PCs = np.zeros((pca_data[1].shape[0], nan_cols.shape[0]))
         
@@ -1774,11 +2482,17 @@ class pAnnData:
 
         adata.uns['pca'] = {'PCs': PCs, 'variance_ratio': pca_data[2], 'variance': pca_data[3]}
         
+        subpdata = "prot" if on == 'protein' else "pep"
+
         self._append_history(f'{on}: PCA fitted on {layer}, stored in obsm["X_pca"] and varm["PCs"]')
-        print(f'{on}: PCA fitted on {layer} and and stored in layers["X_pca"] and uns["pca"]')
+        print(f"{format_log_prefix('result_only',indent=2)} PCA complete, fitted on {layer}. Results stored in:")
+        print(f"       • .{subpdata}.obsm['X_pca']")
+        print(f"       • .{subpdata}.uns['pca'] (includes PCs, variance, variance ratio)")
+        var_pc1, var_pc2 = pca_data[2][:2]
+        print(f"       • Variance explained by PC1/PC2: {var_pc1*100:.2f}% , {var_pc2*100:.2f}%") 
 
     def nanmissingvalues(self, on = 'protein', limit = 0.5):
-        # sets columns (proteins and peptides) with > 0.5 missing values to NaN across all samples
+        # sets columns (proteins and peptides) with > limit (default 0.5) missing values to NaN across all samples
         if not self._check_data(on):
             pass
 
@@ -1797,88 +2511,271 @@ class pAnnData:
         elif on == 'peptide':
             self.pep = adata
 
-    def normalize(self, classes = None, layer = "X", method = 'sum', on = 'protein', set_X = True, **kwargs):  
+    def normalize(self, classes = None, layer = "X", method = 'sum', on = 'protein', set_X = True, force = False, use_nonmissing = False, **kwargs):  
+        """ 
+        Normalize the data across samples (globally or within groups).
+
+        Parameters:
+        - classes (str or list): Sample-level class/grouping column(s) in .obs.
+        - layer (str): Data layer to normalize from (default='X').
+        - method (str): Normalization method. Options: 'sum', 'median', 'mean', 'max', 'reference_feature', 'robust_scale', 'quantile_transform'.
+        - on (str): 'protein' or 'peptide'.
+        - set_X (bool): Whether to set .X to the normalized result.
+        - force (bool): Whether to force normalization even with bad rows.
+        - use_nonmissing (bool): If True, only use columns with no missing values across all samples when computing scaling factors.
+        - **kwargs: Additional arguments for normalization methods.
+            (e.g., reference_columns for 'reference_feature', n_neighbors for 'knn').
+            max_missing_fraction: Maximum fraction of missing values allowed in a row. Default is 0.5.
+
+        """
+        
         if not self._check_data(on):
-            pass
+            return
 
         adata = self.prot if on == 'protein' else self.pep
         if layer != "X" and layer not in adata.layers:
             raise ValueError(f"Layer {layer} not found in .{on}.")
+       
+        normalize_data = adata.layers[layer] if layer != "X" else adata.X
+        was_sparse = sparse.issparse(normalize_data)
+        normalize_data = normalize_data.toarray() if was_sparse else normalize_data.copy()
+        original_data = normalize_data.copy()
 
+        # Check for bad rows (too many missing values)
+        missing_fraction = np.isnan(normalize_data).sum(axis=1) / normalize_data.shape[1]
+        max_missing_fraction = kwargs.pop("max_missing_fraction", 0.5)
+        bad_rows_mask = missing_fraction > max_missing_fraction
+
+        if np.any(bad_rows_mask):
+            n_bad = np.sum(bad_rows_mask)
+            print(f"⚠️ {n_bad} sample(s) have >{int(max_missing_fraction*100)}% missing values.")
+            print("   Suggest running `.impute()` before normalization for more stable results.")
+            print("   Alternatively, try `use_nonmissing=True` to normalize using only consistently observed proteins.")
+            if not force:
+                print("   ➡️ Use `force=True` to proceed anyway.")
+                return
+
+        layer_name = 'X_norm_' + method
         normalize_funcs = ['sum', 'median', 'mean', 'max', 'reference_feature', 'robust_scale', 'quantile_transform']
 
         if method not in normalize_funcs:
-            raise ValueError(f"Unknown method: {method}")
-        
-        normalize_data = adata.layers[layer] if layer != "X" else adata.X
-        layer_name = 'X_norm_' + method
-        was_sparse = sparse.issparse(normalize_data)
-
-        if was_sparse:
-            normalize_data = normalize_data.toarray()
+            raise ValueError(f"Unsupported normalization method: {method}")
 
         if classes is None:
-            normalize_data = _normalize_helper(normalize_data, method, **kwargs)
-            
-            print(f"Normalized data across all samples using {method}. New data stored in `{layer_name}`.")
-            self._history.append(f"{on}: Normalized layer {layer} using {method}. Imputed data stored in `{layer_name}`.")
-                  
-        if was_sparse:
-            adata.layers[layer_name] = sparse.csr_matrix(normalize_data)
+            normalize_data = self._normalize_helper(normalize_data, method, use_nonmissing=use_nonmissing, **kwargs)
+            msg=f"{format_log_prefix('user')} Global normalization using '{method}'"
         else:
-            adata.layers[layer_name] = normalize_data
+            # Group-wise normalization
+            sample_names = utils.get_samplenames(adata, classes)
+            sample_names = np.array(sample_names)
+            unique_groups = np.unique(sample_names)
+
+            for group in unique_groups:
+                idx = np.where(sample_names == group)[0]
+                group_data = normalize_data[idx, :]
+
+                normalized_group = self._normalize_helper(group_data, method=method, use_nonmissing=use_nonmissing, **kwargs)
+                normalize_data[idx, :] = normalized_group
+
+            msg=f"{format_log_prefix('info_only')} Group-wise normalization using '{method}' on class(es): {classes}"
+
+        if use_nonmissing and method in {'sum', 'mean', 'median', 'max'}:
+            msg += f" (using only fully observed columns)"
+
+        msg += f". Layer saved as '{layer_name}'."
+        print(msg)
+
+        # summary printout
+        summary_lines = []
+        if classes is None:
+            summary_lines.append(f"{format_log_prefix('result_only', indent=2)} Normalized all {normalize_data.shape[0]} samples.")
+        else:
+            for group in unique_groups:
+                count = np.sum(sample_names == group)
+                summary_lines.append(f"   - {group}: {count} samples normalized")
+            summary_lines.insert(0, f"{format_log_prefix('result_only', indent=2)} Normalized {normalize_data.shape[0]} samples total.")
+        print("\n".join(summary_lines))
+
+        adata.layers[layer_name] = sparse.csr_matrix(normalize_data) if was_sparse else normalize_data
 
         if set_X:
             self.set_X(layer = layer_name, on = on)
 
-# TODO: move to class function
-def _normalize_helper(data, method, **kwargs):
-    if method == 'sum':
-        # norm by sum: scale each row s.t. sum of each row is the same as the max sum
-        data_norm = data * (np.nansum(data, axis=1).max() / (np.nansum(data, axis=1)))[:, None]
+        # Determine if use_nonmissing note should be added
+        note = ""
+        if use_nonmissing and method in {'sum', 'mean', 'median', 'max'}:
+            note = " (using only fully observed columns)"
 
-    elif method == 'median':
-        # norm by median: scale each row s.t. median of each row is the same as the max median
-        data_norm = data * (np.nanmedian(data, axis=1).max() / (np.nanmedian(data, axis=1)))[:, None]
+        self._history.append(
+            f"{on}: Normalized layer {layer} using {method}{note} (grouped by {classes}). Stored in `{layer_name}`."
+            )
+    
+    def _normalize_helper(self, data, method, use_nonmissing, **kwargs):
+        """
+        Helper function for row-wise normalization.
 
-    elif method == 'mean':
-        # norm by mean: scale each row s.t. mean of each row is the same as the max mean
-        data_norm = data * (np.nanmean(data, axis=1).max() / (np.nanmean(data, axis=1)))[:, None]
+        Parameters:
+        - data (np.ndarray): Data matrix (samples x features).
+        - method (str): Normalization method. One of:
+            'sum', 'mean', 'median', 'max', 'reference_feature',
+            'robust_scale', 'quantile_transform'.
+        - use_nonmissing (bool): If True, only use columns with no missing values
+                                across all samples when computing scaling factors.
 
-    elif method == 'max':
-        # norm by max: scale each row s.t. max value of each row is the same as the max value
-        data_norm = data * (np.nanmax(data, axis=1).max() / (np.nanmax(data, axis=1)))[:, None]
+        Returns:
+        - np.ndarray: Normalized data.
+        """
 
-    elif method == 'reference_feature':
-        # norm by reference feature: scale each row s.t. the reference column is the same across all rows (scale to max value of reference column)
-        reference_columns = kwargs.get('reference_columns', [2])
-        scaling_factors = np.nanmean(np.nanmax(data[:, reference_columns], axis=0) / (data[:, reference_columns]), axis=1)
+        if method in {'sum', 'mean', 'median', 'max'}:
+            reducer = {
+                    'sum': np.nansum,
+                    'mean': np.nanmean,
+                    'median': np.nanmedian,
+                    'max': np.nanmax
+                }[method]
 
-        nan_rows = np.where(np.isnan(scaling_factors))[0]
-        if nan_rows.size > 0:
-            print(f"Rows ({', '.join(map(str, nan_rows))}) were normalized by mean scaling factor because reference feature was missing. Suggest imputation on reference feature by class and re-normalize.")
+            if use_nonmissing:
+                fully_observed_cols = ~np.isnan(data).any(axis=0)
+                if not np.any(fully_observed_cols):
+                    raise ValueError("No fully observed columns available for normalization with `use_nonmissing=True`.")
+                used_cols = np.where(fully_observed_cols)[0]
+                print(f"ℹ️ Normalizing using only fully observed columns: {used_cols}")
+                row_vals = reducer(data[:, fully_observed_cols], axis=1)
+            else:
+                row_vals = reducer(data, axis=1)
 
-        scaling_factors = np.where(np.isnan(scaling_factors), np.nanmean(scaling_factors), scaling_factors)
-        data_norm = data * scaling_factors[:, None]
+            scale = np.nanmax(row_vals) / row_vals
+            scale = np.where(np.isnan(scale), 1.0, scale)
+            data_norm = data * scale[:, None]
 
-    elif method == 'robust_scale':
-        # norm by robust_scale: Center to the median and component wise scale according to the interquartile range. See sklearn.preprocessing.robust_scale for more information.
-        from sklearn.preprocessing import robust_scale
-        data_norm = robust_scale(data, axis=1)
+        elif method == 'reference_feature':
+            # norm by reference feature: scale each row s.t. the reference column is the same across all rows (scale to max value of reference column)
+            reference_columns = kwargs.get('reference_columns', [2])
+            reference_method = kwargs.get('reference_method', 'median')  # default to median
 
-    elif method == 'quantile_transform':
-        # norm by quantile_transform: Transform features using quantiles information. See sklearn.preprocessing.quantile_transform for more information.
-        from sklearn.preprocessing import quantile_transform
-        data_norm = quantile_transform(data, axis=1)
+            reducer_map = {
+                'mean': np.nanmean,
+                'median': np.nanmedian,
+                'sum': np.nansum
+            }
 
-    else:
-        raise ValueError(f"Unknown method: {method}")
+            if reference_method not in reducer_map:
+                raise ValueError(f"Unsupported reference method: {reference_method}. Supported methods are: {list(reducer_map.keys())}")
+            reducer = reducer_map[reference_method]
 
-    return data_norm
+            # resolve reference column names if needed
+            if isinstance(reference_columns[0], str):
+                gene_to_acc, _ = self.get_gene_maps(on='protein')
+                resolved = utils.resolve_accessions(self.prot, reference_columns, gene_map=gene_to_acc)
+                reference_acc = [ref for ref in resolved if ref in self.prot.var.index]
+                reference_columns = [self.prot.var.index.get_loc(ref) for ref in reference_acc]
+                print(f"{format_log_prefix('info')} Normalizing using found reference columns: {reference_acc}")
+                self._history.append(f"Used reference_feature normalization with resolved accessions: {resolved}")
+            else:
+                reference_columns = [int(ref) for ref in reference_columns]
+                reference_acc = [self.prot.var.index[ref] for ref in reference_columns if ref < self.prot.shape[1]]
+                print(f"{format_log_prefix('info')} Normalizing using reference columns: {reference_acc}")
+                self._history.append(f"Used reference_feature normalization with resolved accessions: {reference_acc}")
 
-def import_data(source: str, **kwargs):
+            scaling_factors = np.nanmean(np.nanmax(data[:, reference_columns], axis=0) / (data[:, reference_columns]), axis=1)
+
+            nan_rows = np.where(np.isnan(scaling_factors))[0]
+            if nan_rows.size > 0:
+                print(f"{format_log_prefix('warn')} Rows {list(nan_rows)} have all missing reference values.")
+                print(f"{format_log_prefix('info')} Falling back to row median normalization for these rows.")
+
+                fallback = np.nanmedian(data[nan_rows, :], axis=1)
+                fallback[fallback == 0] = np.nan  # avoid division by 0
+                fallback_scale = np.nanmax(fallback) / fallback
+                fallback_scale = np.where(np.isnan(fallback_scale), 1.0, fallback_scale)  # default to 1.0 if all else fails
+
+                scaling_factors[nan_rows] = fallback_scale
+
+            scaling_factors = np.where(np.isnan(scaling_factors), np.nanmean(scaling_factors), scaling_factors)
+            data_norm = data * scaling_factors[:, None]
+
+        elif method == 'robust_scale':
+            # norm by robust_scale: Center to the median and component wise scale according to the interquartile range. See sklearn.preprocessing.robust_scale for more information.
+            from sklearn.preprocessing import robust_scale
+            data_norm = robust_scale(data, axis=1)
+
+        elif method == 'quantile_transform':
+            # norm by quantile_transform: Transform features using quantiles information. See sklearn.preprocessing.quantile_transform for more information.
+            from sklearn.preprocessing import quantile_transform
+            data_norm = quantile_transform(data, axis=1)
+
+        else:
+            raise ValueError(f"Unknown method: {method}")
+
+        return data_norm
+    
+    # --- scanpy functions ---
+    def clean_X(self, on='prot', inplace=True, set_to=0, layer=None, to_sparse=False, backup_layer="X_preclean", verbose=True):
+        """
+        Replace NaNs in .prot.X or a specified .prot layer with a given value (default: 0).
+        Optionally saves a backup of the original data to a layer (default: 'X_preclean').
+
+        Parameters:
+        - on (str): The attribute to clean ('prot' or 'obs').
+        - inplace (bool): If True, overwrite .X or .layers[layer]. If False, return cleaned matrix.
+        - set_to (float): Value to replace NaNs with.
+        - layer (str or None): Target .prot layer to clean (default: .X).
+        - to_sparse (bool): If True, convert result to sparse.
+        - backup_layer (str or None): If inplace=True and layer=None, save .X to this layer (default: 'X_preclean').
+        - verbose (bool): Print status messages.
+
+        Returns:
+        - np.ndarray or None: Cleaned matrix if inplace=False, otherwise None.
+        """
+        if not self._check_data(on):
+            return
+        adata = self.prot if on == 'prot' else self.pep
+
+        # Choose source matrix
+        X = adata.layers[layer] if layer else adata.X
+        is_sparse = sparse.issparse(X)
+
+        # Copy for manipulation
+        X_clean = X.copy()
+        nan_count = 0
+
+        if is_sparse:
+            nan_mask = np.isnan(X_clean.data)
+            nan_count = np.sum(nan_mask)
+            if nan_count > 0:
+                X_clean.data[nan_mask] = set_to
+        else:
+            nan_mask = np.isnan(X_clean)
+            nan_count = np.sum(nan_mask)
+            X_clean[nan_mask] = set_to
+
+        if to_sparse and not is_sparse:
+            X_clean = sparse.csr_matrix(X_clean)
+
+        # Apply result
+        if inplace:
+            if layer:
+                self.prot.layers[layer] = X_clean
+            else:
+                # Save original .X if requested and not already backed up
+                if backup_layer and backup_layer not in self.prot.layers:
+                    self.prot.layers[backup_layer] = self.prot.X.copy()
+                    if verbose:
+                        print(f"{format_log_prefix('info')} Backed up .X to .layers['{backup_layer}']")
+                self.prot.X = X_clean
+            if verbose:
+                print(f"{format_log_prefix('result')} Cleaned {'layer ' + layer if layer else '.X'}: replaced {nan_count} NaNs with {set_to}.")
+        else:
+            if verbose:
+                print(f"{format_log_prefix('result')} Returning cleaned matrix: {nan_count} NaNs replaced with {set_to}.")
+            return X_clean
+
+
+def import_data(source_type: str, **kwargs):
     """
     Unified wrapper for importing data into a pAnnData object.
+    For pd, arguments are prot_file, pep_file, obs_columns.
+    For diann, arguments are report_file, obs_columns.
     
     Parameters:
     - source (str): The tool or data source. Options:
@@ -1891,29 +2788,46 @@ def import_data(source: str, **kwargs):
     Returns:
     - pAnnData object
     """
-    source = source.lower()
+    print(f"{format_log_prefix('user')} Importing data of type [{source_type}]")
 
-    if source in ['diann', 'dia-nn']:
-        return import_diann(**kwargs)
+    source_type = source_type.lower()
+    obs_columns = kwargs.pop('obs_columns', None)
+    if obs_columns is None:
+        source = kwargs.get('report_file') if 'report_file' in kwargs else kwargs.get('prot_file')
+        format_info, fallback_columns, fallback_obs = resolve_obs_columns(source, source_type)
 
-    elif source in ['pd', 'proteomediscoverer', 'proteome_discoverer', 'pd2.5', 'pd24']:
-        return import_proteomeDiscoverer(**kwargs)
+        if format_info["uniform"]:
+            # Prompt user to rerun with obs_columns
+            return None
+        else:
+            # non-uniform format, use fallback obs
+            kwargs["obs_columns"] = fallback_columns
+            kwargs["obs"] = fallback_obs
 
-    elif source in ['fragpipe', 'fp']:
+    if source_type in ['diann', 'dia-nn']:
+        return _import_diann(**kwargs)
+
+    elif source_type in ['pd', 'proteomediscoverer', 'proteome_discoverer', 'pd2.5', 'pd24']:
+        return _import_proteomeDiscoverer(**kwargs)
+
+    elif source_type in ['fragpipe', 'fp']:
         raise NotImplementedError("FragPipe import is not yet implemented. Stay tuned!")
 
-    elif source in ['spectronaut', 'sn']:
+    elif source_type in ['spectronaut', 'sn']:
         raise NotImplementedError("Spectronaut import is not yet implemented. Stay tuned!")
 
     else:
-        raise ValueError(f"❌ Unsupported import source: '{source}'. "
+        raise ValueError(f"{format_log_prefix('error')} Unsupported import source: '{source_type}'. "
                          "Valid options: 'diann', 'proteomeDiscoverer', 'fragpipe', 'spectronaut'.")
 
-def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample']):
+def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample'], **kwargs):
+    return import_data(source_type='pd', prot_file=prot_file, pep_file=pep_file, obs_columns=obs_columns)
+
+def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample'], **kwargs):
     if not prot_file and not pep_file:
-        raise ValueError("❌ At least one of prot_file or pep_file must be provided")
-    print("--------------------------\nStarting import...\n--------------------------")
-    
+        raise ValueError(f"{format_log_prefix('error')} At least one of prot_file or pep_file must be provided")
+    print("--------------------------\nStarting import [Proteome Discoverer]\n--------------------------")
+
     if prot_file:
         # -----------------------------
         print(f"Source file: {prot_file} / {pep_file}")
@@ -1922,7 +2836,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         if prot_file.endswith('.txt') or prot_file.endswith('.tsv'):
             prot_all = pd.read_csv(prot_file, sep='\t')
         elif prot_file.endswith('.xlsx'):
-            print("⚠️ The read_excel function is slower compared to reading .tsv or .txt files. For improved performance, consider converting your data to .tsv or .txt format.")
+            print("💡 Tip: The read_excel function is slower compared to reading .tsv or .txt files. For improved performance, consider converting your data to .tsv or .txt format.")
             prot_all = pd.read_excel(prot_file)
         # prot_X: sparse data matrix
         prot_X = sparse.csr_matrix(prot_all.filter(regex='Abundance: F', axis=1).values).transpose()
@@ -1937,9 +2851,9 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         prot_obs_names = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: (F\d+):')[0].values
         # prot_obs: sample typing from the column name, drop column if all 'n/a'
         prot_obs = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
-        prot_obs = pd.DataFrame(prot_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(str.strip).astype('category')
+        prot_obs = pd.DataFrame(prot_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).applymap(str.strip).astype('category')
         if (prot_obs == "n/a").all().any():
-            print("⚠️ Found columns with all 'n/a'. Dropping these columns.")
+            print(f"{format_log_prefix('warn')} Found columns with all 'n/a'. Dropping these columns.")
             prot_obs = prot_obs.loc[:, ~(prot_obs == "n/a").all()]
 
         print(f"Number of files: {len(prot_obs_names)}")
@@ -1953,7 +2867,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         if pep_file.endswith('.txt') or pep_file.endswith('.tsv'):
             pep_all = pd.read_csv(pep_file, sep='\t')
         elif pep_file.endswith('.xlsx'):
-            print("⚠️ The read_excel function is slower compared to reading .tsv or .txt files. For improved performance, consider converting your data to .tsv or .txt format.")
+            print("💡 Tip: The read_excel function is slower compared to reading .tsv or .txt files. For improved performance, consider converting your data to .tsv or .txt format.")
             pep_all = pd.read_excel(pep_file)
         # pep_X: sparse data matrix
         pep_X = sparse.csr_matrix(pep_all.filter(regex='Abundance: F', axis=1).values).transpose()
@@ -1967,9 +2881,9 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         pep_var = pep_all.loc[:, 'Modifications':'Theo. MH+ [Da]']
         # prot_obs: sample typing from the column name, drop column if all 'n/a'
         pep_obs = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
-        pep_obs = pd.DataFrame(pep_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(str.strip).astype('category')
+        pep_obs = pd.DataFrame(pep_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).applymap(str.strip).astype('category')
         if (pep_obs == "n/a").all().any():
-            print("⚠️ Found columns with all 'n/a'. Dropping these columns.")
+            print(f"{format_log_prefix('warn')} Found columns with all 'n/a'. Dropping these columns.")
             pep_obs = pep_obs.loc[:, ~(pep_obs == "n/a").all()]
 
         print(f"Peptides: {len(pep_var)}")
@@ -1999,7 +2913,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
         prot_var_set = set(prot_var_names)
 
         if mlb_classes_set != prot_var_set:
-            print("⚠️ Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.")
+            print(f"{format_log_prefix('warn')} Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.")
             print(f"Overlap: {len(mlb_classes_set & prot_var_set)}")
             print(f"Unique to peptide data: {mlb_classes_set - prot_var_set}")
             print(f"Unique to protein data: {prot_var_set - mlb_classes_set}")
@@ -2016,15 +2930,18 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
             "prot_file": prot_file,
             "pep_file": pep_file
         },
-        history_msg="Imported protein and/or peptide data from Proteome Discoverer."
+        history_msg=f"Imported Proteome Discoverer data using source file(s): {prot_file}, {pep_file}."
     )
 
     return pdata
 
-def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Normalised', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes']):
+def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value: str = 'PG.MaxLFQ', pep_value: str = 'Precursor.Normalised', prot_var_columns: List[str] = ['Genes', 'Master.Protein'], pep_var_columns: List[str] = ['Genes', 'Protein.Group', 'Precursor.Charge', 'Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes'], **kwargs):
+    return import_data(source_type='diann', report_file=report_file, obs_columns=obs_columns, prot_value=prot_value, pep_value=pep_value, prot_var_columns=prot_var_columns, pep_var_columns=pep_var_columns, **kwargs)
+
+def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, obs: Optional[pd.DataFrame] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Normalised', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes'], **kwargs):
     if not report_file:
         raise ValueError("Importing from DIA-NN: report.tsv or report.parquet must be provided")
-    print("--------------------------\nStarting import...\n--------------------------")
+    print("--------------------------\nStarting import [DIA-NN]\n--------------------------")
 
     print(f"Source file: {report_file}")
     # if csv, then use pd.read_csv, if parquet then use pd.read_parquet('example_pa.parquet', engine='pyarrow')
@@ -2043,7 +2960,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
             if 'PG.Quantity' not in report_all.columns:
                 raise ValueError("Reports generated with DIA-NN version >2.0 do not contain PG.Quantity values, please use PG.MaxLFQ .")
         else:
-            print("⚠️ Protein value specified is not PG.MaxLFQ, please check if correct.")
+            print(f"{format_log_prefix('info')} Protein value specified is not PG.MaxLFQ, please check if correct.")
     prot_X_pivot = report_all.pivot_table(index='Master.Protein', columns='Run', values=prot_value, aggfunc='first', sort=False)
     prot_X = sparse.csr_matrix(prot_X_pivot.values).T
     # prot_var_names: protein names
@@ -2060,14 +2977,14 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
 
     if missing_columns:
         warnings.warn(
-            f"Warning: The following columns are missing: {', '.join(missing_columns)}. "
+            f"{format_log_prefix('warn')} The following columns are missing: {', '.join(missing_columns)}. "
         )
 
     prot_var = report_all.loc[:, existing_prot_var_columns].drop_duplicates(subset='Master.Protein').drop(columns='Master.Protein')
     # prot_obs: sample typing from the column name
-    if obs_columns is None:
-        num_files = len(prot_X_pivot.columns)
-        prot_obs = pd.DataFrame({'File': range(1, num_files + 1)})
+    if obs is not None:
+        prot_obs = obs
+        # obs_columns = obs_columns
     else:
         prot_obs = pd.DataFrame(prot_X_pivot.columns.values, columns=['Run'])['Run'].str.split('_', expand=True).rename(columns=dict(enumerate(obs_columns)))
     
@@ -2089,7 +3006,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
 
     if missing_columns:
         warnings.warn(
-            f"⚠️ The following columns are missing: {', '.join(missing_columns)}. "
+            f"{format_log_prefix('warn')} The following columns are missing: {', '.join(missing_columns)}. "
             "Consider running analysis in the newer version of DIA-NN (1.8.1). "
             "Peptide-protein mapping may differ."
         )
@@ -2109,7 +3026,6 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     index_dict = {protein: index for index, protein in enumerate(mlb.classes_)}
     reorder_indices = [index_dict[protein] for protein in prot_var_names]
     rs = rs[:, reorder_indices]
-    # print("RS matrix successfully computed")
 
     # -----------------------------
     # ASSERTIONS
@@ -2119,7 +3035,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     prot_var_set = set(prot_var_names)
 
     if mlb_classes_set != prot_var_set:
-        print("⚠️ Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.")
+        print(f"{format_log_prefix('warn')} Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.")
         print(f"Overlap: {len(mlb_classes_set & prot_var_set)}")
         print(f"Unique to peptide data: {mlb_classes_set - prot_var_set}")
         print(f"Unique to protein data: {prot_var_set - mlb_classes_set}")
@@ -2209,12 +3125,155 @@ def _create_pAnnData_from_parts(
 
     print("")
     if not pdata.validate():
-        print("⚠️ Validation issues found. Use `pdata.validate()` to inspect.")
+        print(f"{format_log_prefix('warn')} Validation issues found. Use `pdata.validate()` to inspect.")
 
     if history_msg:
         pdata._append_history(history_msg)
 
     print("--------------------------")
-    print("✅ Import complete. Use `print(pdata)` to view the object.")
+    print(f"{format_log_prefix('result')} Import complete. Use `print(pdata)` to view the object.")
 
     return pdata
+
+def suggest_obs_columns(source=None, source_type=None, filenames=None, delimiter=None):
+    """
+    Extract and suggest sample-level metadata fields from filenames in a Proteome Discoverer or DIA-NN report.
+
+    This function loads sample names from a DIA-NN or PD report file and parses them into tokens based on a delimiter.
+    Each token is classified into metadata categories such as 'gradient', 'amount', or 'well_position' using regex
+    patterns and fuzzy keyword matching. The result is printed and returned in a format suitable for `.obs` annotation.
+
+    Parameters:
+    - source (str or Path): Path to the input file.
+    - source_type (str, optional): Type of the source file ('diann', 'pd', etc.). Will be used to determine the file format.
+    - filenames (list of str, optional): Sample filenames or run names. If provided, bypasses file reading.
+    - delimiter (str, optional): Delimiter used in the file. If not provided, will be inferred from the run names.
+
+    Returns:
+    - list of str: Suggested observation columns.
+    """
+    from pathlib import Path
+    import csv
+    from collections import Counter
+    from scviz import obs_utils
+
+    if filenames is None:
+        if source is None or source_type is None:
+            raise ValueError("If `filenames` is not provided, both `source` and `source_type` must be specified.")
+        source = Path(source)
+        filenames = obs_utils.get_filenames(source, source_type=source_type)
+    
+    if not filenames:
+        raise ValueError("No sample filenames could be extracted from the provided source.")
+
+    # Pick the first filename for token analysis
+    fname = filenames[0]
+
+    # Infer delimiter if not provided
+    if delimiter is None:
+        all_delims = re.findall(r'[^A-Za-z0-9]', fname)
+        delimiter = Counter(all_delims).most_common(1)[0][0] if all_delims else '_'
+        print(f"Auto-detecting '{delimiter}' as delimiter.")
+
+    if source_type == 'pd':
+        # Custom comma-based parsing for PD
+        match = re.match(r'Abundance: (F\d+): (.+)', f"Abundance: F1: {fname}")
+        if match:
+            _, meta = match.groups()
+            raw_tokens = [t.strip() for t in meta.split(',') if t.strip().lower() != 'n/a']
+            fname = meta
+            tokens = raw_tokens
+            delimiter = ','
+        else:
+            raise ValueError(f"Could not parse metadata from PD filename: {fname}")
+
+    # --- Classify tokens ---
+    tokens = fname.split(delimiter)
+    suggestion = {}
+    obs_columns = []
+    token_label_map = []
+    multi_matched_tokens = []
+    unrecognized_tokens = []
+
+    for tok in tokens:
+        labels = obs_utils.classify_subtokens(tok)
+        label = labels[0]
+        if label == "unknown??":
+            obs_columns.append(f"<{tok}?>")
+        else:
+            obs_columns.append(label)
+        token_label_map.append((tok, labels))
+        if label != "unknown??" and label not in suggestion:
+            suggestion[label] = tok
+        if "unknown??" in labels:
+            unrecognized_tokens.append(tok)
+        elif len(labels) > 1:
+            multi_matched_tokens.append((labels, tok))
+
+    # --- Print suggestions ---
+    print(f"\nFrom filename: {fname}")
+    print("Suggested .obs columns:")
+    for tok, labels in token_label_map:
+        print(f"  {' OR '.join(labels):<26}: {tok}")
+    if multi_matched_tokens:
+        print(f"\nMultiple matched token(s): {[t for _, t in multi_matched_tokens]}")
+    if unrecognized_tokens:
+        print(f"Unrecognized token(s): {unrecognized_tokens}")
+    if multi_matched_tokens or unrecognized_tokens:
+        print("Please manually label these.")
+
+    print(f"\n{format_log_prefix('info_only')} Suggested obs:\nobs_columns = {obs_columns}")
+
+    return obs_columns
+
+def resolve_obs_columns(source: str, source_type: str, delimiter: Optional[str] = None) -> Tuple[Dict[str, Any], Optional[List[str]], Optional[pd.DataFrame]]:
+    """
+    Resolve observation columns from sample filenames or metadata columns.
+
+    Parameters
+    ----------
+    filenames : list of str
+        List of filenames (from DIA-NN or PD).
+    source_type : str
+        Either 'diann' or 'pd'.
+    delimiter : str, optional
+        Delimiter to split filename tokens.
+
+    Returns
+    -------
+    suggested_obs : list of str or None
+        List of suggested observation column names, or None if fallback is used.
+    obs_df : pd.DataFrame
+        DataFrame representing initial .obs with either suggested columns or fallback.
+    """
+    from scviz import obs_utils
+    
+    filenames = obs_utils.get_filenames(source, source_type=source_type)
+    if not filenames:
+        raise ValueError(f"{format_log_prefix('error')} No sample filenames could be extracted from the provided source: {source}.")
+
+    if delimiter is None:
+        first_fname = filenames[0]
+        all_delims = re.findall(r'[^A-Za-z0-9]', first_fname)
+        delimiter = Counter(all_delims).most_common(1)[0][0] if all_delims else '_'
+        print(f"      Auto-detecting '{delimiter}' as delimiter from first filename.")
+
+    format_info = obs_utils.analyze_filename_formats(filenames, delimiter=delimiter)
+
+    if format_info["uniform"]:
+        # Uniform format — suggest obs_columns using classification
+        print(f"{format_log_prefix('info_only')} Filenames are uniform. Using `suggest_obs_columns()` to recommend obs_columns...")
+        obs_columns = suggest_obs_columns(filenames=filenames, source_type=source_type, delimiter=delimiter)
+        print(f"{format_log_prefix('warn')} Please review the suggested `obs_columns` above.")
+        print("   → If acceptable, rerun `import_data(..., obs_columns=...)` with this list.\n")
+        return format_info, obs_columns, None
+    else:
+        # Non-uniform format — return fallback DataFrame
+        print(f"{format_log_prefix('warn',indent=2)} {len(format_info['n_tokens'])} different filename formats detected. Proceeding with fallback `.obs` structure... (File Number, Parsing Type)")
+        
+        obs = pd.DataFrame({
+            "File": list(range(1, len(filenames) + 1)),
+            "parsingType": [format_info['group_map'][fname] for fname in filenames]
+        })
+        obs_columns = ["File", "parsingType"]
+        return format_info, obs_columns, obs

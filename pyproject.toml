@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scviz"
-version = "0.1.11"
+version = "0.2.1"
 authors = [
   {name="Marion Pang", email="sr_pang@hotmail.com"},
 ]
@@ -18,18 +18,18 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-  "numpy == 1.26.4",
-  "pandas == 2.2.2", 
-  "matplotlib == 3.8.4", 
-  "seaborn == 0.13.2",
-  "upsetplot == 0.9.0", 
-  "scikit-learn == 1.4.2", 
-  "scipy == 1.13.0",
-  "umap-learn == 0.5.6", 
-  "adjustText == 1.1.1", 
-  "anndata == 0.10.7",
+  "numpy",
+  "pandas", 
+  "matplotlib", 
+  "seaborn",
+  "upsetplot", 
+  "scikit-learn", 
+  "scipy",
+  "umap-learn", 
+  "adjustText", 
+  "anndata",
   "requests",
-  "matplotlib_venn == 0.11.10",
+  "matplotlib_venn",
   "pyarrow",
   "scanpy"
 ]
@@ -41,6 +41,10 @@ Issues = "https://github.com/gnaprs/scviz/issues"
 [tool.pytest.ini_options]
 pythonpath = [
   "."
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:jupyter_client.connect",
+    "ignore::DeprecationWarning:upsetplot.plotting"
 ]
 
 [project.optional-dependencies]

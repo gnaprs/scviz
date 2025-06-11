@@ -22,7 +22,6 @@ Todo:
 """
 
 import re
-
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
@@ -78,7 +77,7 @@ def get_color(resource_type, n=None):
     
     elif resource_type == 'cmap':
         if n is None:
-            raise ValueError("Parameter 'n' must be specified when resource_type is 'cmap'")
+            n = 1  # Default to generating one colormap from the first base color
         if n > len(base_colors):
             warnings.warn(f"Requested {n} colormaps, but only {len(base_colors)} base colors. Reusing from the start.")
         cmaps = []
@@ -86,7 +85,7 @@ def get_color(resource_type, n=None):
             color = base_colors[i % len(base_colors)]
             cmap = mcolors.LinearSegmentedColormap.from_list(f'cmap_{i}', ['white', color])
             cmaps.append(cmap)
-        return cmaps
+        return cmaps if n > 1 else cmaps[0]
     
     elif resource_type == 'palette':
         return sns.color_palette(base_colors)
@@ -305,8 +304,6 @@ def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
     import seaborn as sns
     import matplotlib.pyplot as plt
     import warnings
-
-    adata = utils.get_adata(pdata, on)
 
     # Get abundance DataFrame
     df = utils.get_abundance(
@@ -643,6 +640,20 @@ def resolve_pca_colors(adata, classes, cmap, layer="X"):
     else:
         raise ValueError("Invalid classes input.")
 
+# NOTE: STRING enrichment plots live in enrichment.py, not here.
+# This function is re-documented here for discoverability.
+def plot_enrichment_svg(*args, **kwargs):
+    """
+    Plot STRING enrichment results as an SVG figure.
+
+    NOTE:
+        This function is implemented in `enrichment.py`, not `plotting.py`.
+
+    See Also:
+        scviz.enrichment.plot_enrichment_svg
+    """
+    from .enrichment import plot_enrichment_svg as actual_plot
+    return actual_plot(*args, **kwargs)
 
 # TODO
 def plot_umap(ax, pdata, color = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False):
@@ -693,10 +704,11 @@ def plot_umap(ax, pdata, color = None, layer = "X", on = 'protein', cmap='defaul
     umap = adata.uns['umap']
 
     y = utils.get_samplenames(adata, color)
-    color_dict = {class_type: i for i, class_type in enumerate(set(y))}
+    color_dict = {class_type: i for i, class_type in enumerate(sorted(set(y)))}
     color_mapped = [color_dict[val] for val in y]
+    n_classes = len(color_dict)
     if cmap == 'default':  
-        cmap = get_color('cmap')
+        cmap = mcolors.ListedColormap(get_color('colors', n=n_classes))
     else:
         cmap = cm.get_cmap(cmap)
     norm = mcolors.Normalize(vmin=min(color_mapped), vmax=max(color_mapped))
@@ -726,7 +738,7 @@ def plot_pca_scree(ax, pca):
 
     Parameters:
     ax (matplotlib.axes.Axes): The axes on which to plot the scree plot.
-    pca (sklearn.decomposition.PCA): The fitted PCA model.
+    pca (sklearn.decomposition.PCA or dict): The fitted PCA model, or a dict from .uns with keys: 'variance_ratio'.
 
     Returns:
     ax (matplotlib.axes.Axes): The axes with the plotted scree plot.
@@ -741,10 +753,20 @@ def plot_pca_scree(ax, pca):
     >>> fig, ax = plt.subplots(1,1)
     >>> ax, pca = scplt.plot_pca(ax, data, cases, cmap='viridis', s=20, alpha=.8, plot_pc=[1,2])
     >>> ax = scplt.plot_pca_scree(ax, pca)
+    >>> scplt.plot_pca_scree(ax, data.prot.uns['pca'])
     """
+    if isinstance(pca, dict):
+        variance_ratio = np.array(pca["variance_ratio"])
+        n_components = len(variance_ratio)
+    else:
+        variance_ratio = pca.explained_variance_ratio_
+        n_components = pca.n_components_
 
-    PC_values = np.arange(pca.n_components_) + 1
-    ax.plot(PC_values, pca.explained_variance_ratio_, 'o-', linewidth=2, color='blue')
+    PC_values = np.arange(1, n_components + 1)
+    cumulative = np.cumsum(variance_ratio)
+
+    ax.plot(PC_values, variance_ratio, 'o-', linewidth=2, label='Explained Variance', color='blue')
+    ax.plot(PC_values, cumulative, 'o--', linewidth=2, label='Cumulative Variance', color='gray')
     ax.set_title('Scree Plot')
     ax.set_xlabel('Principal Component')
     ax.set_ylabel('Variance Explained')
@@ -944,7 +966,6 @@ def add_volcano_legend(ax, colors=None):
         Line2D([0], [0], marker='o', color='w', label='NS', markerfacecolor=colors['not significant'], markersize=6)
     ]
     ax.legend(handles=handles, loc='upper right', frameon=True, fontsize=7)
-
 
 def mark_volcano(ax, volcano_df, label, label_color="black", label_type='Gene', s=10, alpha=1, show_names=True, fontsize=8):
     """
