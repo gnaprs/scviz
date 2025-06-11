@@ -2791,7 +2791,7 @@ def import_data(source_type: str, **kwargs):
     print(f"{format_log_prefix('user')} Importing data of type [{source_type}]")
 
     source_type = source_type.lower()
-    obs_columns = kwargs.pop('obs_columns', None)
+    obs_columns = kwargs.get('obs_columns', None)
     if obs_columns is None:
         source = kwargs.get('report_file') if 'report_file' in kwargs else kwargs.get('prot_file')
         format_info, fallback_columns, fallback_obs = resolve_obs_columns(source, source_type)
