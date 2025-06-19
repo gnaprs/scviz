@@ -43,24 +43,24 @@ from scviz import utils
 
 sns.set_theme(context='paper', style='ticks')
 
-def get_color(resource_type, n=None):
+def get_color(resource_type: str, n=None):
     """
     Generate a list of colors, a colormap, or a palette from package defaults.
 
-    Parameters:
-    - resource_type (str): The type of resource to generate. Options are 'colors', 'cmap', and 'palette'. If 'show', displays all 7 colors.
-    - n (int, optional): The number of colors or colormaps to generate. Required for 'colors' and 'cmap'.
+    Args:
+        resource_type (str): The type of resource to generate. Options are 'colors', 'cmap', and 'palette'. If 'show', displays all 7 colors.
+        n (int, optional): The number of colors or colormaps to generate. Required for 'colors' and 'cmap'.
 
     Returns:
-    - list of str: If resource_type is 'colors', a list of hex color strings. Repeats colors if n > 7.
-    - list of matplotlib.colors.LinearSegmentedColormap: If resource_type is 'cmap'
-    - seaborn.color_palette: If resource_type is 'palette'
-    - None: If resource_type is 'show', displays the colors and colormaps.
+        colors (list of str): If resource_type is 'colors', a list of hex color strings. Repeats colors if n > 7.
+        cmap (list of matplotlib.colors.LinearSegmentedColormap): If resource_type is 'cmap'
+        palette (seaborn.color_palette): If resource_type is 'palette'
+        (None): If resource_type is 'show', displays the colors and colormaps.
 
-    Example:
-    >>> colors = get_color('colors', 5)
-    >>> cmap = get_color('cmap')
-    >>> palette = get_color('palette')
+    Examples:
+        >>> colors = get_color('colors', 5)
+        >>> cmap = get_color('cmap')
+        >>> palette = get_color('palette')
     """
 
     # --- 
