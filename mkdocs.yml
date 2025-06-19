@@ -12,6 +12,9 @@ theme:
   favicon: assets/logo.png
   features:
     - navigation.footer
+    - content.footnote.tooltips
+    - content.code.copy
+    - content.code.select
   palette:
     # Dark Mode
     - scheme: slate
@@ -49,6 +52,7 @@ markdown_extensions:
       alternate_style: true
   - admonition
   - pymdownx.details
+  - footnotes
 extra:
   social:
     - icon: fontawesome/brands/github
@@ -59,6 +63,7 @@ extra:
       link: https://pypi.org/project/scviz/
 plugins:
   - mkdocstrings
+  - search
 
 copyright: Copyright &copy; 2025 Marion Pang
 
@@ -77,7 +82,8 @@ nav:
       - Content-Tabs: content-tabs.md
       - Diagram: diagram.md
   - API reference:
-      - scviz: reference/plotting.md
+      - scviz.plotting: reference/plotting.md
+      - scviz.pAnnData: reference/pAnnData.md
       # - scviz.utils: reference/scviz.utils.md
       # - scviz.renderers: reference/scviz.renderers.md
   - Author's website: https://gnaprs.github.io/

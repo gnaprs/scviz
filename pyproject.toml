@@ -31,7 +31,8 @@ dependencies = [
   "requests",
   "matplotlib_venn",
   "pyarrow",
-  "scanpy"
+  "scanpy",
+  "IPython"
 ]
 
 [project.urls]
