@@ -13,6 +13,7 @@
 9. consider QC metrics beyond what we already have?
 10. add gene to uniprot accession conversion function
 11. allow users to input "obs" for their own metadata
+12. string db values rank api ([text](https://string-db.org/cgi/help?subpage=api%23valuesranks-enrichment-api)) - also check about string API key; maybe can generate one per user instead? (store local copy in package if that's possible)
 
 # ENHANCEMENTS (not as important)
 1. when updating .summary/obs, move prot/pep details to the right (prioritize metadata)
