@@ -39,26 +39,40 @@ from .enrichment import get_string_mappings, resolve_to_accessions, enrichment_f
 
 class pAnnData:
     """
-    Class for storing protein and peptide data, with additional relational data between protein and peptide.
+    Class for storing protein and peptide data, along with their relational structure.
+
+    This class holds protein-level and peptide-level expression matrices, as well as a relational structure (RS matrix)
+    that links peptides to their parent proteins. It also tracks processing history, sample-level summaries, and results
+    from differential expression analysis or other statistics.
+
+    ## Filter Functions
     
-    Parameters
-    ----------
-    prot : np.ndarray | sparse.spmatrix
-        Protein data matrix.
-    pep : np.ndarray | sparse.spmatrix
-        Peptide data matrix.
-    rs : np.ndarray | sparse.spmatrix
-        Protein x peptide relational data. Only if both protein and peptide data are provided.
-    history : List[str]
-        List of actions taken on the data.
-    summary : pd.DataFrame
-        Summary of the data, typically used for filtering.
-    stats : Dict
-        Dictionary of differential expression results.
-    
-    !TODO:
-    - Decide whether classes or class_types
-        
+    Functions:
+        filter_prot: Filter based on protein metadata.
+        filter_sample: Filter based on sample metadata.
+
+    ## Enrichment
+
+    Functions:
+        get_string_mappings: Resolve STRING IDs.
+        resolve_to_accessions: Map genes to protein accessions.
+
+    Args:
+        prot (AnnData): Protein data matrix.
+
+        pep (AnnData): Peptide data matrix.
+
+        rs (np.ndarray or sparse.spmatrix): Protein × peptide relational matrix.
+            Only required if both protein and peptide data are provided.
+
+        history (list of str): List of operations or transformations applied to the dataset.
+
+        summary (pd.DataFrame): Per-sample summary metadata, typically used for filtering or grouping.
+
+        stats (dict): Dictionary of statistical results (e.g., differential expression, imputation metadata).
+
+    Todo:
+        Decide whether to use the term `classes` or `class_types` for internal grouping semantics.
     """
 
     def __init__(self, 
@@ -424,9 +438,9 @@ class pAnnData:
         # 3. Final messaging
         if verbose and not (sync_back or self._summary_is_stale):
             if recompute:
-                print(f"{format_log_prefix('update',indent=1)} Updating summary [recompute]: Recomputed metrics and refreshed `.summary` from `.obs`.")
+                print(f"{format_log_prefix('update',indent=3)} Updating summary [recompute]: Recomputed metrics and refreshed `.summary` from `.obs`.")
             else:
-                print(f"{format_log_prefix('update',indent=1)} Updating summary [refresh]: Refreshed `.summary` view (no recompute).")
+                print(f"{format_log_prefix('update',indent=3)} Updating summary [refresh]: Refreshed `.summary` view (no recompute).")
 
         # 4. Final cleanup
         self._summary_is_stale = False
@@ -994,32 +1008,45 @@ class pAnnData:
 
     def filter_prot(self, condition = None, accessions=None, return_copy = 'True', debug=False):
         """
-        Filters the protein data based on a protein metadata condition or a list of accession numbers/gene name.
-        Also removes peptides that are linked only to removed proteins and updates the RS matrix accordingly.
+        Filter protein data based on metadata conditions or accession list (protein name and gene name).
 
-        Parameters:
-        - condition (str): A condition string to filter protein metadata. Can include:
-            - Standard comparisons (e.g. `"Protein FDR Confidence: Combined == 'High'"`)
-            - Substring search using `includes` (e.g. `"Description includes 'p97'"`)
-        - accessions (list of str): List of accession numbers (var_names) to keep.
-        - return_copy (bool): If True, returns a filtered copy. If False, modifies in place.
-        - debug (bool): If True, prints debugging information.
+        This method filters the protein-level data either by evaluating a string condition on the protein metadata,
+        or by providing a list of protein accession numbers (or gene names) to keep. Peptides that are exclusively
+        linked to removed proteins are also removed, and the RS matrix is updated accordingly.
+        
+        Args:
+            condition (str): A condition string to filter protein metadata. Supports:
+
+                - Standard comparisons, e.g. `"Protein FDR Confidence: Combined == 'High'"`
+                - Substring queries using `includes`, e.g. `"Description includes 'p97'"`
+            accessions (list of str, optional): List of accession numbers (var_names) to keep.
+            return_copy (bool): If True, returns a filtered copy. If False, modifies in place.
+            debug (bool): If True, prints debugging information.
 
         Returns:
-        - Filtered pAnnData object if `return_copy=True`, else modifies in place and returns None.
+            pAnnData (pAnnData): Returns a filtered pAnnData object if `return_copy=True`. 
+            None (None): Otherwise, modifies in-place and returns None.
 
-        Example:
-        >>> condition = "Protein FDR Confidence: Combined == 'High'"
-        >>> pdata.filter_prot(condition)
-        
-        >>> condition = "Description includes 'p97'"
-        >>> pdata.filter_prot(condition)
+        Examples:
+            Filter by metadata condition:
 
-        >>> condition = "Score > 0.75"
-        >>> pdata.filter_prot(condition)
+                >>> condition = "Protein FDR Confidence: Combined == 'High'"
+                >>> pdata.filter_prot(condition=condition)
 
-        >>> accessions = ['GAPDH', 'P53']
-        >>> pdata.filter_prot(accessions=accessions)
+            Substring match on protein description:
+
+                >>> condition = "Description includes 'p97'"
+                >>> pdata.filter_prot(condition=condition)
+
+            Numerical condition on metadata:
+
+                >>> condition = "Score > 0.75"
+                >>> pdata.filter_prot(condition=condition)
+
+            Filter by specific protein accessions:
+
+                >>> accessions = ['GAPDH', 'P53']
+                >>> pdata.filter_prot(accessions=accessions)
         """
 
         if not self._check_data('protein'):
@@ -1465,8 +1492,8 @@ class pAnnData:
         pdata.update_summary(recompute=False)
 
         return pdata if return_copy else None
-    
-    def _filter_sample_values(self, values, exact_cases, debug=False, return_copy=True):
+
+    def _filter_sample_values(self, values, exact_cases, verbose=True, debug=False, return_copy=True):
         """
         Filter samples in a pAnnData object using dictionary-style categorical matching.
 
@@ -1575,9 +1602,9 @@ class pAnnData:
             message += f"    → Samples kept: {n_samples}"
             message += f"\n    → Proteins kept: {len(pdata.prot.var)}"
 
-        print(message)
+        print(message) if verbose else None
         pdata._append_history(message)
-        pdata.update_summary(recompute=False)
+        pdata.update_summary(recompute=False, verbose=verbose)
 
         return pdata
 
@@ -2100,8 +2127,8 @@ class pAnnData:
 
 
         # --- Sample filtering ---
-        pdata_case1 = self._filter_sample_values(values=group1_dict, exact_cases=True, return_copy=True)
-        pdata_case2 = self._filter_sample_values(values=group2_dict, exact_cases=True, return_copy=True)
+        pdata_case1 = self._filter_sample_values(values=group1_dict, exact_cases=True, return_copy=True, verbose=False)
+        pdata_case2 = self._filter_sample_values(values=group2_dict, exact_cases=True, return_copy=True, verbose=False)
 
         def _label(d):
             if isinstance(d, dict):
@@ -2111,6 +2138,14 @@ class pAnnData:
         group1_string = _label(group1_dict)
         group2_string = _label(group2_dict)
         comparison_string = f'{group1_string} vs {group2_string}'
+
+        log_prefix = format_log_prefix("user")
+        n1, n2 = len(pdata_case1.prot), len(pdata_case2.prot)
+        print(f"{log_prefix} Running differential expression [protein]")
+        print(f"   🔸 Comparing groups: {comparison_string}")
+        print(f"   🔸 Group sizes: {n1} vs {n2} samples")
+        print(f"   🔸 Method: {method} | Fold Change: {fold_change_mode} | Layer: {layer}")
+        print(f"   🔸 P-value threshold: {pval} | Log2FC threshold: {log2fc}")
 
         # --- Get layer data ---
         data1 = utils.get_adata_layer(pdata_case1.prot, layer)
@@ -2214,7 +2249,16 @@ class pAnnData:
         self._stats[comparison_string] = df_stats
         self._append_history(f"prot: DE for {class_type} {values} using {method} and fold_change_mode='{fold_change_mode}'. Stored in .stats['{comparison_string}'].")
 
-        print(f"{format_log_prefix('result')} Differential expression complete: {comparison_string} | Method: {method}, FC: {fold_change_mode}")
+        sig_counts = df_stats['significance'].value_counts().to_dict()
+        n_up = sig_counts.get('upregulated', 0)
+        n_down = sig_counts.get('downregulated', 0)
+        n_ns = sig_counts.get('not significant', 0)
+
+        print(f"{format_log_prefix('result_only', indent=2)} DE complete. Results stored in:")
+        print(f"       • .stats['{comparison_string}']")
+        print(f"       • Columns: log2fc, p_value, significance, etc.")
+        print(f"       • Upregulated: {n_up} | Downregulated: {n_down} | Not significant: {n_ns}")
+
         return df_stats
 
     # TODO: Need to figure out how to make this interface with plot functions, probably do reordering by each class_value within the loop?
@@ -2319,29 +2363,64 @@ class pAnnData:
 
                 impute_data[idx, :] = imputed_group
 
-            print(f"ℹ️ Group-wise imputation using '{method}' on class(es): {classes}. Layer saved as '{layer_name}'.")
+            print(f"{format_log_prefix('user')} Group-wise imputation using '{method}' on class(es): {classes}. Layer saved as '{layer_name}'.")
 
         summary_lines = []
         if classes is None:
             num_imputed = np.sum(np.isnan(original_data) & ~np.isnan(impute_data))
-            summary_lines.append(f"{format_log_prefix('result_only', indent=2)} {num_imputed} values imputed.")
+            # Row-wise missingness
+            was_missing = np.isnan(original_data).any(axis=1)
+            now_complete = ~np.isnan(impute_data).any(axis=1)
+            now_incomplete = np.isnan(impute_data).any(axis=1)
+
+            fully_imputed_samples = np.sum(was_missing & now_complete)
+            partially_imputed_samples = np.sum(was_missing & now_incomplete)
+
+            summary_lines.append(
+                f"{format_log_prefix('result_only', indent=2)} {num_imputed} values imputed."
+            )
+            summary_lines.append(
+                f"{format_log_prefix('info_only', indent=2)} {fully_imputed_samples} samples fully imputed, {partially_imputed_samples} samples partially imputed."
+            )
+
         else:
             sample_names = utils.get_samplenames(adata, classes)
             sample_names = np.array(sample_names)
             unique_groups = np.unique(sample_names)
 
             counts_by_group = {}
+            fully_by_group = {}
+            partial_by_group = {}
+            
             for group in unique_groups:
+
+
+                
                 idx = np.where(sample_names == group)[0]
                 before = original_data[idx, :]
                 after = impute_data[idx, :]
+
+                # count imputed values
                 mask = np.isnan(before) & ~np.isnan(after)
                 counts_by_group[group] = np.sum(mask)
 
+                # count fully and partially imputed samples
+                was_missing = np.isnan(before).any(axis=1)
+                now_complete = ~np.isnan(after).any(axis=1)
+                now_incomplete = np.isnan(after).any(axis=1)
+
+                fully_by_group[group] = np.sum(was_missing & now_complete)
+                partial_by_group[group] = np.sum(was_missing & now_incomplete)
+
             total = sum(counts_by_group.values())
             summary_lines.append(f"{format_log_prefix('result_only', indent=2)} {total} values imputed total.")
-            for group, count in counts_by_group.items():
-                summary_lines.append(f"   - {group}: {count} values")
+            for group in unique_groups:
+                count = counts_by_group[group]
+                fully = fully_by_group[group]
+                partial = partial_by_group[group]
+                summary_lines.append(
+                    f"   - {group}: {count} values, {fully} fully imputed, {partial} partially imputed samples"
+                )
 
         print("\n".join(summary_lines))
 
@@ -2791,7 +2870,7 @@ def import_data(source_type: str, **kwargs):
     print(f"{format_log_prefix('user')} Importing data of type [{source_type}]")
 
     source_type = source_type.lower()
-    obs_columns = kwargs.pop('obs_columns', None)
+    obs_columns = kwargs.get('obs_columns', None)
     if obs_columns is None:
         source = kwargs.get('report_file') if 'report_file' in kwargs else kwargs.get('prot_file')
         format_info, fallback_columns, fallback_obs = resolve_obs_columns(source, source_type)
