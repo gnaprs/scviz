@@ -8,6 +8,8 @@ import tempfile
 import os
 import re
 
+from scviz.utils import format_log_prefix
+
 # Helpers
 def _pretty_vs_key(k):
     import ast
@@ -80,14 +82,16 @@ def resolve_to_accessions(self, mixed_list):
     """    
     gene_to_acc, _ = self.get_gene_maps(on='protein')
     accs = []
+    unresolved_accs = []
     for item in mixed_list:
         if item in self.prot.var.index:
             accs.append(item)  # already an accession
         elif item in gene_to_acc:
             accs.append(gene_to_acc[item])
         else:
-            print(f"[WARNING] Could not resolve '{item}' to an accession — skipping.")
-    return accs
+            unresolved_accs.append(item)
+            # print(f"{format_log_prefix('warn_only',2)} Could not resolve '{item}' to an accession — skipping.")
+    return accs, unresolved_accs
 
 def get_string_mappings(self, identifiers, batch_size=300, debug=False):
     """
@@ -117,13 +121,13 @@ def get_string_mappings(self, identifiers, batch_size=300, debug=False):
     found_ids = {i: sid for i, sid in existing.items() if pd.notna(sid)}
     missing = [i for i in identifiers if i not in found_ids]
 
-    print(f"[INFO] Found {len(found_ids)} cached STRING IDs. {len(missing)} need lookup.")
+    print(f"{format_log_prefix('info_only',2)} Found {len(found_ids)} cached STRING IDs. {len(missing)} need lookup.")
 
     all_rows = []
 
     for i in range(0, len(missing), batch_size):
         batch = missing[i:i + batch_size]
-        print(f"[INFO] Querying STRING for batch {i // batch_size + 1} ({len(batch)} identifiers)...") if debug else None
+        print(f"{format_log_prefix('info')} Querying STRING for batch {i // batch_size + 1} ({len(batch)} identifiers)...") if debug else None
 
         url = "https://version-12-0.string-db.org/api/tsv-no-header/get_string_ids"
         params = {
@@ -162,9 +166,9 @@ def get_string_mappings(self, identifiers, batch_size=300, debug=False):
             else:
                 print(f"[DEBUG] Skipping unknown accession '{acc}'")
 
-        print(f"[INFO] Cached {len(updated_ids)} new STRING ID mappings.")
+        print(f"{format_log_prefix('info')} Cached {len(updated_ids)} new STRING ID mappings.")
     else:
-        print("[WARNING] No STRING mappings returned for the requested identifiers.")
+        print(f"{format_log_prefix('warn')} No STRING mappings returned for the requested identifiers.")
 
     # Return final mapping as a DataFrame
     out_df = pd.DataFrame.from_dict(found_ids, orient="index", columns=["string_identifier"])
@@ -223,7 +227,7 @@ def enrichment_functional(
 ):
 
     def query_functional_enrichment(query_ids, species_id, background_ids=None, debug=False):
-        print(f"[INFO] Running enrichment on {len(query_ids)} STRING IDs (species {species_id})...")
+        # print(f"{format_log_prefix('info_only',2)} Running enrichment on {len(query_ids)} STRING IDs (species {species_id})...")
         url = "https://version-12-0.string-db.org/api/json/enrichment"
         payload = {
             "identifiers": "%0d".join(query_ids),
@@ -231,7 +235,7 @@ def enrichment_functional(
             "caller_identity": "scviz"
         }
         if background_ids is not None:
-            print(f"[INFO] Using background of {len(background_ids)} STRING IDs.")
+            print(f"{format_log_prefix('info_only')} Using background of {len(background_ids)} STRING IDs.")
             payload["background_string_identifiers"] = "%0d".join(background_ids)
 
         response = requests.post(url, data=payload)
@@ -246,17 +250,18 @@ def enrichment_functional(
         resolved_key = _resolve_de_key(self.stats, de_key)
         de_df = self.stats[resolved_key]
         sig_df = de_df[de_df["significance"] != "not significant"].copy()
+        print(f"{format_log_prefix('user')} Running STRING enrichment [DE-based: {resolved_key}]")
 
         up_genes = sig_df[sig_df[score_col] > 0][gene_col].dropna().head(top_n).tolist()
         down_genes = sig_df[sig_df[score_col] < 0][gene_col].dropna().head(top_n).tolist()
 
-        up_accs = self.resolve_to_accessions(up_genes)
-        down_accs = self.resolve_to_accessions(down_genes)
+        up_accs, up_unresolved = self.resolve_to_accessions(up_genes)
+        down_accs, down_unresolved = self.resolve_to_accessions(down_genes)
 
         background_accs = None
         background_string_ids = None
         if background == "all_quantified":
-            print("[WARNING] Mapping background proteins may take a long time due to batching.")
+            print(f"{format_log_prefix('warn')} Mapping background proteins may take a long time due to batching.")
             background_accs = de_df[de_df["significance"] == "not significant"].index.tolist()
 
         if background_accs:
@@ -264,27 +269,36 @@ def enrichment_functional(
             background_string_ids = bg_map["string_identifier"].tolist()
 
         if store_key is not None:
-            print("[WARNING] Ignoring `store_key` for DE-based enrichment. Using auto-generated pretty keys.")
+            print(f"{format_log_prefix('warn')} Ignoring `store_key` for DE-based enrichment. Using auto-generated pretty keys.")
 
         results = {}
         for label, accs in zip(["up", "down"], [up_accs, down_accs]):
             t0 = time.time()
 
             if not accs:
-                print(f"[WARNING] No {label}-regulated proteins to analyze.")
+                print(f"{format_log_prefix('warn')} No {label}-regulated proteins to analyze.")
                 continue
 
             mapping_df = self.get_string_mappings(accs)
             if mapping_df.empty:
-                print(f"[WARNING] No valid STRING mappings found for {label}-regulated proteins.")
+                print(f"{format_log_prefix('warn')} No valid STRING mappings found for {label}-regulated proteins.")
                 continue
 
             string_ids = mapping_df["string_identifier"].tolist()
             inferred_species = mapping_df["ncbi_taxon_id"].mode().iloc[0]
             species_id = species if species is not None else inferred_species
 
+            print(f"\n🔹 {label.capitalize()}-regulated proteins")
+            print(f"   🔸 Proteins: {len(accs)} → STRING IDs: {len(string_ids)}")
+            print(f"   🔸 Species: {species_id} | Background: {'None' if background_string_ids is None else 'custom'}")
+            if label == "up":
+                if up_unresolved:
+                    print(f"{format_log_prefix('warn',2)} Some accessions unresolved for {label}-regulated proteins: {', '.join(up_unresolved)}")
+            else:
+                if down_unresolved:
+                    print(f"{format_log_prefix('warn',2)} Some accessions unresolved for {label}-regulated proteins: {', '.join(down_unresolved)}")
+
             enrichment_df = query_functional_enrichment(string_ids, species_id, background_string_ids)
-            
             enrich_key = f"{resolved_key}_{label}"
             pretty_base = _pretty_vs_key(resolved_key)
             pretty_key = f"{pretty_base}_{label}"
@@ -299,17 +313,16 @@ def enrichment_functional(
                 "result": enrichment_df
             }
 
-            print(f"\n[Enrichment: {pretty_base} ({label}-regulated)]")
-            print(f"  → {len(accs)} proteins → {len(string_ids)} STRING IDs")
-            print(f"  → Enrichment complete ({time.time() - t0:.2f}s)")
-            print(f"  → Access: pdata.stats['functional'][\"{pretty_key}\"]['result']")
-            print(f"  → Plot  : pdata.plot_enrichment_svg(\"{pretty_base}\", direction=\"{label}\")")
-            print(f"  → Web   : {string_url}\n")
+            print(f"{format_log_prefix('result')} Enrichment complete ({time.time() - t0:.2f}s)")
+            print(f"   • Access result: pdata.stats['functional'][\"{pretty_key}\"][\"result\"]")
+            print(f"   • Plot command : pdata.plot_enrichment_svg(\"{pretty_base}\", direction=\"{label}\")")
+            print(f"   • View online  : {string_url}\n")
 
             results[label] = enrichment_df
 
     elif genes is not None:
         t0 = time.time()
+        print(f"{format_log_prefix('user')} Running STRING enrichment [user-supplied]")
 
         if store_key is None:
             prefix = "UserSearch"
@@ -318,7 +331,7 @@ def enrichment_functional(
             next_id = len(existing_ids) + 1
             store_key = f"{prefix}{next_id}"
 
-        input_accs = self.resolve_to_accessions(genes)
+        input_accs, unresolved_accs = self.resolve_to_accessions(genes)
         mapping_df = self.get_string_mappings(input_accs)
 
         if mapping_df.empty:
@@ -330,11 +343,16 @@ def enrichment_functional(
 
         background_string_ids = None
         if background == "all_quantified":
-            print("[WARNING] Mapping background proteins may take a long time due to batching.")
+            print(f"{format_log_prefix('warn')} Mapping background proteins may take a long time due to batching.")
             all_accs = list(self.prot.var_names)
             background_accs = list(set(all_accs) - set(input_accs))
             bg_map = self.get_string_mappings(background_accs)
             background_string_ids = bg_map["string_identifier"].tolist()
+
+        print(f"   🔸 Input genes: {len(genes)} → Resolved STRING IDs: {len(string_ids)}")
+        print(f"   🔸 Species: {species_id} | Background: {'None' if background_string_ids is None else 'custom'}")
+        if unresolved_accs:
+            print(f"{format_log_prefix('warn',2)} Some accessions unresolved: {', '.join(unresolved_accs)}")
 
         enrichment_df = query_functional_enrichment(string_ids, species_id, background_string_ids)
         string_url = self.get_string_network_link(string_ids=string_ids, species=species_id)
@@ -348,12 +366,10 @@ def enrichment_functional(
             "result": enrichment_df
         }
 
-        print(f"\n[Enrichment: {store_key} (user-supplied list)]")
-        print(f"  → {len(input_accs)} input genes → {len(string_ids)} STRING IDs")
-        print(f"  → Enrichment complete ({time.time() - t0:.2f}s)")
-        print(f"  → Access: pdata.stats['functional'][\"{store_key}\"]['result']")
-        print(f"  → Plot  : pdata.plot_enrichment_svg(\"{store_key}\")")
-        print(f"  → Web   : {string_url}\n")
+        print(f"{format_log_prefix('result')} Enrichment complete ({time.time() - t0:.2f}s)")
+        print(f"   • Access result: pdata.stats['functional'][\"{store_key}\"][\"result\"]")
+        print(f"   • Plot command : pdata.plot_enrichment_svg(\"{store_key}\")")
+        print(f"   • View online  : {string_url}\n")
 
         return enrichment_df
 
@@ -407,14 +423,14 @@ def plot_enrichment_svg(self, key, direction=None, category=None, save_as=None):
     if category:
         params["category"] = category
 
-    print(f"[INFO] Fetching STRING SVG for key '{lookup_key}' (n={len(string_ids)})...")
+    print(f"{format_log_prefix('user')} Fetching STRING SVG for key '{lookup_key}' (n={len(string_ids)})...")
     response = requests.get(url, params=params)
     response.raise_for_status()
 
     if save_as:
         with open(save_as, "wb") as f:
             f.write(response.content)
-        print(f"[INFO] Saved SVG to: {save_as}")
+        print(f"{format_log_prefix('info_only')} Saved SVG to: {save_as}")
 
     with tempfile.NamedTemporaryFile("wb", suffix=".svg", delete=False) as tmp:
         tmp.write(response.content)
@@ -439,7 +455,7 @@ def enrichment_ppi(self, genes, species=None, store_key=None):
         Key to store the PPI enrichment result in self.stats["ppi"]. If None, auto-generates a unique key.
     """
     def query_ppi_enrichment(string_ids, species):
-        print(f"[INFO] Running PPI enrichment for {len(string_ids)} STRING IDs (species {species})...")
+        # print(f"[INFO] Running PPI enrichment for {len(string_ids)} STRING IDs (species {species})...")
         url = "https://string-db.org/api/json/ppi_enrichment"
         payload = {
             "identifiers": "%0d".join(string_ids),
@@ -454,8 +470,9 @@ def enrichment_ppi(self, genes, species=None, store_key=None):
         print("[DEBUG] PPI enrichment result:", result)
         return result[0] if isinstance(result, list) else result
 
-    print(f"[INFO] Resolving input genes ({len(genes)} items)...")
-    input_accs = self.resolve_to_accessions(genes)
+    print(f"{format_log_prefix('user')} Running STRING PPI enrichment")
+    t0 = time.time()
+    input_accs, unresolved_accs = self.resolve_to_accessions(genes)
     mapping_df = self.get_string_mappings(input_accs)
 
     if mapping_df.empty:
@@ -464,6 +481,11 @@ def enrichment_ppi(self, genes, species=None, store_key=None):
     string_ids = mapping_df["string_identifier"].tolist()
     inferred_species = mapping_df["ncbi_taxon_id"].mode().iloc[0]
     species_id = species if species is not None else inferred_species
+
+    print(f"   🔸 Input genes: {len(genes)} → Resolved STRING IDs: {len(mapping_df)}")
+    print(f"   🔸 Species: {species_id}")
+    if unresolved_accs:
+        print(f"{format_log_prefix('warn', 2)} Some accessions unresolved: {', '.join(unresolved_accs)}")
 
     result = query_ppi_enrichment(string_ids, species_id)
 
@@ -484,11 +506,12 @@ def enrichment_ppi(self, genes, species=None, store_key=None):
         "species": species_id
     }
 
-    print(f"\n[PPI Enrichment: {store_key}]")
-    print(f"  → {len(string_ids)} STRING IDs")
-    print(f"  → {result['number_of_edges']} edges vs {result['expected_number_of_edges']} expected")
-    print(f"  → p = {result['p_value']:.2e}")
-    print(f"  → Access: pdata.stats['ppi']['{store_key}']['result']\n")
+    print(f"{format_log_prefix('result')} PPI enrichment complete ({time.time() - t0:.2f}s)")
+    print(f"   • STRING IDs   : {len(string_ids)}")
+    print(f"   • Edges found  : {result['number_of_edges']} vs {result['expected_number_of_edges']} expected")
+    print(f"   • p-value      : {result['p_value']:.2e}")
+    print(f"   • Access result: pdata.stats['ppi']['{store_key}']['result']\n")
+
     return result
 
 def list_enrichments(self):
@@ -520,41 +543,43 @@ def list_enrichments(self):
 
     de_unenriched = sorted(_pretty_vs_key(k) for k in (de_keys - enriched_de))
 
-    print("\n[STRING Enrichment Summary]\n")
+    print(f"{format_log_prefix('user')} Listing STRING enrichment status\n")
 
-    print("Available DE comparisons (not yet enriched):")
+    print(f"{format_log_prefix('info_only',2)} Available DE comparisons (not yet enriched):")
     if de_unenriched:
         for pk in de_unenriched:
-            print(f"  - {pk}")
+            print(f"        - {pk}")
     else:
         print("  (none)\n")
 
-    print('\nTo run enrichment: pdata.enrichment_functional(from_de=True, de_key="...")')
-    print("\nCompleted STRING enrichment results:")
+    print("\n  🔹 To run enrichment:")
+    print("      pdata.enrichment_functional(from_de=True, de_key=\"...\")")
+    
+    print(f"\n{format_log_prefix('result_only')} Completed STRING enrichment results:")
     if not enriched_results:
-        print("  (none)")
+        print("    (none)")
     for pretty, raw_key, kind in enriched_results:
         if kind == "DE-based":
             base, suffix = pretty.rsplit("_", 1)
             print(f"  - {pretty} ({kind})")
-            print(f"    Access table: pdata.stats['functional'][\"{raw_key}\"]['result']")
-            print(f"    Plot result : pdata.plot_enrichment_svg(\"{base}\", direction=\"{suffix}\")")
+            print(f"    • Table: pdata.stats['functional'][\"{raw_key}\"]['result']")
+            print(f"    • Plot : pdata.plot_enrichment_svg(\"{base}\", direction=\"{suffix}\")")
             url = self.stats["functional"].get(raw_key, {}).get("string_url")
             if url:
-                print(f"    View online  : {url}")
+                print(f"    • Link  : {url}")
         else:
             print(f"  - {pretty} ({kind})")
-            print(f"    Access table: pdata.stats['functional'][\"{raw_key}\"]['result']")
-            print(f"    Plot result : pdata.plot_enrichment_svg(\"{pretty}\")")
+            print(f"    • Table: pdata.stats['functional'][\"{raw_key}\"]['result']")
+            print(f"    • Plot : pdata.plot_enrichment_svg(\"{pretty}\")")
             url = self.stats["functional"].get(raw_key, {}).get("string_url")
             if url:
-                print(f"    View online  : {url}")
+                print(f"    • Link  : {url}")
 
     if ppi_keys:
-        print("\nCompleted STRING PPI results:")
+        print(f"\n{format_log_prefix('result_only')} Completed STRING enrichment results:")
         for key in sorted(ppi_keys):
             print(f"  - {key} (User)")
-            print(f"    Access result: pdata.stats['ppi']['{key}']['result']")
+            print(f"    • Table: pdata.stats['ppi']['{key}']['result']")
     else:
-        print("\nCompleted STRING PPI results:")
-        print("  (none)")
+        print(f"\n{format_log_prefix('result_only')} Completed STRING PPI results:")
+        print("    (none)")
