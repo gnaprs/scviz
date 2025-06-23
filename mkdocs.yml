@@ -83,9 +83,12 @@ nav:
       - Diagram: diagram.md
   - API reference:
       - scviz.plotting: reference/plotting.md
-      - scviz.pAnnData: reference/pAnnData.md
-      # - scviz.utils: reference/scviz.utils.md
-      # - scviz.renderers: reference/scviz.renderers.md
+      - pAnnData:
+          - Overview: reference/pAnnData.md
+          - Core Utilities: reference/core_mixins.md
+          - Metadata + Summary: reference/metadata_mixins.md
+          - Editing + Filtering: reference/editing_mixins.md
+          - Analysis + Enrichment: reference/analysis_mixins.md
   - Author's website: https://gnaprs.github.io/
 # nav:
 # - Home:
