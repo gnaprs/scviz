@@ -20,7 +20,7 @@ def test_import_diann_old():
     diann_file = str(test_dir / 'test_diann.tsv')
 
     obs_columns = ['name','amt','enzyme','date','MS','acquisition','method','gradient','replicate']
-    pdata = pAnnData.import_data(source_type='diann', file=diann_file, obs_columns=obs_columns)
+    pdata = pAnnData.import_data(source_type='diann', report_file=diann_file, obs_columns=obs_columns)
     assert pdata is not None
     assert pdata.prot is not None
     assert pdata.pep is not None
@@ -33,7 +33,7 @@ def test_import_diann_new():
 
     # MP_20250219_OA_DIA_FAIMS_TS25_24min_sc_LCM-Cortex_01.raw
     obs_columns = ['name','date','MS','acquisition','FAIMS','column','gradient','amt','region','replicate']
-    pdata = pAnnData.import_data(source_type='diann', file=diann_file, obs_columns=obs_columns)
+    pdata = pAnnData.import_data(source_type='diann', report_file=diann_file, obs_columns=obs_columns)
     assert pdata is not None
     assert pdata.prot is not None
     assert pdata.pep is not None

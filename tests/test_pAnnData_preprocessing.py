@@ -26,7 +26,7 @@ def pdata_preprocessing():
     }, index=[f"P{i+1}" for i in range(6)])
 
     ann = AnnData(X=X, obs=obs, var=var)
-    return pAnnData.pAnnData(prot=ann)
+    return pAnnData(prot=ann)
 
 def test_impute_mean_groupwise(pdata_preprocessing):
     pdata = pdata_preprocessing

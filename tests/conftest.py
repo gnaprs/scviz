@@ -1,5 +1,5 @@
 import pytest
-from scviz import pAnnData
+from scviz.pAnnData import pAnnData
 from pathlib import Path
 
 def create_dummy_pAnnData():
@@ -9,8 +9,8 @@ def create_dummy_pAnnData():
     pep_file = str(test_dir / 'test_pd_pep.txt')
 
     obs_columns = ['sample', 'cellline', 'treatment']
-    pdata = pAnnData.import_proteomeDiscoverer(prot_file = prot_file, pep_file = pep_file, obs_columns=obs_columns)
-    
+    pdata = pAnnData.import_data(source_type="pd", prot_file=prot_file, pep_file=pep_file, obs_columns=obs_columns)
+
     return pdata
 
 @pytest.fixture

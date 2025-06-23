@@ -2,11 +2,9 @@ import requests
 import pandas as pd
 import time
 from io import StringIO
-import ast
 from IPython.display import SVG, display
 import tempfile
 import os
-import re
 
 from scviz.utils import format_log_prefix
 

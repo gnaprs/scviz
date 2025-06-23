@@ -75,6 +75,7 @@ class pAnnData:
         Decide whether to use the term `classes` or `class_types` for internal grouping semantics.
     """
 
+    # moved to mixin
     def __init__(self, 
                  prot = None, # np.ndarray | sparse.spmatrix 
                  pep = None, # np.ndarray | sparse.spmatrix
@@ -98,6 +99,7 @@ class pAnnData:
         self._stats = {}
         self._summary_is_stale = False
 
+    # moved to mixin
     # -----------------------------
     # SETTERS/GETTERS    
     @property
@@ -180,8 +182,7 @@ class pAnnData:
         self._stats = value
 
     # -----------------------------
-    # ALIASSES
-
+    # moved to mixin
     # STRING RELATED
     get_string_mappings = get_string_mappings
     resolve_to_accessions = resolve_to_accessions
@@ -192,6 +193,7 @@ class pAnnData:
     get_string_network_link = get_string_network_link
 
     # -----------------------------
+    # moved to mixin
     # UTILITY FUNCTIONS
     def _set_RS(self, rs, debug=False, validate=True):
         """
@@ -236,6 +238,7 @@ class pAnnData:
             sparsity = 100 * (1 - nnz / total)
             print(f"{format_log_prefix('result',indent=1)} RS matrix set: {self._rs.shape} (proteins × peptides), sparsity: {sparsity:.2f}%")
 
+    # moved to mixin
     def __repr__(self):
         if self.prot is not None:
             prot_shape = f"{self.prot.shape[0]} files by {self.prot.shape[1]} proteins"
@@ -267,9 +270,11 @@ class pAnnData:
                 f"{pep_info}\n\n"
                 f"{rs_info}\n")
     
+    # moved to mixin
     def _has_data(self):
         return self.prot is not None or self.pep is not None
 
+    # moved to mixin
     def _update_metrics(self):
         """Compute per-sample and RS-derived metrics for prot and pep data."""
         if self.prot is not None:
@@ -301,6 +306,7 @@ class pAnnData:
             self.prot.var['peptides_per_protein'] = peptides_per_protein
             self.prot.var['unique_peptides'] = unique_counts
 
+    # moved to mixin
     def _update_summary_metrics(self, unique_peptide_thresh=2):
         """
         Add RS-derived per-sample metrics to ._summary.
@@ -318,6 +324,7 @@ class pAnnData:
             high_conf_count = np.sum(~np.isnan(high_conf_matrix), axis=1)
             self._summary['unique_pep2_protein_count'] = high_conf_count
 
+    # moved to mixin
     def _merge_obs(self):
         """
         Merge .prot.obs and .pep.obs into a single summary DataFrame.
@@ -339,6 +346,7 @@ class pAnnData:
             summary, parent=self, mark_stale_fn=self._mark_summary_stale)
         self._previous_summary = summary.copy()
 
+    # moved to mixin
     def _push_summary_to_obs(self, skip_if_contains='pep', verbose=False):
         """
         Push changes from .summary back into .prot.obs and .pep.obs.
@@ -384,6 +392,7 @@ class pAnnData:
 
         return updated_prot, updated_pep
 
+    # moved to mixin
     def update_summary(self, recompute=True, sync_back=False, verbose=True):
         """
         Update the `.summary` DataFrame to reflect current state of `.obs` and metadata.
@@ -445,10 +454,12 @@ class pAnnData:
         # 4. Final cleanup
         self._summary_is_stale = False
 
+    # moved to mixin
     def _update_summary(self):
         print("⚠️  Legacy _update_summary() called — consider switching to update_summary()")
         self.update_summary(recompute=True, sync_back=False, verbose=False)
 
+    # moved to mixin
     def _build_identifier_maps(self, adata, gene_col="Genes"):
         """
         Builds bidirectional mapping for:
@@ -483,6 +494,7 @@ class pAnnData:
 
         return forward, reverse
 
+    # moved to mixin
     def refresh_identifier_maps(self):
         """
         Refresh all gene/accession map caches.
@@ -491,6 +503,7 @@ class pAnnData:
             if hasattr(self, attr):
                 delattr(self, attr)
 
+    # moved to mixin
     def get_identifier_maps(self, on='protein'):
         """
         Returns identifier mapping dictionaries:
@@ -506,6 +519,7 @@ class pAnnData:
         else:
             raise ValueError(f"Invalid value for 'on': {on}. Must be 'protein' or 'peptide'.")
 
+    # moved to mixin
     # TODO: add peptide remapping to var, but need to also update rs if you do this.
     def update_identifier_maps(self, mapping, on='protein', direction='forward', overwrite=False, verbose=True):
         """
@@ -616,18 +630,23 @@ class pAnnData:
 
         self.metadata.setdefault("identifier_map_history", []).append(record)
 
+    # moved to mixin
     get_gene_maps = get_identifier_maps
 
+    # moved to mixin
     def _mark_summary_stale(self):
         self._summary_is_stale = True
 
+    # moved to mixin
     def _append_history(self, action):
         self._history.append(action)
 
+    # moved to mixin
     def print_history(self):
         formatted_history = "\n".join(f"{i}: {action}" for i, action in enumerate(self._history, 1))
         print("-------------------------------\nHistory:\n-------------------------------\n"+formatted_history)
 
+    # moved to mixin
     def update_missing_genes(self, gene_col="Genes", verbose=True):
         """
         Fills missing gene names in .prot.var[gene_col] using UniProt API.
@@ -683,6 +702,7 @@ class pAnnData:
                 print("   ", ", ".join(missing_ids[:5]) + ("..." if unknown > 5 else ""))
                 print("💡 Tip: You can update these using `pdata.update_identifier_maps({'GENE': 'ACCESSION'}, on='protein', direction='reverse', overwrite=True)`")
 
+    # moved to mixin
     def validate(self, verbose=True):
         """
         Checks internal consistency of the pAnnData object.
@@ -763,6 +783,7 @@ class pAnnData:
                 print(f"{format_log_prefix('result')} pAnnData object is valid.")
             return True
 
+    # moved to mixin
     def describe_rs(self):
         """
         Returns a DataFrame summarizing RS (protein × peptide) connectivity:
@@ -788,6 +809,7 @@ class pAnnData:
 
         return summary_df
 
+    # moved to mixin
     def plot_rs(self, figsize=(10, 4)):
         """
         Shows barplots of:
@@ -820,6 +842,7 @@ class pAnnData:
     # -----------------------------
     # VALIDATION FUNCTIONS
 
+    # moved to validate mixin
     def _check_data(self, on):
         # check if protein or peptide data exists
         if on not in ['protein', 'peptide' , 'prot', 'pep']:
@@ -831,6 +854,7 @@ class pAnnData:
         else:
             return True
 
+    # moved to validate mixin
     def _check_rankcol(self, on = 'protein', class_values = None):
         # check if average and rank columns exist for the specified class values
         if on == 'protein':
@@ -850,6 +874,7 @@ class pAnnData:
     # -----------------------------
     # EDITING FUNCTIONS
     
+    # moved to base mixin
     def copy(self):
         """
         Return a new pAnnData object with the current state of all components.
@@ -878,8 +903,7 @@ class pAnnData:
 
         return new_obj
 
-
-
+    # moved to edit mixin
     def set_X(self, layer, on = 'protein'):
         # defines which layer to set X to
             if not self._check_data(on):
@@ -899,6 +923,7 @@ class pAnnData:
 
             self._history.append(f"{on}: Set X to layer {layer}.")
 
+    # moved to edit mixin
     def get_abundance(self, namelist=None, layer='X', on='protein',
                     classes=None, log=True, x_label='gene'):
         """
@@ -1006,6 +1031,7 @@ class pAnnData:
 
         return df
 
+    # moved to filter mixin
     def filter_prot(self, condition = None, accessions=None, return_copy = 'True', debug=False):
         """
         Filter protein data based on metadata conditions or accession list (protein name and gene name).
@@ -1143,6 +1169,7 @@ class pAnnData:
         pdata.update_summary(recompute=True)
         return pdata if return_copy else None
 
+    # moved to filter mixin
     def filter_prot_found(self, group, min_ratio=None, min_count=None, on='protein', return_copy=True, verbose=True):
         """
         Filters proteins or peptides based on the 'Found In' ratio for a given class grouping or file-level detection.
@@ -1287,6 +1314,7 @@ class pAnnData:
 
         return filtered if return_copy else None
 
+    # moved to filter mixin
     def _filter_sync_peptides_to_proteins(self, original, updated_prot, debug=None):
         """Helper function to filter peptides based on protein filtering. Returns inputs needed for _apply_rs_filter.
 
@@ -1313,6 +1341,7 @@ class pAnnData:
 
         return proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names
 
+    # moved to filter mixin
     def filter_sample(self, values=None, exact_cases=False, condition=None, file_list=None, min_prot=None, return_copy=True, debug=False, query_mode=False):
         """
         Unified method to filter samples in a pAnnData object.
@@ -1393,6 +1422,7 @@ class pAnnData:
         if condition is not None and query_mode:
             return self._filter_sample_query(query_string=condition, source='summary', return_copy=return_copy, debug=debug)
 
+    # moved to filter mixin
     def _filter_sample_metadata(self, condition = None, return_copy = True, file_list=None, debug=False):
         """
         Filter samples in a pAnnData object based on numeric summary conditions or a file/sample list.
@@ -1493,6 +1523,7 @@ class pAnnData:
 
         return pdata if return_copy else None
 
+    # moved to filter mixin
     def _filter_sample_values(self, values, exact_cases, verbose=True, debug=False, return_copy=True):
         """
         Filter samples in a pAnnData object using dictionary-style categorical matching.
@@ -1608,6 +1639,7 @@ class pAnnData:
 
         return pdata
 
+    # moved to filter mixin
     def _filter_sample_query(self, query_string, source='obs', return_copy=True, debug=False):
         """
         Filters samples using a raw pandas-style query string on either obs or summary.
@@ -1667,6 +1699,7 @@ class pAnnData:
 
         return pdata if return_copy else None
 
+    # moved to filter mixin
     def filter_rs(
         self,
         min_peptides_per_protein=None,
@@ -1800,6 +1833,7 @@ class pAnnData:
 
         return pdata if return_copy else None
 
+    # moved to filter mixin
     def _apply_rs_filter(
         self,
         keep_proteins=None,
@@ -1880,7 +1914,7 @@ class pAnnData:
         if debug:
             print(f"{format_log_prefix('result')} RS matrix filtered: {prot_mask.sum()} proteins, {pep_mask.sum()} peptides retained.")
 
-
+    # moved to editing mixin
     def export(self, filename, format = 'csv'):
         # export data, each layer as a separate file
         
@@ -1899,6 +1933,7 @@ class pAnnData:
             for layer in self.prot.layers:
                 self.prot.layers[layer].toarray().to_csv(f"{filename}_protein_{layer}.csv")
 
+    # moved to filter mixin
     def _format_filter_query(self, condition, dataframe):
         """
         Formats a query string for filtering a DataFrame with potentially complex column names. Used in `filter_sample_metadata()` and `filter_prot()`.
@@ -1943,6 +1978,7 @@ class pAnnData:
 
         return condition
 
+    # moved to filter mixin
     def _annotate_found_samples(self, threshold=0.0, layer='X'):
         """
         Internal method. Adds per-sample 'Found In' flags to .prot.var and .pep.var.
@@ -1973,6 +2009,7 @@ class pAnnData:
             for sample in found.columns:
                 adata.var[f"Found In: {sample}"] = found[sample]
 
+    # moved to filter mixin
     def annotate_found(self, classes=None, on='protein', layer='X', threshold=0.0):
         """
         Adds group-level 'Found In' annotations for proteins or peptides.
@@ -2043,10 +2080,10 @@ class pAnnData:
             f"{format_log_prefix('user')} Annotated features: 'found in' class combinations {classes} using threshold {threshold}."
         )
 
-
-
     # -----------------------------
     # PROCESSING FUNCTIONS
+
+    # moved to analysis mixin
     def cv(self, classes = None, on = 'protein', layer = "X", debug = False):
         if not self._check_data(on):
             pass
@@ -2065,6 +2102,7 @@ class pAnnData:
 
         self._history.append(f"{on}: Coefficient of Variation (CV) calculated for {layer} data by {classes}. E.g. CV stored in var['CV: {class_value}'].")
 
+    # moved to analysis mixin
     # TODO: implement methods for calculdating fold change, 1. mean, 2. prot pairwise median, or 3. pep pairwise median (will need to refer to RS)
     def de(self, values=None, class_type=None, method='ttest', layer='X', pval=0.05, log2fc=1.0, fold_change_mode='mean'):
         """
@@ -2261,6 +2299,7 @@ class pAnnData:
 
         return df_stats
 
+    # moved to analysis mixin
     # TODO: Need to figure out how to make this interface with plot functions, probably do reordering by each class_value within the loop?
     def rank(self, classes = None, on = 'protein', layer = "X"):
         if not self._check_data(on):
@@ -2288,6 +2327,7 @@ class pAnnData:
 
         self._history.append(f"{on}: Ranked {layer} data. Ranking, average and stdev stored in var.")
 
+    # moved to analysis mixin
     def impute(self, classes=None, layer="X", method='mean', on='protein', set_X=True, **kwargs):
         """
         Impute missing values across samples (globally or within classes) using SimpleImputer.
@@ -2395,7 +2435,7 @@ class pAnnData:
             for group in unique_groups:
 
 
-                
+
                 idx = np.where(sample_names == group)[0]
                 before = original_data[idx, :]
                 after = impute_data[idx, :]
@@ -2433,6 +2473,7 @@ class pAnnData:
             f"{on}: Imputed layer '{layer}' using '{method}' (grouped by {classes if classes else 'ALL'}). Stored in '{layer_name}'."
         )
 
+    # moved to analysis mixin
     def neighbor(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.pp.neighbors
         if not self._check_data(on):
@@ -2464,6 +2505,7 @@ class pAnnData:
         print(f"       • obs['connectivities'] (connectivity graph)")
         print(f"       • uns['neighbors'] (neighbor graph metadata)")
  
+    # moved to analysis mixin
     def leiden(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.tl.leiden with default resolution of 0.25
         if not self._check_data(on):
@@ -2493,6 +2535,7 @@ class pAnnData:
         print(f"{format_log_prefix('result_only', indent=2)} Leiden clustering complete. Results stored in:")
         print(f"       • obs['leiden'] (cluster labels)")
 
+    # moved to analysis mixin
     def umap(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.tl.umap
         if not self._check_data(on):
@@ -2524,6 +2567,7 @@ class pAnnData:
         print(f"       • obsm['X_umap'] (UMAP coordinates)")
         print(f"       • uns['umap'] (UMAP settings)")
 
+    # moved to analysis mixin
     def pca(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.tl.pca
         if not self._check_data(on):
@@ -2570,6 +2614,7 @@ class pAnnData:
         var_pc1, var_pc2 = pca_data[2][:2]
         print(f"       • Variance explained by PC1/PC2: {var_pc1*100:.2f}% , {var_pc2*100:.2f}%") 
 
+    # moved to analysis mixin
     def nanmissingvalues(self, on = 'protein', limit = 0.5):
         # sets columns (proteins and peptides) with > limit (default 0.5) missing values to NaN across all samples
         if not self._check_data(on):
@@ -2590,6 +2635,7 @@ class pAnnData:
         elif on == 'peptide':
             self.pep = adata
 
+    # moved to analysis mixin
     def normalize(self, classes = None, layer = "X", method = 'sum', on = 'protein', set_X = True, force = False, use_nonmissing = False, **kwargs):  
         """ 
         Normalize the data across samples (globally or within groups).
@@ -2689,6 +2735,7 @@ class pAnnData:
             f"{on}: Normalized layer {layer} using {method}{note} (grouped by {classes}). Stored in `{layer_name}`."
             )
     
+    # moved to analysis mixin
     def _normalize_helper(self, data, method, use_nonmissing, **kwargs):
         """
         Helper function for row-wise normalization.
@@ -2789,6 +2836,7 @@ class pAnnData:
         return data_norm
     
     # --- scanpy functions ---
+    # moved to analysis mixin
     def clean_X(self, on='prot', inplace=True, set_to=0, layer=None, to_sparse=False, backup_layer="X_preclean", verbose=True):
         """
         Replace NaNs in .prot.X or a specified .prot layer with a given value (default: 0).
@@ -2848,7 +2896,6 @@ class pAnnData:
             if verbose:
                 print(f"{format_log_prefix('result')} Returning cleaned matrix: {nan_count} NaNs replaced with {set_to}.")
             return X_clean
-
 
 def import_data(source_type: str, **kwargs):
     """
