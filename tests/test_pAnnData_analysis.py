@@ -97,6 +97,34 @@ def test_impute_set_X_overwrites(pdata_preprocessing):
     # Check if .X was overwritten
     assert not np.allclose(original, pdata.prot.X), "Expected .X to be updated after imputation."
 
+def test_impute_median_groupwise_skips_allnan_feature(pdata_preprocessing):
+    pdata = pdata_preprocessing
+    # Set entire column (P6) to NaN in BE_kd group
+    pdata.prot.X[0:3, 5] = np.nan
+
+    pdata.impute(classes=["cellline", "treatment"], method="median")
+    imputed = pdata.prot.X
+
+    # Check that P6 in BE_kd group is still NaN
+    assert np.isnan(imputed[0:3, 5]).all(), "All-NaN feature in group should remain NaN after median imputation."
+
+    # Check that AS_sc group (samples 3–5) still imputed P6 correctly
+    assert not np.isnan(imputed[3:, 5]).any(), "Non-empty group should have values imputed."
+
+def test_impute_median_global_skips_allnan_feature(pdata_preprocessing):
+    pdata = pdata_preprocessing
+    # Set entire column (e.g., P6) to NaN globally
+    pdata.prot.X[:, 5] = np.nan
+
+    pdata.impute(method="median")  # global median imputation
+    imputed = pdata.prot.X
+
+    # Check that P6 is still all NaN
+    assert np.isnan(imputed[:, 5]).all(), "All-NaN feature should remain NaN after global median imputation."
+
+    # Check that other missing values were imputed
+    assert not np.isnan(imputed[:, :5]).any(), "All imputable values should be filled."
+
 def test_normalize_sum(pdata_preprocessing):
     pdata = pdata_preprocessing
     pdata.normalize(method="sum", set_X=True)

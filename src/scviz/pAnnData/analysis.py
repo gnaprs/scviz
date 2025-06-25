@@ -313,9 +313,12 @@ class AnalysisMixin:
                 impute_data = imputer.fit_transform(impute_data)
             else:
                 imputer = SimpleImputer(strategy=method, keep_empty_features=True)
+                nan_columns = np.isnan(impute_data).all(axis=0)  # features fully missing in this group
                 impute_data = imputer.fit_transform(impute_data)
+                impute_data[:, nan_columns] = np.nan
 
             print(f"{format_log_prefix('user')} Global imputation using '{method}'. Layer saved as '{layer_name}'.")
+            skipped_features = np.sum(np.isnan(impute_data).all(axis=0))
 
         else:
             # Group-wise imputation
@@ -338,7 +341,9 @@ class AnalysisMixin:
                     imputed_group = group_data
                 else:
                     imputer = SimpleImputer(strategy=method, keep_empty_features=True)
+                    nan_columns = np.isnan(group_data).all(axis=0)  # features fully missing in this group
                     imputed_group = imputer.fit_transform(group_data)
+                    imputed_group[:, nan_columns] = np.nan # restore fully missing features
 
                 impute_data[idx, :] = imputed_group
 
@@ -354,12 +359,13 @@ class AnalysisMixin:
 
             fully_imputed_samples = np.sum(was_missing & now_complete)
             partially_imputed_samples = np.sum(was_missing & now_incomplete)
+            skipped_features = np.sum(np.isnan(impute_data).all(axis=0))
 
             summary_lines.append(
                 f"{format_log_prefix('result_only', indent=2)} {num_imputed} values imputed."
             )
             summary_lines.append(
-                f"{format_log_prefix('info_only', indent=2)} {fully_imputed_samples} samples fully imputed, {partially_imputed_samples} samples partially imputed."
+                f"{format_log_prefix('info_only', indent=2)} {fully_imputed_samples} samples fully imputed, {partially_imputed_samples} samples partially imputed, {skipped_features} skipped feature(s) with all missing values."
             )
 
         else:
@@ -370,11 +376,9 @@ class AnalysisMixin:
             counts_by_group = {}
             fully_by_group = {}
             partial_by_group = {}
+            missing_features_by_group = {}
             
             for group in unique_groups:
-
-
-
                 idx = np.where(sample_names == group)[0]
                 before = original_data[idx, :]
                 after = impute_data[idx, :]
@@ -387,9 +391,11 @@ class AnalysisMixin:
                 was_missing = np.isnan(before).any(axis=1)
                 now_complete = ~np.isnan(after).any(axis=1)
                 now_incomplete = np.isnan(after).any(axis=1)
+                now_missing = np.sum(np.isnan(before).all(axis=0))
 
                 fully_by_group[group] = np.sum(was_missing & now_complete)
                 partial_by_group[group] = np.sum(was_missing & now_incomplete)
+                missing_features_by_group[group] = now_missing
 
             total = sum(counts_by_group.values())
             summary_lines.append(f"{format_log_prefix('result_only', indent=2)} {total} values imputed total.")
@@ -397,8 +403,9 @@ class AnalysisMixin:
                 count = counts_by_group[group]
                 fully = fully_by_group[group]
                 partial = partial_by_group[group]
+                skipped = missing_features_by_group[group]
                 summary_lines.append(
-                    f"   - {group}: {count} values, {fully} fully imputed, {partial} partially imputed samples"
+                    f"   - {group}: {count} values, {fully} fully imputed, {partial} partially imputed samples, {skipped} skipped feature(s) with all missing values."
                 )
 
         print("\n".join(summary_lines))

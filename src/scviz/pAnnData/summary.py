@@ -61,10 +61,10 @@ class SummaryMixin:
 
         # 2. Recompute or re-merge afterward
         if recompute:
-            self._update_metrics()
+            self._update_metrics() # type: ignore #, in MetricsMixin
         self._merge_obs()
-        self._update_summary_metrics()
-        self.refresh_identifier_maps()
+        self._update_summary_metrics() # type: ignore #, in MetricsMixin
+        self.refresh_identifier_maps() # type: ignore #, in IdentifierMixin
 
         # 3. Final messaging
         if verbose and not (sync_back or self._summary_is_stale):
