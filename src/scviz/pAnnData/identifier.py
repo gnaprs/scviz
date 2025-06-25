@@ -230,13 +230,13 @@ class IdentifierMixin:
             if found:
                 print(f"{format_log_prefix('result')} Recovered {found} gene name(s) from UniProt. Genes found:")
                 filled_clean = [str(g) for g in filled if pd.notna(g)]
-                preview = ", ".join(filled_clean[:25])
-                if found > 25:
+                preview = ", ".join(filled_clean[:10])
+                if found > 10:
                     preview += "..."
-                print("   ", preview)
+                print("        ", preview)
             if unknown:
                 missing_ids = self.prot.var.loc[missing_mask].index[pd.isna(filled)]
                 print(f"{format_log_prefix('warn')} {unknown} gene name(s) still missing. Assigned as 'UNKNOWN_<accession>' for:")
-                print("   ", ", ".join(missing_ids[:5]) + ("..." if unknown > 5 else ""))
+                print("        ", ", ".join(missing_ids[:5]) + ("..." if unknown > 10 else ""))
                 print("💡 Tip: You can update these using `pdata.update_identifier_maps({'GENE': 'ACCESSION'}, on='protein', direction='reverse', overwrite=True)`")
 

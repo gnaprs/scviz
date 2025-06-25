@@ -35,6 +35,7 @@ import re
 import io
 import requests
 import warnings
+import time
 
 import pandas as pd
 import numpy as np
@@ -625,63 +626,105 @@ def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'prot
 
     base_url = 'https://rest.uniprot.org/uniprotkb/stream'
     fields = "%2C".join(search_fields)
-    query_parts = ["%28accession%3A" + id + "%29" for id in prot_list]
-    query = "+OR+".join(query_parts)
-    query = "%28" + query + "%29"
     format_type = 'tsv'
     
+    def query_uniprot_batch(ids, query_type="accession"):
+        if not ids:
+            return pd.DataFrame()
+
+        if query_type == "accession":
+            query_parts = [f"%28accession%3A{id}%29" for id in ids]
+        elif query_type == "id":
+            query_parts = [f"%28id%3A{id}%29" for id in ids]
+        else:
+            raise ValueError(f"Unknown query_type: {query_type}")
+
+        query = "+OR+".join(query_parts)
+        full_query = f"%28{query}%29"
+        url = f'{base_url}?fields={fields}&format={format_type}&query={full_query}'
+
+        if verbose:
+            print(f"Querying UniProt ({query_type}) for {len(ids)} proteins")
+
+        results = requests.get(url)
+        results.raise_for_status()
+        return pd.read_csv(io.StringIO(results.text), sep='\t')
+
     if verbose:
         print(f"Querying Uniprot for {len(prot_list)} proteins")
-
-    # full url
-    url = f'{base_url}?fields={fields}&format={format_type}&query={query}'
     
-    results = requests.get(url)
-    results.raise_for_status()
-    
-    df = pd.read_csv(io.StringIO(results.text), sep='\t')
+    def resolve_uniprot_redirects(accessions, from_db='UniProtKB_AC-ID', to_db='UniProtKB'):
+        url = 'https://rest.uniprot.org/idmapping/run'
+        data = {'from': from_db, 'to': to_db, 'ids': ','.join(accessions)}
 
-    isoform_prots = set(prot_list) - set(df['Entry'])
-    if isoform_prots:
-        # print statement for missing proteins, saying will now search for isoforms
+        res = requests.post(url, data=data)
+        res.raise_for_status()
+        job_id = res.json()['jobId']
+
+        # Poll until job is complete
+        while True:
+            status = requests.get(f"https://rest.uniprot.org/idmapping/status/{job_id}").json()
+            if status.get("jobStatus") == "RUNNING":
+                time.sleep(1)
+            else:
+                break
+
+        # Get results
+        results = requests.get(f"https://rest.uniprot.org/idmapping/uniprotkb/results/{job_id}").json()
+        mapping = {item['from']: item['to']['primaryAccession'] for item in results.get('results', [])}
+        return mapping
+
+    # Split isoform vs canonical accessions
+    isoform_ids = [acc for acc in prot_list if '-' in acc]
+    canonical_ids = [acc for acc in prot_list if '-' not in acc]
+
+    df_canonical = query_uniprot_batch(canonical_ids, query_type="accession")
+    df_isoform = query_uniprot_batch(isoform_ids, query_type="accession")
+
+    # Identify any isoforms that weren't found
+    found_isoform_ids = set(df_isoform['Entry']) if not df_isoform.empty else set()
+    missing_isoforms = [acc for acc in isoform_ids if acc not in found_isoform_ids]
+
+    if missing_isoforms and verbose:
+        print(f"Attempting fallback query for {len(missing_isoforms)} isoform base IDs")
+
+    # Attempt fallback query using base accessions
+    fallback_ids = list(set([id.split('-')[0] for id in missing_isoforms]))
+    df_fallback = query_uniprot_batch(fallback_ids, query_type="id")
+
+    # Combine all DataFrames
+    df = pd.concat([df_canonical, df_isoform, df_fallback], ignore_index=True)
+
+    # Final pass: insert missing rows if still unresolved
+    found_entries = set(df['Entry']) if 'Entry' in df.columns else set()
+    still_missing = set(prot_list) - found_entries
+
+    if still_missing:
         if verbose:
-            print(f'Searching for isoforms in unmapped accessions: {len(isoform_prots)}')
-        # these are typically isoforms, so we will try to search for them again
-        query_parts = ["%28accession%3A" + id + "%29" for id in isoform_prots]
-        query = "+OR+".join(query_parts)
-        query = "%28" + query + "%29"
-        url = f'{base_url}?fields={fields}&format={format_type}&query={query}'
-        
-        results = requests.get(url)
-        results.raise_for_status()
-        
-        isoform_df = pd.read_csv(io.StringIO(results.text), sep='\t')
-        
-        # now, let's search isoforms by entry name (id) instead
-        isoform_entrynames = isoform_df['Entry Name']
-        query_parts = ["%28id%3A" + id + "%29" for id in isoform_entrynames]
-        query = "+OR+".join(query_parts)
-        query = "%28" + query + "%29"
-        url = f'{base_url}?fields={fields}&format={format_type}&query={query}'
+            print(f"Trying UniProt ID mapping for {len(still_missing)} unresolved accessions...")
+        redirect_map = resolve_uniprot_redirects(list(still_missing))
+        if redirect_map:
+            redirected_ids = list(redirect_map.values())
+            df_redirected = query_uniprot_batch(redirected_ids, query_type="accession")
+            
+            # Remap back to original accession
+            inv_map = {v: k for k, v in redirect_map.items()}
+            if 'Entry' in df_redirected.columns:
+                df_redirected['Entry'] = df_redirected['Entry'].apply(lambda x: inv_map.get(x, x))
 
-        results = requests.get(url)
-        results.raise_for_status()
+            df = pd.concat([df, df_redirected], ignore_index=True)
 
-        isoform_df2 = pd.read_csv(io.StringIO(results.text), sep='\t')
-        entry_mapping = {entry.split('-')[0]: (entry, protein_name) for entry, protein_name in zip(isoform_df['Entry'], isoform_df['Protein names'])}
-        isoform_df2[['Entry', 'Protein names']] = isoform_df2['Entry'].apply(lambda x: entry_mapping.get(x.split('-')[0], (x, None))).apply(pd.Series)
-        
-        df = pd.concat([df, isoform_df2], axis=0)
-        
-        # what's left is missing proteins
-        missing_prots = set(prot_list) - set(df['Entry'])
-        if missing_prots:
-            print(f"Proteins not found in uniprot database after two attempts: {missing_prots}")
-            missing_df = pd.DataFrame(missing_prots, columns=['Entry'])
-            for col in df.columns:
-                if col != 'Entry':
-                    missing_df[col] = np.nan
-            df = pd.concat([df, missing_df], axis=0)
+            resolved = set(redirect_map.keys())
+            still_missing -= resolved
+
+    # Step 5: Fill in placeholders for totally missing accessions
+    if still_missing:
+        print(f"Proteins not found in UniProt database after all attempts: {still_missing}") if verbose else None
+        missing_df = pd.DataFrame({'Entry': list(still_missing)})
+        for col in search_fields:
+            if col != 'accession' and col not in missing_df.columns:
+                missing_df[col] = np.nan
+        df = pd.concat([df, missing_df], ignore_index=True)
     
     return df
 
