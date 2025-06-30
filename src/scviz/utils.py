@@ -103,7 +103,7 @@ def format_log_prefix(level: str, indent=None) -> str:
 
 # ----------------
 # DATA PROCESSING FUNCTIONS
-# NOTE: get_samplenames and get_classlist are very similar, may want to consider combining at some point
+# NOTE: get_samplenames and get_classlist are very similar, may want to explain better the difference (classlist is basically samplenames.unique?)
 def get_samplenames(adata, classes):
     """
     Gets the sample names for the given class(es) type. Helper function for plot functions. 
@@ -371,7 +371,7 @@ def get_upset_query(upset_content, present, absent):
 
     return prot_query_df
 
-# TODO: check through all code and migrate to new filter_dict()
+# TODO: LEGACY, CHECK TO MAKE SURE IT"S NOT BEING USED ANYWHERE ELSE
 def filter(pdata, class_type, values, exact_cases = False, debug = False):
     """
     Filters samples from either a pAnnData or AnnData object using legacy-style
@@ -832,6 +832,34 @@ def get_pca_importance(model: Union[dict, 'sklearn.decomposition.PCA'], initial_
     }
     df = pd.DataFrame(result.items(), columns=["Principal Component", "Top Features"])
     return df
+
+def get_protein_clusters(pdata, on='prot', layer='X', t=5, criterion='maxclust'):
+    """
+    Returns a dict mapping cluster_id → list of proteins, using stored linkage.
+    
+    Parameters:
+        t: number of clusters (if criterion='maxclust') or distance threshold
+        criterion: 'maxclust', 'distance', etc. (see scipy fcluster)
+    """
+    from scipy.cluster.hierarchy import fcluster
+    
+    key = f"{on}_{layer}_clustermap"
+    stats = pdata.stats.get(key)
+    if not stats or "row_linkage" not in stats:
+        print(f"No linkage found for {key} in pdata.stats.")
+        return None
+
+    linkage = stats["row_linkage"]
+    labels = fcluster(linkage, t=t, criterion=criterion)
+    order = stats["row_order"]
+
+    from collections import defaultdict
+    clusters = defaultdict(list)
+    for label, prot in zip(labels, order):
+        clusters[label].append(prot)
+
+    return dict(clusters)
+
 
 # ----------------
 # TO FIX

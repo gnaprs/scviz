@@ -234,7 +234,7 @@ class AnalysisMixin:
         n_ns = sig_counts.get('not significant', 0)
 
         print(f"{format_log_prefix('result_only', indent=2)} DE complete. Results stored in:")
-        print(f"       • .stats['{comparison_string}']")
+        print(f'       • .stats["{comparison_string}"]')
         print(f"       • Columns: log2fc, p_value, significance, etc.")
         print(f"       • Upregulated: {n_up} | Downregulated: {n_down} | Not significant: {n_ns}")
 
@@ -377,6 +377,7 @@ class AnalysisMixin:
             fully_by_group = {}
             partial_by_group = {}
             missing_features_by_group = {}
+            total_samples_by_group = {}
             
             for group in unique_groups:
                 idx = np.where(sample_names == group)[0]
@@ -396,16 +397,31 @@ class AnalysisMixin:
                 fully_by_group[group] = np.sum(was_missing & now_complete)
                 partial_by_group[group] = np.sum(was_missing & now_incomplete)
                 missing_features_by_group[group] = now_missing
+                total_samples_by_group[group] = len(idx)
 
+            # Compute dynamic width based on longest group name
+            group_width = max(max(len(str(g)) for g in unique_groups), 20)
+
+            # Summary totals
             total = sum(counts_by_group.values())
             summary_lines.append(f"{format_log_prefix('result_only', indent=2)} {total} values imputed total.")
+            summary_lines.append(f"{format_log_prefix('info_only', indent=2)} Group-wise summary:")
+
+            # Header row (aligned with computed width)
+            header = (f"{'Group':<{group_width}} | Values Imputed | Skipped Features | Samples Imputed (Partial,Fully)/Total")
+            divider = "-" * len(header)
+            summary_lines.append(f"{' ' * 5}{header}")
+            summary_lines.append(f"{' ' * 5}{divider}")
+
+            # Data rows
             for group in unique_groups:
                 count = counts_by_group[group]
                 fully = fully_by_group[group]
                 partial = partial_by_group[group]
                 skipped = missing_features_by_group[group]
+                total_samples = total_samples_by_group[group]
                 summary_lines.append(
-                    f"   - {group}: {count} values, {fully} fully imputed, {partial} partially imputed samples, {skipped} skipped feature(s) with all missing values."
+                    f"{' ' * 5}{group:<{group_width}} | {count:>14} | {skipped:>16} | {partial:>7}, {fully:>5} / {total_samples:<3}"
                 )
 
         print("\n".join(summary_lines))
@@ -613,12 +629,13 @@ class AnalysisMixin:
 
         if np.any(bad_rows_mask):
             n_bad = np.sum(bad_rows_mask)
-            print(f"⚠️ {n_bad} sample(s) have >{int(max_missing_fraction*100)}% missing values.")
-            print("   Suggest running `.impute()` before normalization for more stable results.")
-            print("   Alternatively, try `use_nonmissing=True` to normalize using only consistently observed proteins.")
+            print(f"{format_log_prefix('error',2)} {n_bad} sample(s) have >{int(max_missing_fraction*100)}% missing values.")
+            print("     Suggest running `.impute()` before normalization for more stable results.")
+            print("     Alternatively, try `use_nonmissing=True` to normalize using only consistently observed proteins.")
             if not force:
-                print("   ➡️ Use `force=True` to proceed anyway.")
+                print("     ➡️ Use `force=True` to proceed anyway.")
                 return
+            print(f"{format_log_prefix('warn',2)} Proceeding with normalization despite bad rows (force=True).")
 
         layer_name = 'X_norm_' + method
         normalize_funcs = ['sum', 'median', 'mean', 'max', 'reference_feature', 'robust_scale', 'quantile_transform']
@@ -704,7 +721,7 @@ class AnalysisMixin:
                 if not np.any(fully_observed_cols):
                     raise ValueError("No fully observed columns available for normalization with `use_nonmissing=True`.")
                 used_cols = np.where(fully_observed_cols)[0]
-                print(f"ℹ️ Normalizing using only fully observed columns: {used_cols}")
+                print(f"{format_log_prefix('info_only',2)} Normalizing using only fully observed columns: {used_cols}")
                 row_vals = reducer(data[:, fully_observed_cols], axis=1)
             else:
                 row_vals = reducer(data, axis=1)

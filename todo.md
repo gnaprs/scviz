@@ -1,7 +1,7 @@
 ## To-Do List
 
 # TODO features to implement
-0. Consider adding function that tidies up anndata.X -> so that we can directly use any sc.tl/sc.pl function
+0. implement harmony
 1. Add sharedPeptides function on get_CV()
 2. Update umap with uncertainty and also subset coloring
 3. Implement dot plot: expression of the indicated genes in the three clusters (dot size is percentage of cells per cluster; color is cluster average normalized expression)
@@ -17,16 +17,20 @@
 
 # ENHANCEMENTS (not as important)
 1. when updating .summary/obs, move prot/pep details to the right (prioritize metadata)
+2. heatmap implemented, but may be better to just export to a format for morpheous
 
 # TESTS
-1.  
+1. reorganize tests per suite in panndata module
+2. Check clean_X and verify works with scanpy (tidies up anndata.X -> so that we can directly use any sc.tl/sc.pl function)
 
 # FIX/BUGS
 1. sync get_uniprot_fields() with convert_identifiers() and get_string_... functions - make one combined function for all 3
 2. housekeeping csvs not installed with package - find a way to fix this
 3. get_pca_importance just needs to accept pdata input (and prot/pep) - can get uns['pca'] and var_names from it.
 4. plot_pca ellipse having issues (only showing one ellipse, not around data points)
-5. new pd3.1 has new format for peptides - modifications dolumn name definitely changed, and i think uniprot gene/prot checking may be bugged
+5. new pd3.1 has new format for peptides - modifications column name definitely changed, and i think uniprot gene/prot checking may be bugged
+6. .summary updates number of proteins, but repr(pdata) doesn't
+7. move normalize USER print statements to before error messages
 
 # MAINTENANCE
 1. Check out scprep repo for possible utility functions

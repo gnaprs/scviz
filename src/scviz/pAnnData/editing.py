@@ -29,7 +29,7 @@ class EditingMixin:
                 if layer not in self.pep.layers: # type: ignore[attr-defined]
                     raise ValueError(f"Layer {layer} not found in peptide data.")
                 self.pep.X = self.pep.layers[layer] # type: ignore[attr-defined]
-                print(f"{format_log_prefix('info_only', indent=2)} Set {on} data to layer {layer}.")
+                print(f"{format_log_prefix('info_only', indent=2)} Set {on} data (.X) to layer {layer}.")
 
             self._history.append(f"{on}: Set X to layer {layer}.") # type: ignore[attr-defined]
 

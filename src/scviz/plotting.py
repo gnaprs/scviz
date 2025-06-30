@@ -773,32 +773,235 @@ def plot_pca_scree(ax, pca):
     
     return ax
 
-# double check
-def plot_heatmap(ax, heatmap_data, cmap=cm.get_cmap('seismic'), norm_values=[4,5.5,7], linewidth=.5, annotate=True, square=False, cbar_kws = {'label': 'Abundance (AU)'}):
+def plot_clustermap(ax, pdata, on='prot', classes=None, layer="X", x_label='accession', namelist=None, lut=None, log2=True,
+                    cmap="coolwarm", figsize=(6, 10), force=False, impute=None, **kwargs):
     """
-    Plot annotated heatmap of protein abundance data.
+    Plot a clustered heatmap (proteins × samples) with optional column annotations and hierarchical clustering.
 
     Parameters:
-    ax (matplotlib.axes.Axes): The axes on which to plot the heatmap.
-    heatmap_data (pandas.DataFrame): The data to plot.
-    cmap (matplotlib.colors.Colormap): The colormap to use for the heatmap.
-    norm_values (list): The low, mid, and high values used to set colorbar scale. Can be assymetric.
-    linewidth (float): Plot linewidth.
-    annotate (bool): Annotate each heatmap entry with numerical value. True by default.
-    square (bool): Make heatmap square. False by default.
-    cbar_kws (dict): Pass-through keyword arguments for the colorbar. See `matplotlib.figure.Figure.colorbar()` for more information.
+        ax: Unused; included for compatibility with scviz plotting API.
+        pdata: pAnnData object.
+        on: 'prot' or 'pep' (choose data matrix).
+        classes: str or list of str. Sample class columns to annotate in the heatmap.
+        layer: str. Layer name to use; defaults to .X.
+        x_label: 'accession' or 'gene'. Used for row names and namelist mapping.
+        namelist: Optional list of protein accessions or gene names to plot.
+        lut: Optional nested dict of {class_name: {label: color}}.
+            This controls annotation bar colors. Missing entries are filled using default palettes.
 
-    Returns:
-    ax (matplotlib.axes.Axes): The axes with the plotted heatmap.
+            Example:
+                lut = {
+                    "cellline": {
+                        "AS": "#e41a1c",
+                        "BE": "#377eb8"
+                    },
+                    "condition": {
+                        "kd": "#4daf4a",
+                        "sc": "#984ea3"
+                    }
+                }
+
+        log2: Whether to log2-transform the abundance matrix (default: True).
+        cmap: Colormap for heatmap (default: 'coolwarm').
+        figsize: Tuple for figure size.
+        force: If True, imputes missing protein values instead of dropping rows with NaNs.
+        impute: Imputation strategy used when force=True. Options:
+            - 'row_min': fill NaNs with minimum value in that protein row
+            - 'global_min': fill NaNs with global minimum value in matrix
+
+        **kwargs: Additional arguments passed to seaborn.clustermap().
+            Common options:
+                - z_score (int): Normalize rows (0) or columns (1).
+                - standard_scale (int): Scale rows or columns to unit variance.
+                - center (float): Value to center colormap on (e.g., 0 with z_score).
+                - col_cluster (bool): Whether to cluster columns (samples). Default: False
+                - row_cluster (bool): Whether to cluster rows (proteins). Default: True
+                - linewidth (float): Grid line width between cells.
+                - xticklabels / yticklabels (bool): Show axis tick labels.
+                - colors_ratio (tuple): Proportion of space allocated to annotation bars.
     """
-    # if there are any columns that start with 'Matched in', remove them
-    heatmap_data = heatmap_data.loc[:,~heatmap_data.columns.str.contains('Matched in')]
+    # --- Step 1: Extract data ---
+    if on not in ("prot", "pep"):
+        raise ValueError(f"`on` must be 'prot' or 'pep', got '{on}'")
     
-    abundance_data_log10 = np.log10(heatmap_data)
-    mid_norm = mcolors.TwoSlopeNorm(vmin=norm_values[0], vcenter=norm_values[1], vmax=norm_values[2])
-    ax = sns.heatmap(abundance_data_log10, yticklabels=True, square=square, annot=annotate, linewidth=linewidth, cmap=cmap, norm=mid_norm, cbar_kws=cbar_kws)
+    if namelist is not None:
+        df_abund = utils.get_abundance(
+        pdata, namelist=namelist, layer=layer, on=on,
+        classes=classes, log=log2, x_label=x_label)
+        
+        pivot_col = "log2_abundance" if log2 else "abundance"
+        row_index = "gene" if x_label == "gene" else "accession"
+        df = df_abund.pivot(index=row_index, columns="cell", values=pivot_col)
+    
+    else:
+        adata = pdata.prot if on == 'prot' else pdata.pep
+        X = adata.layers[layer] if layer in adata.layers else adata.X
+        data = X.toarray() if hasattr(X, "toarray") else np.asarray(X)
+        df = pd.DataFrame(data.T, index=adata.var_names, columns=adata.obs_names)
+        if log2:
+            with np.errstate(divide='ignore', invalid='ignore'):
+                df = np.log2(df)
+                df[df == -np.inf] = np.nan
 
-    return ax
+    # --- Handle missing values ---
+    nan_rows = df.index[df.isna().any(axis=1)].tolist()
+    if nan_rows:
+        if not force:
+            print(f"Warning: {len(nan_rows)} proteins contain missing values and will be excluded: {nan_rows}")
+            print("To include them, rerun with force=True and impute='row_min' or 'global_min'.")
+            df = df.drop(index=nan_rows)
+        else:
+            print(f"{len(nan_rows)} proteins contain missing values: {nan_rows}.\nImputing using strategy: '{impute}'")
+            if impute == "row_min":
+                global_min = df.min().min()
+                df = df.apply(lambda row: row.fillna(row.min() if not np.isnan(row.min()) else global_min), axis=1)
+            elif impute == "global_min":
+                df = df.fillna(df.min().min())
+            else:
+                raise ValueError("`impute` must be either 'row_min' or 'global_min' when force=True.")
+
+    # --- Step 2: Column annotations ---
+    col_colors = None
+    legend_handles, legend_labels = [], []
+
+    if classes is not None:
+        if isinstance(classes, str):
+            sample_labels = utils.get_samplenames(adata, classes)
+            annotations = pd.DataFrame({classes: sample_labels}, index=adata.obs_names)
+        else:
+            sample_labels = utils.get_samplenames(adata, classes)
+            split_labels = [[part.strip() for part in s.split(",")] for s in sample_labels]
+            annotations = pd.DataFrame(split_labels, index=adata.obs_names, columns=classes)
+
+        if lut is None:
+            lut = {}
+
+        full_lut = {}
+        for col in annotations.columns:
+            unique_vals = sorted(annotations[col].dropna().unique())
+            user_colors = lut.get(col, {})
+            missing_vals = [v for v in unique_vals if v not in user_colors]
+            fallback_palette = sns.color_palette(n_colors=len(missing_vals))
+            fallback_colors = dict(zip(missing_vals, fallback_palette))
+            full_lut[col] = {**user_colors, **fallback_colors}
+
+            unmatched = set(user_colors) - set(unique_vals)
+            if unmatched:
+                print(f"Warning: The following labels in `lut['{col}']` are not found in the data: {sorted(unmatched)}")
+
+        col_colors = annotations.apply(lambda col: col.map(full_lut[col.name]))
+
+        # Legend handles
+        for col in annotations.columns:
+            legend_handles.append(mpatches.Patch(facecolor="none", edgecolor="none", label=col))  # header
+            for label, color in full_lut[col].items():
+                legend_handles.append(mpatches.Patch(facecolor=color, edgecolor="black", label=label))
+            legend_labels.extend([col] + list(full_lut[col].keys()))
+
+    # --- Step 3: Clustermap defaults (user-overridable) ---
+    col_cluster = kwargs.pop("col_cluster", False)
+    row_cluster = kwargs.pop("row_cluster", True)
+    linewidth = kwargs.pop("linewidth", 0.1)
+    yticklabels = kwargs.pop("yticklabels", True)
+    xticklabels = kwargs.pop("xticklabels", True)
+    colors_ratio = kwargs.pop("colors_ratio", (0.03, 0.02))
+    if kwargs.get("z_score", None) == 0:
+        zero_var_rows = df.var(axis=1) == 0
+        if zero_var_rows.any():
+            dropped = df.index[zero_var_rows].tolist()
+            print(f"⚠️ {len(dropped)} proteins have zero variance and will be dropped due to z_score=0: {dropped}")
+            df = df.drop(index=dropped)
+
+    # --- Step 4: Plot clustermap ---
+    try:
+        g = sns.clustermap(df,
+                        cmap=cmap,
+                        col_cluster=col_cluster,
+                        row_cluster=row_cluster,
+                        col_colors=col_colors,
+                        figsize=figsize,
+                        xticklabels=xticklabels,
+                        yticklabels=yticklabels,
+                        linewidth=linewidth,
+                        colors_ratio=colors_ratio,
+                        **kwargs)
+    except Exception as e:
+        print(f"Error occurred while creating clustermap: {e}")
+        return df
+
+    # --- Step 5: Column annotation legend ---
+    if classes is not None:
+        g.ax_col_dendrogram.legend(legend_handles, legend_labels,
+                                   title=None,
+                                   bbox_to_anchor=(0.5, 1.15),
+                                   loc="upper center",
+                                   ncol=len(classes),
+                                   handletextpad=0.5,
+                                   columnspacing=1.5,
+                                   frameon=False)
+        
+    # --- Step 6: Row label remapping ---
+    if x_label == "gene":
+        _ , prot_map = pdata.get_gene_maps(on='protein' if on == 'prot' else 'peptide')
+        row_labels = [prot_map.get(row, row) for row in g.data2d.index]
+        g.ax_heatmap.set_yticklabels(row_labels, rotation=0)
+
+    # --- Step 8: Store clustering results ---
+    cluster_key  = f"{on}_{layer}_clustermap"
+    row_order = list(g.data2d.index)
+    row_indices = g.dendrogram_row.reordered_ind
+
+    pdata.stats[cluster_key]  = {
+        "row_order": row_order,
+        "row_indices": row_indices,
+        "row_labels": x_label,   # 'accession' or 'gene'
+        "namelist_used": namelist if namelist is not None else "all_proteins",
+        "col_order": list(g.data2d.columns),
+        "col_indices": g.dendrogram_col.reordered_ind if g.dendrogram_col else None,
+        "row_linkage": g.dendrogram_row.linkage,  # <--- NEW
+        "col_linkage": g.dendrogram_col.linkage if g.dendrogram_col else None,
+    }
+
+    return g
+
+# def plot_heatmap(ax, pdata, classes=None, layer="X", cmap=cm.get_cmap('seismic'), norm_values=[4,5.5,7], linewidth=.5, annotate=True, square=False, cbar_kws = {'label': 'Abundance (AU)'}):
+#     """
+#     Plot annotated heatmap of protein abundance data.
+
+#     Parameters:
+#     ax (matplotlib.axes.Axes): The axes on which to plot the heatmap.
+#     pdata (scviz.pdata): The input pdata object.
+#     classes (str or list of str, optional): Class column(s) to group samples. If None, all samples are included.
+#     cmap (matplotlib.colors.Colormap): The colormap to use for the heatmap.
+#     norm_values (list): The low, mid, and high values used to set colorbar scale. Can be assymetric.
+#     linewidth (float): Plot linewidth.
+#     annotate (bool): Annotate each heatmap entry with numerical value. True by default.
+#     square (bool): Make heatmap square. False by default.
+#     cbar_kws (dict): Pass-through keyword arguments for the colorbar. See `matplotlib.figure.Figure.colorbar()` for more information.
+
+#     Returns:
+#     ax (matplotlib.axes.Axes): The axes with the plotted heatmap.
+#     """
+#     # get the abundance data for the specified classes
+    
+#     if cmap is None:
+#         cmap = plt.get_cmap("seismic")
+#     if cbar_kws is None:
+#         cbar_kws = {'label': 'Abundance (log$_2$ AU)'}
+
+#     # get data
+#     adata = pdata.prot
+#     data = adata.layers[layer] if layer != "X" else adata.X
+#     data = data.toarray() if sparse.issparse(data) else data.copy()
+
+
+#     # log-transform the data
+#     abundance_data_log10 = np.log10(data + 1)
+
+#     mid_norm = mcolors.TwoSlopeNorm(vmin=norm_values[0], vcenter=norm_values[1], vmax=norm_values[2])
+#     ax = sns.heatmap(abundance_data_log10, yticklabels=True, square=square, annot=annotate, linewidth=linewidth, cmap=cmap, norm=mid_norm, cbar_kws=cbar_kws)
+
+#     return ax
 
 def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold_change_mode='mean', label=5,
                  label_type='Gene', color=None, alpha=0.5, pval=0.05, log2fc=1, linewidth=0.5,
@@ -869,9 +1072,10 @@ def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold
 
     scatter_kwargs = dict(s=20, edgecolors='none')
     scatter_kwargs.update(kwargs)
+    colors = volcano_df['significance'].astype(str).map(default_color)
 
     ax.scatter(volcano_df['log2fc'], volcano_df['-log10(p_value)'],
-               c=volcano_df['significance'].map(default_color), alpha=alpha, **scatter_kwargs)
+               c=colors, alpha=alpha, **scatter_kwargs)
 
     ax.axhline(-np.log10(pval), color='black', linestyle='--', linewidth=linewidth)
     ax.axvline(log2fc, color='black', linestyle='--', linewidth=linewidth)
@@ -880,8 +1084,13 @@ def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold
     ax.set_xlabel('$log_{2}$ fold change')
     ax.set_ylabel('-$log_{10}$ p value')
 
-    max_abs_log2fc = np.max(np.abs(volcano_df['log2fc'])) + 0.5
+    log2fc_clean = volcano_df['log2fc'].replace([np.inf, -np.inf], np.nan).dropna()
+    if log2fc_clean.empty:
+        max_abs_log2fc = 1  # default range if nothing valid
+    else:
+        max_abs_log2fc = log2fc_clean.abs().max() + 0.5
     ax.set_xlim(-max_abs_log2fc, max_abs_log2fc)
+
 
     if not no_marks and label not in [None, 0, [0, 0]]:
         if isinstance(label, int):
@@ -898,7 +1107,7 @@ def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold
                 label_df = volcano_df[
                 volcano_df.index.str.lower().isin(label_lower) |
                 volcano_df['Genes'].str.lower().isin(label_lower)
-]
+            ]
 
         else:
             raise ValueError("label must be int or list")
