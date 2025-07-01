@@ -656,14 +656,14 @@ def plot_enrichment_svg(*args, **kwargs):
     return actual_plot(*args, **kwargs)
 
 # TODO
-def plot_umap(ax, pdata, color = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False):
+def plot_umap(ax, pdata, classes = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False):
     """
     This function plots the Uniform Manifold Approximation and Projection (UMAP) of the protein data.
 
     Parameters:
         ax (matplotlib.axes.Axes): The axes to plot on.
         data (pandas.DataFrame): The protein data to plot.
-        color (str): The column in the data to color by.
+        classes (str): The column in the data to color by.
         cmap (matplotlib.colors.Colormap, optional): The colormap to use for the plot. Defaults to 'viridis'.
         s (int, optional): The size of the points in the plot. Defaults to 20.
         alpha (float, optional): The transparency of the points in the plot. Defaults to 0.8.
@@ -680,6 +680,7 @@ def plot_umap(ax, pdata, color = None, layer = "X", on = 'protein', cmap='defaul
     """
     default_umap_params = {'n_components': 2, 'random_state': 42}
     umap_param = {**default_umap_params, **(umap_params if umap_params else {})}
+    color = classes
     
     if umap_param['n_components'] == 3:
         assert ax.name == '3d', "The ax must be a 3D projection, please define projection='3d'"

@@ -32,7 +32,10 @@ dependencies = [
   "matplotlib_venn",
   "pyarrow",
   "scanpy",
-  "IPython"
+  "IPython",
+  "igraph",
+  "harmonypy",
+  "leidenalg"
 ]
 
 [project.urls]

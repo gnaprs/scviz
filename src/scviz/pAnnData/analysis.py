@@ -1,3 +1,4 @@
+from matplotlib.pylab import f
 import numpy as np
 import pandas as pd
 import scanpy as sc
@@ -435,7 +436,10 @@ class AnalysisMixin:
             f"{on}: Imputed layer '{layer}' using '{method}' (grouped by {classes if classes else 'ALL'}). Stored in '{layer_name}'."
         )
 
-    def neighbor(self, on = 'protein', layer = "X", **kwargs):
+    # TODO: allow user to pass in own transformer
+    def neighbor(self, on = 'protein', layer = "X", use_rep='X_pca', **kwargs):
+        # from sklearn.neighbors import KNeighborsTransformer
+        # >>> transformer = KNeighborsTransformer(n_neighbors=10, metric='manhattan', algorithm='kd_tree')
         # uses sc.pp.neighbors
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             pass
@@ -454,14 +458,22 @@ class AnalysisMixin:
         log_prefix = format_log_prefix("user")
         print(f"{log_prefix} Computing neighbors [{on}] using layer: {layer}")
 
-        if 'pca' not in adata.uns:
-            print(f"{format_log_prefix('info_only',indent=2)} PCA not found in AnnData object. Running PCA with default settings.")
-            self.pca(on = on, layer = layer)
+        if use_rep == 'X_pca':
+            if 'pca' not in adata.uns:
+                print(f"{format_log_prefix('info_only',indent=2)} PCA not found in AnnData object. Running PCA with default settings.")
+                self.pca(on = on, layer = layer)
+        else:
+            if use_rep not in adata.obsm:
+                raise ValueError(f"PCA key '{use_rep}' not found in obsm. Please run PCA first and specify a valid key.")
+            print(f"{format_log_prefix('info_only',indent=2)} Using '{use_rep}' found in obsm for neighbor graph.")
 
-        sc.pp.neighbors(adata, **kwargs)
+        if use_rep == 'X_pca':
+            sc.pp.neighbors(adata, **kwargs)
+        else:
+            sc.pp.neighbors(adata, use_rep=use_rep, **kwargs)
 
-        self._append_history(f'{on}: Neighbors fitted on {layer}, stored in obs["distances"] and obs["connectivities"]') # type: ignore[attr-defined], HistoryMixin
-        print(f"{format_log_prefix('result_only',indent=2)} Neighbors computed on {layer}. Results stored in:")
+        self._append_history(f'{on}: Neighbors fitted on {layer}, using {use_rep}, stored in obs["distances"] and obs["connectivities"]') # type: ignore[attr-defined], HistoryMixin
+        print(f"{format_log_prefix('result_only',indent=2)} Neighbors computed on {layer}, using {use_rep}. Results stored in:")
         print(f"       • obs['distances'] (pairwise distances)")
         print(f"       • obs['connectivities'] (connectivity graph)")
         print(f"       • uns['neighbors'] (neighbor graph metadata)")
@@ -512,6 +524,8 @@ class AnalysisMixin:
         if 'neighbors' not in adata.uns:
             print(f"{format_log_prefix('info_only', indent=2)} Neighbors not found in AnnData object. Running neighbors with default settings.")
             self.neighbor(on = on, layer = layer)
+        else:
+            print(f"{format_log_prefix('info_only', indent=2)} Using existing neighbors found in AnnData object.")
 
         if layer == "X":
             # do nothing
@@ -528,6 +542,7 @@ class AnalysisMixin:
 
     def pca(self, on = 'protein', layer = "X", **kwargs):
         # uses sc.tl.pca
+        # for kwargs can use key_added to store PCA in a different key - then for neighbors need to specify key by use_rep
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             pass
         
@@ -572,6 +587,54 @@ class AnalysisMixin:
         var_pc1, var_pc2 = pca_data[2][:2]
         print(f"       • Variance explained by PC1/PC2: {var_pc1*100:.2f}% , {var_pc2*100:.2f}%") 
 
+    def harmony(self, key, on = 'protein'):
+        # uses sc.external.pp.harmony_integrate
+        # requires harmonypy
+        if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
+            pass
+       
+        if on == 'protein':
+            adata = self.prot
+        elif on == 'peptide':
+            adata = self.pep
+
+        log_prefix = format_log_prefix("user")
+        print(f"{log_prefix} Performing Harmony batch correction on [{on}] PCA.")
+
+        # check if pca has been run before, look for distances and connectivities in obsp
+        if 'pca' not in adata.uns:
+            print(f"{format_log_prefix('info_only', indent=2)} PCA not found in AnnData object. Running PCA with default settings.")
+            self.pca(on = on, layer = "X")
+
+        # check that key is valid column in adata.obs
+        if key not in adata.obs.columns:
+            raise ValueError(f"Batch key '{key}' not found in adata.obs.")
+
+        sc.external.pp.harmony_integrate(adata, key)
+
+        self._append_history(f'{on}: Harmony batch correction applied on key {key}, stored in obsm["X_pca_harmony"] and uns["umap"]') # type: ignore[attr-defined], HistoryMixin
+        print(f"{format_log_prefix('result_only', indent=2)} Harmony batch correction complete. Results stored in:")
+        print(f"       • obsm['X_pca_harmony'] (PCA coordinates)")
+
+    def morpheus_export(self, filename='pdata', on='protein'):
+        if not self._check_data(on):  # type: ignore[attr-defined], ValidationMixin
+            return
+
+        adata = self.prot if on == 'protein' else self.pep
+
+        # alternatively, use morpheus to plot clustermap
+        # will need two things
+        # 1. dataset (proteins in column, samples in rows)
+        dense_matrix = adata.X.toarray()
+        df = pd.DataFrame(dense_matrix, index=adata.obs_names, columns=adata.var_names)
+        df.to_csv(f'{filename}_protein_matrix.csv')
+        # 2. File Annotations (each sample in a row, different annotations in columns)
+        adata.obs.to_csv(f'{filename}_protein_annotations.csv')
+        # 3. Protein Annotations (each protein in a row, different annotations in columns)
+        adata.var.to_csv(f'{filename}_protein_annotations.csv')
+
+        print(f"{format_log_prefix('result')} Morpheus export complete.")
+
     def nanmissingvalues(self, on = 'protein', limit = 0.5):
         # sets columns (proteins and peptides) with > limit (default 0.5) missing values to NaN across all samples
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
@@ -613,6 +676,7 @@ class AnalysisMixin:
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             return
 
+
         adata = self.prot if on == 'protein' else self.pep
         if layer != "X" and layer not in adata.layers:
             raise ValueError(f"Layer {layer} not found in .{on}.")
@@ -622,6 +686,25 @@ class AnalysisMixin:
         normalize_data = normalize_data.toarray() if was_sparse else normalize_data.copy()
         original_data = normalize_data.copy()
 
+        layer_name = 'X_norm_' + method
+        normalize_funcs = ['sum', 'median', 'mean', 'max', 'reference_feature', 'robust_scale', 'quantile_transform']
+
+        if method not in normalize_funcs:
+            raise ValueError(f"Unsupported normalization method: {method}")
+
+        # Build the header message early
+        if classes is None:
+            msg = f"{format_log_prefix('user')} Global normalization using '{method}'"
+        else:
+            msg = f"{format_log_prefix('info_only')} Group-wise normalization using '{method}' on class(es): {classes}"
+
+        if use_nonmissing and method in {'sum', 'mean', 'median', 'max'}:
+            msg += " (using only fully observed columns)"
+        msg += f". Layer will be saved as '{layer_name}'."
+
+        # ✅ Print message before checking for missing values
+        print(msg)
+
         # Check for bad rows (too many missing values)
         missing_fraction = np.isnan(normalize_data).sum(axis=1) / normalize_data.shape[1]
         max_missing_fraction = kwargs.pop("max_missing_fraction", 0.5)
@@ -629,23 +712,15 @@ class AnalysisMixin:
 
         if np.any(bad_rows_mask):
             n_bad = np.sum(bad_rows_mask)
-            print(f"{format_log_prefix('error',2)} {n_bad} sample(s) have >{int(max_missing_fraction*100)}% missing values.")
-            print("     Suggest running `.impute()` before normalization for more stable results.")
-            print("     Alternatively, try `use_nonmissing=True` to normalize using only consistently observed proteins.")
+            print(f"{format_log_prefix('warn',2)} {n_bad} sample(s) have >{int(max_missing_fraction*100)}% missing values.")
+            print("     Try running `.impute()` before normalization. Suggest to use the flag `use_nonmissing=True` to normalize using only consistently observed proteins.")
             if not force:
                 print("     ➡️ Use `force=True` to proceed anyway.")
                 return
             print(f"{format_log_prefix('warn',2)} Proceeding with normalization despite bad rows (force=True).")
 
-        layer_name = 'X_norm_' + method
-        normalize_funcs = ['sum', 'median', 'mean', 'max', 'reference_feature', 'robust_scale', 'quantile_transform']
-
-        if method not in normalize_funcs:
-            raise ValueError(f"Unsupported normalization method: {method}")
-
         if classes is None:
             normalize_data = self._normalize_helper(normalize_data, method, use_nonmissing=use_nonmissing, **kwargs)
-            msg=f"{format_log_prefix('user')} Global normalization using '{method}'"
         else:
             # Group-wise normalization
             sample_names = utils.get_samplenames(adata, classes)
@@ -658,14 +733,6 @@ class AnalysisMixin:
 
                 normalized_group = self._normalize_helper(group_data, method=method, use_nonmissing=use_nonmissing, **kwargs)
                 normalize_data[idx, :] = normalized_group
-
-            msg=f"{format_log_prefix('info_only')} Group-wise normalization using '{method}' on class(es): {classes}"
-
-        if use_nonmissing and method in {'sum', 'mean', 'median', 'max'}:
-            msg += f" (using only fully observed columns)"
-
-        msg += f". Layer saved as '{layer_name}'."
-        print(msg)
 
         # summary printout
         summary_lines = []
@@ -721,7 +788,7 @@ class AnalysisMixin:
                 if not np.any(fully_observed_cols):
                     raise ValueError("No fully observed columns available for normalization with `use_nonmissing=True`.")
                 used_cols = np.where(fully_observed_cols)[0]
-                print(f"{format_log_prefix('info_only',2)} Normalizing using only fully observed columns: {used_cols}")
+                print(f"{format_log_prefix('info_only',2)} Normalizing using only fully observed columns: {len(used_cols)}")
                 row_vals = reducer(data[:, fully_observed_cols], axis=1)
             else:
                 row_vals = reducer(data, axis=1)
@@ -849,5 +916,5 @@ class AnalysisMixin:
         else:
             if verbose:
                 print(f"{format_log_prefix('result')} Returning cleaned matrix: {nan_count} NaNs replaced with {set_to}.")
-            return X_clean
+            return X_clean 
 
