@@ -271,6 +271,53 @@ def plot_summary(ax, pdata, value='protein_count', classes=None, plot_mean = Tru
 
     return ax
 
+def plot_abundance_housekeeping(ax, pdata, classes=None, loading_control='all', **kwargs):
+    """
+    Plot abundance of housekeeping proteins.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes or array-like
+        Axes to plot on. If `loading_control='all'`, must be a list of 3 Axes.
+    pdata : pAnnData
+        Your pAnnData object.
+    classes : str or list, optional
+        Sample-level class/grouping column(s) in .obs.
+    loading_control : str
+        Type of loading controls to use. Options: 'whole cell', 'nuclear', 'mitochondrial', 'all'.
+            Whole cell: GAPDH, beta tubulin (TBCD), beta actin (ACTB), vinculin (VCL), tubulin (TBP)
+            Nuclear: cytochrome c oxidase (COX), lamin B1 (LMNB1), proliferating cell nuclear antigen (PCNA), Histone Deacetylase 1 (HDAC1)
+            Mitochondrial: Voltage-Dependent Anion Channel 1 (VDAC1)
+    """
+
+    loading_controls = {
+        'whole cell': ['GAPDH', 'TBCD', 'ACTB', 'VCL', 'TBP'],
+        'nuclear': ['COX', 'LMNB1', 'PCNA', 'HDAC1'],
+        'mitochondrial': ['VDAC1'],
+        'all': ['GAPDH', 'TBCD', 'ACTB', 'VCL', 'TBP', 'COX', 'LMNB1', 'PCNA', 'HDAC1', 'VDAC1']
+    }
+
+    # Check validity
+    if loading_control not in loading_controls:
+        raise ValueError(f"❌ Invalid loading control type: {loading_control}")
+
+    # Plot all categories as subplots
+    if loading_control == 'all':
+        # Create 1x3 subplots
+        fig, axes = plt.subplots(1, 3, figsize=(16, 4), constrained_layout=True)
+        groups = ['whole cell', 'nuclear', 'mitochondrial']
+        for ax_sub, group in zip(axes, groups):
+            palette = get_color('colors', n=len(loading_controls[group]))
+            plot_abundance(ax_sub, pdata, namelist=loading_controls[group], classes=classes, layer='X', palette=palette, **kwargs)
+            ax_sub.set_title(group.title())
+        fig.suptitle("Housekeeping Protein Abundance", fontsize=14)
+        return fig, axes
+    else:
+        palette = get_color('colors', n=len(loading_controls[loading_control]))
+        plot_abundance(ax, pdata, namelist=loading_controls[loading_control], classes=classes, layer='X', palette=palette, **kwargs)
+        ax.set_title(loading_control.title())
+
+
 def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
                    classes=None, return_df=False, order=None, palette=None,
                    log=True, facet=None, height=4, aspect=0.5,
@@ -299,12 +346,6 @@ def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
     Returns:
     matplotlib.Axes or sns.FacetGrid or pd.DataFrame
     """
-    import numpy as np
-    import pandas as pd
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-    import warnings
-
     # Get abundance DataFrame
     df = utils.get_abundance(
         pdata, namelist=namelist, layer=layer, on=on,

@@ -12,6 +12,7 @@
 9. add gene to uniprot accession conversion function
 10. allow users to input "obs" for their own metadata
 11. string db values rank api ([text](https://string-db.org/cgi/help?subpage=api%23valuesranks-enrichment-api)) - also check about string API key; maybe can generate one per user instead? (store local copy in package if that's possible)
+12. Add tools for comparing two comparisons - plot of log(fc) vs log (fc), with coloring for significance? | then we also need to control hypothesis testing - ANOVA with Tukey and BH-algorithm for correction
 
 # ENHANCEMENTS (not as important)
 1. when updating .summary/obs, move prot/pep details to the right (prioritize metadata)
@@ -19,7 +20,6 @@
 3. implement string without mapping? mapping is very slow...
 4. get_pca_importance just needs to accept pdata input (and prot/pep) - can get uns['pca'] and var_names from it.
 5. Double-check peptide export format: (i) Gene Name (ii) Peptide name (iii) Peptide amino acid sequence start and end in the protein (iv) Charge, etc. if any (v) and then columns with the sample names where the intensities are reported
-
 
 # TESTS
 1. reorganize tests per suite in panndata module

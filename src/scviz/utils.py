@@ -318,7 +318,7 @@ def resolve_accessions(adata, namelist, gene_col="Genes", gene_map=None):
         )
 
     if unmatched:
-        print("[resolve_accessions] Warning: Unmatched names:")
+        print(f"{format_log_prefix('warn')}resolve_accessions: Unmatched names:")
         for u in unmatched:
             print(f"  - {u}")
 
