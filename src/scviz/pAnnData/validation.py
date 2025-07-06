@@ -4,19 +4,51 @@ import numpy as np
 
 class ValidationMixin:
     """
-    Internal consistency checks for pAnnData structure.
+    Provides internal validation checks for data consistency across `.prot`, `.pep`, `.summary`, and the RS matrix.
+
+    This mixin ensures that core components of the pAnnData object are structurally aligned and reports any mismatches
+    or inconsistencies in dimensionality, identifiers, and matrix shapes.
 
     Functions:
-        validate: Full validation routine to verify integrity of internal data.
-        _check_data: Checks whether `.prot` and `.pep` are valid AnnData objects.
-        _check_rankcol: Validates the presence and structure of rank columns.
+
+        validate:
+            Comprehensive integrity check for .prot, .pep, .summary, and RS matrix. Returns True if all checks pass.
+
+        _check_data:
+            Utility method to verify that protein or peptide data exists. Raises error if missing.
+
+        _check_rankcol:
+            Verifies presence of 'Average: <class>' and 'Rank: <class>' columns in `.var` for use with rank-based plotting.
     """
     def validate(self, verbose=True):
         """
-        Checks internal consistency of the pAnnData object.
-        
+        Check internal consistency of the pAnnData object.
+
+        This function verifies that `.prot`, `.pep`, `.summary`, and `.rs` are 
+        internally aligned, with matching dimensions, index values, and consistency
+        between shared sample identifiers. It prints helpful diagnostics if issues
+        are detected.
+
+        Checks Performed:
+        -----------------
+        - `.obs` and `.var` shapes match `.X` for both `.prot` and `.pep`
+        - `.obs` and `.var` indices are unique
+        - `.prot.obs_names` match `.pep.obs_names`
+        - `.summary.index` matches `.obs.index` for both `.prot` and `.pep`
+        - `.rs.shape` matches (n_proteins, n_peptides)
+        - Prints RS matrix sparsity and connectivity stats (if verbose=True)
+
+        Args:
+            verbose (bool): If True, print summary of validation and RS stats.
+
         Returns:
             bool: True if all checks pass, False otherwise.
+
+        Example:
+            To validate the pAnnData object and check for consistency issues:
+                >>> is_valid = pdata.validate()
+                >>> if not is_valid:
+                ...     print("Fix issues before proceeding.")
         """
         issues = []
 
@@ -92,6 +124,18 @@ class ValidationMixin:
             return True
 
     def _check_data(self, on):
+        """
+        Internal check for existence of protein or peptide data.
+
+        Args:
+            on (str): One of 'protein', 'peptide', 'prot', or 'pep'.
+
+        Returns:
+            bool: True if corresponding data exists.
+
+        Raises:
+            ValueError: If `on` is not a valid option or if the corresponding data is missing.
+        """
         # check if protein or peptide data exists
         if on not in ['protein', 'peptide' , 'prot', 'pep']:
             raise ValueError("Invalid input: on must be either 'protein' or 'peptide'.")
@@ -103,6 +147,21 @@ class ValidationMixin:
             return True
 
     def _check_rankcol(self, on = 'protein', class_values = None):
+        """
+        Internal check for existence of average and rank columns in `.var`.
+
+        This function ensures that for each `class_value`, both of the following 
+        columns exist in the `.var` of the chosen modality:
+            - 'Average: <class_value>'
+            - 'Rank: <class_value>'
+
+        Args:
+            on (str): 'protein' or 'peptide'.
+            class_values (list of str): Class values expected to have been used in plot_rankquank().
+
+        Raises:
+            ValueError: If class_values is None, or if required columns are missing from `.var`.
+        """
         # check if average and rank columns exist for the specified class values
         if on == 'protein':
             adata = self.prot

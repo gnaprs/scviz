@@ -41,6 +41,7 @@ markdown_extensions:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
+      default_lang: python
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences:
@@ -49,7 +50,7 @@ markdown_extensions:
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
-      alternate_style: true
+      alternate_style: true     
   - admonition
   - pymdownx.details
   - footnotes
@@ -62,7 +63,13 @@ extra:
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/scviz/
 plugins:
-  - mkdocstrings
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: false
   - search
 
 copyright: Copyright &copy; 2025 Marion Pang
@@ -89,6 +96,8 @@ nav:
           - Metadata + Summary: reference/metadata_mixins.md
           - Editing + Filtering: reference/editing_mixins.md
           - Analysis + Enrichment: reference/analysis_mixins.md
+          - Hidden Functions: reference/hidden_functions.md
+
   - Author's website: https://gnaprs.github.io/
 # nav:
 # - Home:

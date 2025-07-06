@@ -10,32 +10,41 @@ from scviz.utils import format_log_prefix
 
 class EnrichmentMixin:
     """
-    Performs functional enrichment and PPI analysis via STRING.
+    Provides methods for STRING-based functional and protein–protein interaction (PPI) enrichment.
+
+    This mixin includes utilities for:
+
+    - Running functional enrichment on differentially expressed or user-supplied gene lists.
+    - Performing STRING PPI enrichment to identify interaction networks.
+    - Generating STRING network visualization links and embedded SVGs.
+    - Listing and accessing enrichment results stored in `.stats`.
 
     Functions:
-        get_string_mappings: Map protein IDs to STRING IDs.
-        resolve_to_accessions: Convert gene names to protein accessions.
-        enrichment_functional: Functional enrichment (GO, KEGG, etc.).
-        enrichment_ppi: Protein-protein interaction network enrichment.
-        list_enrichments: View stored enrichment results.
-        plot_enrichment_svg: Render STRING SVG network plots.
-        get_string_network_link: Generate STRING network visualization URLs.
-    """        
+        enrichment_functional: Runs STRING functional enrichment on DE results or a custom gene list.
+        enrichment_ppi: Runs STRING PPI enrichment on a user-supplied gene or accession list.
+        list_enrichments: Lists available enrichment results and DE comparisons.
+        plot_enrichment_svg: Displays a STRING enrichment SVG inline or saves it to file.
+        get_string_mappings: Maps UniProt accessions to STRING IDs using the STRING API.
+        resolve_to_accessions: Resolves gene names or mixed inputs to accessions using internal mappings.
+        get_string_network_link: Generates a direct STRING network URL for visualization.
+    """   
     def get_string_mappings(self, identifiers, batch_size=300, debug=False):
         """
-        Maps UniProt accessions to STRING IDs, with caching into self.prot.var["String ID"].
+        Map UniProt accessions to STRING IDs using the STRING API.
 
-        Parameters
-        ----------
-        identifiers : list of str
-            List of UniProt accessions.
-        batch_size : int
-            Batch size for querying STRING API.
+        This method retrieves corresponding STRING identifiers for a list of UniProt accessions
+        and stores the result in `self.prot.var["String ID"]` for downstream use.
 
-        Returns
-        -------
-        pd.DataFrame
-            Mapping table with columns: input_identifier, string_identifier, ncbi_taxon_id
+        Args:
+            identifiers (list of str): List of UniProt accession IDs to map.
+            batch_size (int): Number of accessions to include in each API query (default is 300).
+            debug (bool): If True, prints progress and response info.
+
+        Returns:
+            pd.DataFrame: Mapping table with columns: `input_identifier`, `string_identifier`, and `ncbi_taxon_id`.
+
+        Note:
+            This is a helper method used primarily by `enrichment_functional()` and `enrichment_ppi()`.
         """
         print(f"[INFO] Resolving STRING IDs for {len(identifiers)} identifiers...") if debug else None
 
@@ -107,20 +116,25 @@ class EnrichmentMixin:
 
     def resolve_to_accessions(self, mixed_list):
         """
-        Converts a list of gene names or accessions into accessions
-        using internal gene-to-accession mapping.
+        Convert gene names or accessions into standardized UniProt accession IDs.
 
-        Parameters
-        ----------
-        mixed_list : list of str
-            Gene names or UniProt accessions.
+        This method resolves input items using the internal gene-to-accession map,
+        ensuring all returned entries are accessions present in the `.prot` object.
 
-        Returns
-        -------
-        list of str
-            Accessions resolved from input items.
-        """    
-        gene_to_acc, _ = self.get_gene_maps(on='protein')
+        Args:
+            mixed_list (list of str): A list containing gene names and/or UniProt accessions.
+
+        Returns:
+            list of str: List of resolved UniProt accession IDs.
+
+        Note:
+            This function is similar to `utils.resolve_accessions()` but operates in the context 
+            of the current `pAnnData` object and its internal gene mappings.
+
+        Todo:
+            Add example comparing results from `resolve_to_accessions()` and `utils.resolve_accessions()`.
+        """
+        gene_to_acc, _ = self.get_gene_maps(on='protein') 
         accs = []
         unresolved_accs = []
         for item in mixed_list:
@@ -147,7 +161,56 @@ class EnrichmentMixin:
         debug=False,
         **kwargs
     ):
+        """
+        Run functional enrichment analysis using STRING on a gene list.
 
+        This method performs ranked or unranked enrichment analysis using STRING's API.
+        It supports both differential expression-based analysis (up- and down-regulated genes)
+        and custom gene lists provided by the user. Enrichment results are stored in
+        `.stats["functional"]` for later access and plotting.
+
+        Args:
+            genes (list of str, optional): List of gene symbols to analyze. Ignored if `from_de=True`.
+            from_de (bool): If True (default), selects genes from stored differential expression results.
+            top_n (int): Number of top-ranked genes to use when `from_de=True` (default is 150).
+            score_col (str): Column name in the DE table to rank genes by (default is `"significance_score"`).
+            gene_col (str): Column name in `.prot.var` or DE results that contains gene names.
+            de_key (str): Key to retrieve stored DE results from `.stats["de_results"]`.
+            store_key (str, optional): Custom key to store enrichment results. Ignored when `from_de=True`.
+            species (str, optional): Organism name or NCBI taxonomy ID. If None, inferred from STRING response.
+            background (str or list of str, optional): Background gene list to use for enrichment.
+
+                - If `"all_quantified"`, uses non-significant proteins from DE or all other quantified proteins.
+                - If a list, must contain valid gene names or accessions.
+            debug (bool): If True, prints API request info and diagnostic messages.
+            **kwargs: Additional keyword arguments passed to the STRING enrichment API.
+
+        Returns:
+            dict or pd.DataFrame:
+
+                - If `from_de=True`, returns a dictionary of enrichment DataFrames for "up" and "down" gene sets.
+                - If `genes` is provided, returns a single enrichment DataFrame.
+
+        Example:
+            Run differential expression, then perform STRING enrichment on top-ranked genes:
+
+                >>> case1 = {'cellline': 'AS', 'treatment': 'sc'} # legacy style: class_type = ["group", "condition"]
+                >>> case2 = {'cellline': 'BE', 'treatment': 'sc'} # legacy style: values = [["GroupA", "Treatment1"], ["GroupA", "Control"]]
+                >>> pdata_nb.de(values = case_values) # or legacy style: pdata.de(classes=class_type, values=values)
+                >>> pdata.list_enrichments()  # list available DE result keys
+                >>> pdata.enrichment_functional(from_de=True, de_key="GroupA_Treatment1 vs GroupA_Control")
+
+            Perform enrichment on a custom list of genes:
+
+                >>> genelist = ["P55072", "NPLOC4", "UFD1", "STX5A", "NSFL1C", "UBXN2A",
+                ...             "UBXN4", "UBE4B", "YOD1", "WASHC5", "PLAA", "UBXN10"]
+                >>> pdata.enrichment_functional(genes=genelist, from_de=False)
+
+        Note:
+            Internally uses `resolve_to_accessions()` and `get_string_mappings()`, and stores results 
+            in `.stats["functional"]`. Results can be accessed or visualized via `plot_enrichment_svg()`
+            or by visiting the linked STRING URLs.
+        """
         def query_functional_enrichment(query_ids, species_id, background_ids=None, debug=False):
             # print(f"{format_log_prefix('info_only',2)} Running enrichment on {len(query_ids)} STRING IDs (species {species_id})...")
             url = "https://version-12-0.string-db.org/api/json/enrichment"
@@ -300,16 +363,33 @@ class EnrichmentMixin:
 
     def enrichment_ppi(self, genes, species=None, store_key=None):
         """
-        Run STRING PPI enrichment on a user-supplied list of accessions or gene names.
+        Run STRING PPI (protein–protein interaction) enrichment on a user-supplied gene or accession list.
 
-        Parameters
-        ----------
-        genes : list of str
-            A list of accessions or gene names.
-        species : int or None
-            NCBI species ID (e.g. 9606 for human). If None, inferred from STRING ID mapping.
-        store_key : str or None
-            Key to store the PPI enrichment result in self.stats["ppi"]. If None, auto-generates a unique key.
+        This method maps the input gene names or UniProt accessions to STRING IDs, infers the species 
+        if not provided, and submits the list to STRING's PPI enrichment endpoint. Results are stored 
+        in `.stats["ppi"]` for later retrieval or visualization.
+
+        Args:
+            genes (list of str): A list of gene names or UniProt accessions to analyze.
+            species (int or str, optional): NCBI taxonomy ID (e.g., 9606 for human). If None, inferred from STRING mappings.
+            store_key (str, optional): Key to store the enrichment result under `.stats["ppi"]`.
+                If None, a unique key is auto-generated.
+
+        Returns:
+            pd.DataFrame: DataFrame of STRING PPI enrichment results.
+
+        Example:
+            Run differential expression, then perform STRING PPI enrichment on significant genes:
+
+                >>> class_type = ["group", "condition"]
+                >>> values = [["GroupA", "Treatment1"], ["GroupA", "Control"]]
+
+                >>> pdata.de(classes=class_type, values=values)
+                >>> pdata.list_enrichments()
+                >>> sig_genes = pdata.stats["de_results"]["GroupA_Treatment1 vs GroupA_Control"]
+                >>> sig_genes = sig_genes[sig_genes["significance"] != "not significant"]["Genes"].dropna().tolist()
+
+                >>> pdata.enrichment_ppi(genes=sig_genes)
         """
         def query_ppi_enrichment(string_ids, species):
             # print(f"[INFO] Running PPI enrichment for {len(string_ids)} STRING IDs (species {species})...")
@@ -373,8 +453,19 @@ class EnrichmentMixin:
 
     def list_enrichments(self):
         """
-        List available STRING enrichment results and DE contrasts not yet analyzed.
-        Always outputs as plain text (for use in scripts, terminals, notebooks).
+        List available STRING enrichment results and unprocessed DE contrasts.
+
+        This method prints available functional and PPI enrichment entries stored in
+        `.stats["functional"]` and `.stats["ppi"]`, as well as DE comparisons in 
+        `.stats["de_results"]` that have not yet been analyzed.
+
+        Returns:
+            None
+
+        Example:
+            List enrichment results stored after running functional or PPI enrichment:
+
+                >>> pdata.list_enrichments()
         """
 
         functional = self.stats.get("functional", {})
@@ -443,18 +534,30 @@ class EnrichmentMixin:
 
     def plot_enrichment_svg(self, key, direction=None, category=None, save_as=None):
         """
-        Display STRING enrichment SVG inline in Jupyter.
+        Display STRING enrichment SVG inline in a Jupyter notebook.
 
-        Parameters
-        ----------
-        key : str
-            Key to use from .stats["functional"], e.g. a DE contrast or 'userSearch1'.
-        direction : str or None
-            'up' or 'down' for DE comparisons. Should be None for user-supplied lists.
-        category : str or None
-            STRING enrichment category ("GO", "KEGG", etc).
-        save_as : str or None
-            If provided, also saves the SVG to this path.
+        This method fetches and renders a STRING-generated SVG for a previously completed
+        functional enrichment result. Optionally, the SVG can also be saved to disk.
+
+        Args:
+            key (str): Enrichment result key from `.stats["functional"]`. For DE-based comparisons, this 
+                includes both contrast and direction (e.g., `"GroupA_Treatment1_vs_Control_up"`).
+            direction (str, optional): Direction of DE result, either `"up"` or `"down"`. Use `None` for 
+                user-defined gene lists.
+            category (str, optional): STRING enrichment category to filter by (e.g., `"GO"`, `"KEGG"`).
+            save_as (str, optional): If provided, saves the retrieved SVG to the given file path.
+
+        Returns:
+            None
+
+        Example:
+            Display a STRING enrichment network for a user-supplied gene list:
+
+                >>> pdata.plot_enrichment_svg("UserSearch1")
+
+        Note:
+            The `key` must correspond to an existing entry in `.stats["functional"]`, created via 
+            `enrichment_functional()`.
         """
         if "functional" not in self.stats:
             raise ValueError("No STRING enrichment results found in .stats['functional'].")
@@ -508,13 +611,25 @@ class EnrichmentMixin:
 
     def get_string_network_link(self, key=None, string_ids=None, species=None, show_labels=True):
         """
-        Generate a direct STRING website link to view a network of the given STRING IDs.
+        Generate a direct STRING network URL to visualize protein interactions online.
 
-        If `key` is provided, retrieves from self.stats["functional"][key].
+        This method constructs a STRING website link to view a network of proteins,
+        using either a list of STRING IDs or a key from previously stored enrichment results.
 
-        Returns
-        -------
-        str : URL
+        Args:
+            key (str, optional): Key from `.stats["functional"]` to extract STRING IDs and species info.
+            string_ids (list of str, optional): List of STRING identifiers to include in the network.
+            species (int or str, optional): NCBI taxonomy ID (e.g., 9606 for human). Required if not using a stored key.
+            show_labels (bool): If True (default), node labels will be shown in the network view.
+
+        Returns:
+            str: URL to open the network in the STRING web interface.
+
+        Example:
+            Get a STRING network link for a stored enrichment result:
+
+                >>> url = pdata.get_string_network_link(key="UserSearch1")
+                >>> print(url)
         """
         if string_ids is None:
             if key is None:
@@ -542,6 +657,19 @@ class EnrichmentMixin:
 
 # --- Top-level helper (keep above class definition) ---
 def _pretty_vs_key(k):
+    """
+    Format a DE contrast key into a human-readable string.
+
+    This function attempts to convert a string representation of a DE comparison
+    (e.g., a list of dictionaries) into a simplified `"group1 vs group2"` format,
+    using the values from each dictionary in the left and right group.
+
+    Args:
+        k (str): DE key string, typically in the format `"[{{...}}] vs [{{...}}]"`.
+
+    Returns:
+        str: A simplified, human-readable version of the DE comparison key.
+    """
     import ast
     try:
         parts = k.split(" vs ")
@@ -552,6 +680,24 @@ def _pretty_vs_key(k):
         return k  # fallback to raw key if anything goes wrong
 
 def _resolve_de_key(stats_dict, user_key, debug=False):
+    """
+    Resolve a user-supplied DE key to a valid key stored in `.stats["de_results"]`.
+
+    This function matches a flexible, human-readable DE key against the internal keys
+    stored in the DE results dictionary. It supports both raw and pretty-formatted keys,
+    and can handle suffixes like `_up` or `_down` for directional analysis.
+
+    Args:
+        stats_dict (dict): Dictionary of DE results (typically `pdata.stats["de_results"]`).
+        user_key (str): User-supplied key to resolve, e.g., "AS_kd vs AS_sc_down".
+        debug (bool): If True, prints detailed debug output for tracing.
+
+    Returns:
+        str: The matching internal DE result key.
+
+    Raises:
+        ValueError: If no matching key is found.
+    """
     import re
     print(f"[DEBUG] Resolving user key: {user_key}") if debug else None
 

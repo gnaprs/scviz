@@ -6,23 +6,29 @@ Includes foundational methods for validation, copying, and history tracking.
 
 ---
 
-## BaseMixin
-
 ::: src.scviz.pAnnData.base
     options:
-      show_root_heading: true
+      show_root_heading: false
+      render_module_header: false
       heading_level: 2
 
-## ValidationMixin
+::: src.scviz.pAnnData.summary
+    options:
+      show_root_heading: false
+      heading_level: 2
 
 ::: src.scviz.pAnnData.validation
     options:
-      show_root_heading: true
+      show_root_heading: false
+      render_module_header: false
       heading_level: 2
-
-## HistoryMixin
 
 ::: src.scviz.pAnnData.history
     options:
-      show_root_heading: true
+      show_root_heading: false
+      heading_level: 2
+
+::: src.scviz.pAnnData.identifier
+    options:
+      show_root_heading: false
       heading_level: 2

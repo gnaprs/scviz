@@ -6,13 +6,18 @@ Mixins for manipulating or reducing the dataset through selection and exports.
 
 ---
 
+## Editing
 ::: src.scviz.pAnnData.editing
     options:
-      show_root_heading: true
-      heading_level: 2
+      show_root_heading: false
+      heading_level: 3
+      <!-- filters:
+        - "!^__" -->
 
-
+## Filtering
 ::: src.scviz.pAnnData.filtering
     options:
-      show_root_heading: true
-      heading_level: 2
+      show_root_heading: false
+      heading_level: 3
+      <!-- filters:
+        - "!^__" -->

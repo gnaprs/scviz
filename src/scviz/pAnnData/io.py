@@ -15,8 +15,9 @@ from scviz.utils import format_log_prefix
 """
 Data import utilities for building `pAnnData` objects from supported proteomics tools.
 
-This module contains functions for importing and parsing output from tools like Proteome Discoverer and DIA-NN,
-and converting them into `pAnnData` instances with appropriate `.prot`, `.pep`, and relational RS matrices.
+This module provides functions to parse outputs from common tools such as Proteome Discoverer and DIA-NN,
+automatically extracting protein and peptide quantification matrices, sample metadata, and relational mappings
+between peptides and proteins.
 
 Supported tools:
     - Proteome Discoverer (PD 1.3, PD 2.4, etc.)
@@ -33,20 +34,60 @@ Functions:
 
 def import_data(source_type: str, **kwargs):
     """
-    Unified wrapper for importing data into a pAnnData object.
-    For pd, arguments are prot_file, pep_file, obs_columns.
-    For diann, arguments are report_file, obs_columns.
-    
-    Parameters:
-    - source (str): The tool or data source. Options:
-        - 'diann' or 'dia-nn' → calls import_diann()
-        - 'pd', 'proteomeDiscoverer', 'pd13', 'pd24' → calls import_proteomeDiscoverer()
-        - 'fragpipe', 'fp' → Not implemented yet
-        - 'spectronaut', 'sn' → Not implemented yet
-    - **kwargs: Arguments passed directly to the corresponding import function
+    Unified wrapper for importing data into a `pAnnData` object.
+
+    This function routes to a specific import handler based on the `source_type`,
+    such as Proteome Discoverer or DIA-NN. It parses protein/peptide expression data
+    and associated sample metadata, returning a fully initialized `pAnnData` object.
+
+    Args:
+        source_type (str): The input tool or data source. Supported values:
+
+            - `'pd'`, `'proteomeDiscoverer'`, `'pd13'`, `'pd24'`:  
+              → Uses `import_proteomeDiscoverer()`.  
+              Required kwargs:
+                - `prot_file` (str): Path to protein-level report file
+                - `obs_columns` (list of str): Columns to extract for `.obs`
+              Optional kwargs:
+                - `pep_file` (str): Path to peptide-level report file
+
+            - `'diann'`, `'dia-nn'`:  
+              → Uses `import_diann()`.  
+              Required kwargs:
+                - `report_file` (str): Path to DIA-NN report file
+                - `obs_columns` (list of str): Columns to extract for `.obs`
+
+            - `'fragpipe'`, `'fp'`: Not yet implemented  
+            - `'spectronaut'`, `'sn'`: Not yet implemented
+
+        **kwargs: Additional keyword arguments forwarded to the relevant import function.
 
     Returns:
-    - pAnnData object
+        pAnnData: A populated pAnnData object with `.prot`, `.pep`, `.summary`, and identifier mappings.
+
+    Example:
+        Importing Proteome Discoverer output for single-cell data:
+
+            >>> obs_columns = ['Sample', 'method', 'duration', 'cell_line']
+            >>> pdata_untreated_sc = import_data(
+            ...     source_type='pd',
+            ...     prot_file='data/202312_untreated/Marion_20231218_OTE_Aur60min_CBR_prot_Proteins.txt',
+            ...     pep_file='data/202312_untreated/Marion_20231218_OTE_Aur60min_CBR_pep_PeptideGroups.txt',
+            ...     obs_columns=obs_columns
+            ... )
+
+        Importing PD output for bulk data from an Excel file:
+
+            >>> obs_columns = ['Sample', 'cell_line']
+            >>> pdata_bulk = import_data(
+            ...     source_type='pd',
+            ...     prot_file='HCT116 resistance_20230601_pdoutput.xlsx',
+            ...     obs_columns=obs_columns
+            ... )
+
+    Note:
+        If `obs_columns` is not provided and filename formats are inconsistent,
+        fallback parsing is applied with generic columns (`"File"`, `"parsingType"`).
     """
 
     print(f"{format_log_prefix('user')} Importing data of type [{source_type}]")
@@ -82,6 +123,36 @@ def import_data(source_type: str, **kwargs):
                          "Valid options: 'diann', 'proteomeDiscoverer', 'fragpipe', 'spectronaut'.")
 
 def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample'], **kwargs):
+    """
+    Import Proteome Discoverer (PD) output into a `pAnnData` object.
+
+    This is a convenience wrapper for `import_data(source_type='pd')`. It loads protein- and optionally peptide-level
+    expression data from PD report files and parses sample metadata columns.
+
+    Args:
+        prot_file (str): Path to the protein-level report file (required).
+        pep_file (str, optional): Path to the peptide-level report file (optional but recommended).
+        obs_columns (list of str): List of columns to extract for `.obs`. These should match metadata tokens
+            embedded in the filenames (e.g. sample, condition, replicate).
+        **kwargs: Additional keyword arguments passed to `import_data()`.
+
+    Returns:
+        pAnnData: A populated object with `.prot`, `.pep` (if provided), `.summary`, and identifier mappings.
+
+    Example:
+        To import data from Proteome Discoverer:
+
+            >>> obs_columns = ['Sample', 'condition', 'cell_line']
+            >>> pdata = import_proteomeDiscoverer(
+            ...     prot_file='my_project/proteins.txt',
+            ...     pep_file='my_project/peptides.txt',
+            ...     obs_columns=obs_columns
+            ... )
+
+    Note:
+        - If `pep_file` is omitted, the resulting `pAnnData` will not include `.pep` or an RS matrix.
+        - If filename structure is inconsistent and `obs_columns` cannot be inferred, fallback columns are used.
+    """
     return import_data(source_type='pd', prot_file=prot_file, pep_file=pep_file, obs_columns=obs_columns)
 
 def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample'], **kwargs):
@@ -197,6 +268,43 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
     return pdata
 
 def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value: str = 'PG.MaxLFQ', pep_value: str = 'Precursor.Normalised', prot_var_columns: List[str] = ['Genes', 'Master.Protein'], pep_var_columns: List[str] = ['Genes', 'Protein.Group', 'Precursor.Charge', 'Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes'], **kwargs):
+    """
+    Import DIA-NN output into a `pAnnData` object.
+
+    This function parses a DIA-NN report file and separates protein- and peptide-level expression matrices
+    using the specified abundance and metadata columns.
+
+    Args:
+        report_file (str): Path to the DIA-NN report file (required).
+        obs_columns (list of str): List of metadata columns to extract from the filename for `.obs`.
+        prot_value (str): Column name in DIA-NN output to use for protein quantification.
+            Default: `'PG.MaxLFQ'`.
+        pep_value (str): Column name in DIA-NN output to use for peptide quantification.
+            Default: `'Precursor.Normalised'`.
+        prot_var_columns (list of str): Columns from the protein group table to store in `.prot.var`.
+            Default includes gene and master protein annotations.
+        pep_var_columns (list of str): Columns from the precursor table to store in `.pep.var`.
+            Default includes peptide sequence, precursor ID, and mapping annotations.
+        **kwargs: Additional keyword arguments passed to `import_data()`.
+
+    Returns:
+        pAnnData: A populated object with `.prot`, `.pep`, `.summary`, and identifier mappings.
+
+    Example:
+        To import data from a DIA-NN report file:
+
+            >>> obs_columns = ['Sample', 'treatment', 'replicate']
+            >>> pdata = import_diann(
+            ...     report_file='data/project_diaNN_output.tsv',
+            ...     obs_columns=obs_columns,
+            ...     prot_value='PG.MaxLFQ',
+            ...     pep_value='Precursor.Normalised'
+            ... )
+
+    Note:
+        - DIA-NN report should contain both protein group and precursor-level information.
+        - Metadata columns in filenames must be consistently formatted to extract `.obs`.
+    """
     return import_data(source_type='diann', report_file=report_file, obs_columns=obs_columns, prot_value=prot_value, pep_value=pep_value, prot_var_columns=prot_var_columns, pep_var_columns=pep_var_columns, **kwargs)
 
 def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, obs: Optional[pd.DataFrame] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Normalised', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes'], **kwargs):
@@ -328,20 +436,36 @@ def _create_pAnnData_from_parts(
     history_msg=""
 ):
     """
-    Assemble a pAnnData object from processed matrices and metadata.
+    Assemble a `pAnnData` object from processed matrices and metadata.
 
-    Parameters:
-    - prot_X, pep_X: csr_matrix (observations × features); one may be None
-    - rs: peptide-to-protein relational matrix (or None if not applicable)
-    - *_obs, *_var: pandas DataFrames for sample and feature metadata
-    - *_obs_names, *_var_names: list-like of sample/protein/peptide names
-    - obs_columns: optional list of column names to assign to .obs
-    - X_mbr_prot, X_mbr_pep: optional MBR identification layers
-    - metadata: optional dict of metadata tags (e.g. {'source': 'diann'})
-    - history_msg: string to append to the object's history
+    This function is typically called internally by import functions. It constructs
+    `.prot` and `.pep` AnnData objects, assigns optional metadata and MBR layers,
+    adds identifier mappings and sample-level summary metrics, and returns a
+    validated `pAnnData` object.
+
+    Args:
+        prot_X (csr_matrix): Protein-level expression matrix (samples × proteins).
+        pep_X (csr_matrix or None): Peptide-level expression matrix (samples × peptides).
+        rs (csr_matrix or None): Binary matrix linking proteins (rows) to peptides (columns).
+        prot_obs (pd.DataFrame): Sample-level metadata for protein data.
+        prot_var (pd.DataFrame): Feature-level metadata for proteins.
+        prot_obs_names (list-like): Sample identifiers for `.prot`.
+        prot_var_names (list-like): Protein accession identifiers for `.prot`.
+        pep_obs (pd.DataFrame, optional): Sample metadata for `.pep`. If not provided, `.prot.obs` is reused.
+        pep_var (pd.DataFrame, optional): Feature metadata for peptides.
+        pep_obs_names (list-like, optional): Sample identifiers for `.pep`.
+        pep_var_names (list-like, optional): Peptide identifiers.
+        obs_columns (list of str, optional): Columns from filenames to include in `.summary` and `.obs`.
+        X_mbr_prot (np.ndarray or DataFrame, optional): Optional protein-level MBR identification info.
+        X_mbr_pep (np.ndarray or DataFrame, optional): Optional peptide-level MBR identification info.
+        metadata (dict, optional): Optional dictionary of import metadata (e.g. `{'source': 'diann'}`).
+        history_msg (str): Operation description to append to the history log.
 
     Returns:
-    - pAnnData object with summary updated and validated
+        pAnnData: Initialized object with `.prot`, `.pep`, `.summary`, `.rs`, and other metadata filled in.
+
+    Note:
+        This is a low-level function. In most cases, users should call `import_data()`, `import_proteomeDiscoverer()`, or `import_diann()` instead.
     """
     from .pAnnData import pAnnData
 
@@ -400,20 +524,37 @@ def _create_pAnnData_from_parts(
 
 def suggest_obs_columns(source=None, source_type=None, filenames=None, delimiter=None):
     """
-    Extract and suggest sample-level metadata fields from filenames in a Proteome Discoverer or DIA-NN report.
+    Suggest `.obs` column names based on parsed sample names.
 
-    This function loads sample names from a DIA-NN or PD report file and parses them into tokens based on a delimiter.
-    Each token is classified into metadata categories such as 'gradient', 'amount', or 'well_position' using regex
-    patterns and fuzzy keyword matching. The result is printed and returned in a format suitable for `.obs` annotation.
+    This function analyzes filenames or run names extracted from Proteome Discoverer
+    or DIA-NN reports and attempts to identify consistent metadata fields. These fields
+    may include `gradient`, `amount`, `cell_line`, or `well_position`, depending on
+    naming conventions and regular expression matches.
 
-    Parameters:
-    - source (str or Path): Path to the input file.
-    - source_type (str, optional): Type of the source file ('diann', 'pd', etc.). Will be used to determine the file format.
-    - filenames (list of str, optional): Sample filenames or run names. If provided, bypasses file reading.
-    - delimiter (str, optional): Delimiter used in the file. If not provided, will be inferred from the run names.
+    Args:
+        source (str or Path, optional): Path to a DIA-NN or PD output file.
+        source_type (str, optional): Type of the input file. Supports `'diann'` or `'pd'`.
+            If not provided, inferred from filename or fallback heuristics.
+        filenames (list of str, optional): List of sample file names or run labels to parse.
+            If provided, bypasses file loading.
+        delimiter (str, optional): Delimiter to use for tokenizing filenames (e.g., `','`, `'_'`).
+            If not specified, will be inferred automatically.
 
     Returns:
-    - list of str: Suggested observation columns.
+        list of str: Suggested list of metadata column names to assign to `.obs`.
+
+    Example:
+        To suggest observation columns from a file:
+
+            >>> suggest_obs_columns("my_experiment_PD.txt", source_type="pd")
+
+        Suggested columns: ['Sample', 'gradient', 'cell_line', 'duration']
+
+            >>> ['Sample', 'gradient', 'cell_line', 'duration']
+
+    Note:
+        This function is typically used as part of the `.import_data()` flow
+        when filenames embed experimental metadata.
     """
     from pathlib import Path
     import csv
@@ -490,23 +631,37 @@ def suggest_obs_columns(source=None, source_type=None, filenames=None, delimiter
 
 def resolve_obs_columns(source: str, source_type: str, delimiter: Optional[str] = None) -> Tuple[Dict[str, Any], Optional[List[str]], Optional[pd.DataFrame]]:
     """
-    Resolve observation columns from sample filenames or metadata columns.
+    Resolve observation columns from sample filenames or metadata fields.
 
-    Parameters
-    ----------
-    filenames : list of str
-        List of filenames (from DIA-NN or PD).
-    source_type : str
-        Either 'diann' or 'pd'.
-    delimiter : str, optional
-        Delimiter to split filename tokens.
+    This function attempts to infer sample-level metadata (`.obs`) from filenames
+    or a report file (DIA-NN or Proteome Discoverer). It classifies tokens using 
+    regex patterns and known metadata heuristics.
 
-    Returns
-    -------
-    suggested_obs : list of str or None
-        List of suggested observation column names, or None if fallback is used.
-    obs_df : pd.DataFrame
-        DataFrame representing initial .obs with either suggested columns or fallback.
+    Args:
+        source (str): Path to the report file (DIA-NN or PD).
+        source_type (str): Source type — one of {'diann', 'pd'}.
+        delimiter (str, optional): Delimiter used to split filename tokens. If None, auto-inferred.
+
+    Returns:
+        Tuple[dict, list[str] or None, pd.DataFrame or None]: A tuple of:
+        
+        - **metadata** (dict): Metadata extracted during parsing, including fallback flags.
+        - **suggested_obs** (list of str or None): Suggested observation column names, or None if inconsistent format.
+        - **obs_df** (pd.DataFrame or None): Parsed observation DataFrame.
+
+    Note:
+        If filename formats are inconsistent across samples, the fallback `.obs` will include:
+        - A generic 'File' column with raw filenames
+        - A 'parsingType' column indicating parsing structure
+
+    Example:
+        Inferring observation columns from a PD file:
+
+            >>> resolve_obs_columns('filepaths/pd_report.xlsx', source_type='pd')
+
+        Inferring from a DIA-NN report with custom delimiter:
+
+            >>> resolve_obs_columns('filepaths/diann.tsv', source_type='diann', delimiter='_')
     """
     
     filenames = get_filenames(source, source_type=source_type)
@@ -541,28 +696,33 @@ def resolve_obs_columns(source: str, source_type: str, delimiter: Optional[str] 
 
 def classify_subtokens(token, used_labels=None, keyword_map=None):
     """
-    Classify a token into one or more metadata categories based on keyword matching and pattern rules.
+    Classify a token into one or more metadata categories based on keyword or pattern matching.
 
-    This function parses a token into subtokens (e.g., by splitting on digit/letter boundaries),
-    and attempts to classify each subtoken using:
-    - Regex patterns (e.g., for dates and well positions)
-    - Fuzzy substring matching against a user-defined keyword map
+    This function splits a token (e.g. from a filename) into subtokens using character-type transitions 
+    (e.g., "Aur60minDIA" → "Aur", "60", "min", "DIA"), then attempts to classify each subtoken using:
 
-    Parameters
-    ----------
-    token : str
-        The input string token to classify (e.g., "Aur60minDIA").
-    used_labels : set, optional
-        A set of already-assigned labels to avoid duplicating suggestions. Currently unused but reserved for future logic.
-    keyword_map : dict, optional
-        A dictionary where keys are metadata categories (e.g. 'gradient') and values are lists of substrings to match.
-        If None, a default keyword map will be used.
+    - Regex patterns (e.g., dates, well positions like A01)
+    - Fuzzy substring matching via a user-defined or default keyword map
 
-    Returns
-    -------
-    labels : list of str
-        A list of matched metadata labels for the token (e.g., ['gradient', 'acquisition']).
-        If no match is found, returns ['unknown??'].
+    Args:
+        token (str): The input string to classify (e.g., "Aur60minDIA").
+        used_labels (set, optional): Reserved for future logic to avoid assigning the same label twice.
+        keyword_map (dict, optional): A dictionary of metadata categories (e.g., 'gradient') to example substrings.
+
+    Returns:
+        list of str: A list of predicted metadata labels for the token (e.g., ['gradient', 'acquisition']).
+                     If no match is found, returns ['unknown??'].
+
+    Example:
+        Classify a gradient+time token:
+
+            >>> classify_subtokens("Aur60minDIA")
+            ['gradient', 'acquisition']
+
+        Classify a well position:
+
+            >>> classify_subtokens("B07")
+            ['well_position']
     """
 
     default_map = {
@@ -617,19 +777,29 @@ def is_date_like(sub):
 
 def get_filenames(source: Union[str, Path], source_type: str) -> List[str]:
     """
-    Extract the list of sample filenames from a DIA-NN or Proteome Discoverer report file.
+    Extract sample filenames from a DIA-NN or Proteome Discoverer report.
 
-    Parameters
-    ----------
-    source : str
-        Path to the input file.
-    source_type : {'diann', 'pd'}
-        Source tool type.
+    For DIA-NN reports, this extracts the 'Run' column from the table.
+    For Proteome Discoverer (PD) output, it collects unique sample identifiers 
+    based on column headers (e.g. abundance columns like "Abundances (SampleX)").
 
-    Returns
-    -------
-    filenames : list of str
-        List of sample names (Run names for DIA-NN or column-based for PD).
+    Args:
+        source (str or Path): Path to the input report file.
+        source_type (str): Tool used to generate the report. Must be one of {'diann', 'pd'}.
+
+    Returns:
+        list of str: Extracted list of sample names or run filenames.
+
+    Example:
+        Extract DIA-NN run names:
+
+            >>> get_filenames("diann_output.tsv", source_type="diann")
+            ['Sample1.raw', 'Sample2.raw', 'Sample3.raw']
+
+        Extract PD sample names from abundance columns:
+
+            >>> get_filenames("pd_output.xlsx", source_type="pd")
+            ['SampleA', 'SampleB', 'SampleC']
     """
     source = Path(source)
     ext = source.suffix.lower()
@@ -673,23 +843,44 @@ def analyze_filename_formats(filenames, delimiter: str = "_", group_labels=None)
     """
     Analyze filename structures to detect format consistency.
 
-    Parameters
-    ----------
-    filenames : list of str
-        List of sample or file names.
-    delimiter : str
-        Delimiter used to split tokens.
-    group_labels : list of str, optional
-        If provided, maps group indices to labels like ['A', 'B'].
+    This function checks if all filenames can be split into the same number of tokens
+    using the provided delimiter. It can optionally group files by token count and assign
+    custom group labels.
 
-    Returns
-    -------
-    format_info : dict
-        {
-            'uniform': bool,
-            'n_tokens': list of int,
-            'group_map': dict of filename → group label
-        }
+    Args:
+        filenames (list of str): List of sample or file names.
+        delimiter (str): Delimiter used to split each filename (default: "_").
+        group_labels (list of str, optional): Optional group labels to assign to each unique token length group.
+
+    Returns:
+        dict: Format information containing:
+            - 'uniform': True if all filenames split into the same number of tokens.
+            - 'n_tokens': List of token counts for each filename.
+            - 'group_map': Mapping of filename to group label (if labels are provided).
+
+    Example:
+        Check if filenames have a uniform structure:
+
+            >>> filenames = ["A_60min_KD", "B_60min_SC", "C_120min_KD"]
+            >>> analyze_filename_formats(filenames)
+            {
+                'uniform': True,
+                'n_tokens': [3, 3, 3],
+                'group_map': {}
+            }
+
+        With group labels:
+
+            >>> analyze_filename_formats(filenames, group_labels=["Group1"])
+            {
+                'uniform': True,
+                'n_tokens': [3, 3, 3],
+                'group_map': {
+                    'A_60min_KD': 'Group1',
+                    'B_60min_SC': 'Group1',
+                    'C_120min_KD': 'Group1'
+                }
+            }
     """
     group_counts = defaultdict(list)
     for fname in filenames:

@@ -18,43 +18,47 @@ class pAnnData(BaseMixin, ValidationMixin, SummaryMixin, MetricsMixin,
                IdentifierMixin, HistoryMixin, EditingMixin, FilterMixin,
                AnalysisMixin, EnrichmentMixin):
     """
-    Class for storing protein and peptide data, and relational mass spectrometry data.
+    Unified data container for protein and peptide expression in single-cell and bulk proteomics.
 
-    `pAnnData` integrates protein-level and peptide-level `AnnData` objects, alongside a binary relational structure
-    (`rs`) that links peptides to their parent proteins. It is designed for single-cell and bulk proteomics data,
-    with support for filtering, differential expression, enrichment, imputation, and visualization.
+    `pAnnData` integrates matched protein-level and peptide-level `AnnData` objects, along with an optional
+    binary relational structure (`rs`) that maps peptides to their parent proteins. It is designed for single-cell and bulk
+    proteomics data, and supports a range of analysis workflows, including filtering, normalization, imputation, differential
+    expression, enrichment, and visualization.
 
     This class is composed of modular mixins to enhance maintainability and organization.
 
     ## Mixins
 
     - **BaseMixin**: Core internal utilities, copying, and simple logic.
-    - **ValidationMixin**: Consistency checks on `.prot`, `.pep`, and `rs` structure.
+    - **ValidationMixin**: Ensures structural and dimensional consistency across `.prot`, `.pep`, `.summary`, and `rs`.
     - **SummaryMixin**: Maintains `.summary`, synchronizes metadata, and caches per-sample metrics.
-    - **MetricsMixin**: Calculates and visualizes peptide-to-protein relationship statistics.
-    - **IdentifierMixin**: Manages gene/accession identifier maps and missing gene resolution.
+    - **MetricsMixin**: Computes descriptive statistics from expression data and relational structure (RS matrix).
+    - **IdentifierMixin**: Manages bidirectional gene/accession mappings and handles missing gene resolution via UniProt.
     - **HistoryMixin**: Tracks all operations performed on the object for transparency.
-    - **EditingMixin**: Directly edits expression matrices and supports export utilities.
-    - **FilterMixin**: Protein/sample filtering based on metadata, counts, or expression presence.
+    - **EditingMixin**: Supports in-place editing, direct manipulation of expression matrices, and data export.
+    - **FilterMixin**: Provides flexible filtering of samples and proteins/peptides based on metadata, presence, or quantification.
     - **AnalysisMixin**: Core statistical operations: differential expression, imputation, PCA, clustering, etc.
-    - **EnrichmentMixin**: Runs STRING-based functional and interaction enrichment analyses.
+    - **EnrichmentMixin**: Runs STRING-based enrichment analyses (GO, pathways, PPI) using ranked or unranked protein sets.
 
     Args:
-        prot (AnnData): Protein-level expression matrix.
+        prot (AnnData): Protein-level expression matrix, with `.obs` containing sample metadata and `.var` describing protein features.
 
-        pep (AnnData): Peptide-level expression matrix.
+        pep (AnnData): Peptide-level expression matrix, structured analogously to `prot`.
 
-        rs (np.ndarray or sparse.spmatrix): Protein × peptide relational matrix.
-            Only required if both protein and peptide data are provided.
+        rs (np.ndarray or sparse.spmatrix, optional):
+            Binary relational matrix (proteins × peptides), where non-zero entries indicate a parent-protein relationship.
 
-        summary (pd.DataFrame): Per-sample metadata and metrics, synced to `.prot.obs` and `.pep.obs`.
+        summary (pd.DataFrame, optional):
+            Sample-level metadata table, merged from `.prot.obs` and `.pep.obs`, with support for additional metrics.
 
-        stats (dict): Stores results from DE, imputation, and other downstream analyses.
+        stats (dict, optional):
+            Dictionary for storing analysis outputs such as DE results, imputation metadata, and enrichment summaries.
 
-        history (list of str): List of operations or transformations applied to the dataset.
+        history (list of str, optional):
+            Chronological list of user-invoked operations, automatically tracked for reproducibility.
 
     Todo:
-        Decide whether to use the term `classes` or `class_types` for internal grouping semantics.
+        Decide whether to standardize internal terminology to `classes` or `class_types` for sample-level grouping.
     """
     def __init__(self, 
                  prot = None, # np.ndarray | sparse.spmatrix 

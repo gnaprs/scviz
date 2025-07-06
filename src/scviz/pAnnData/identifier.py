@@ -5,24 +5,48 @@ from scviz import utils
 
 class IdentifierMixin:
     """
-    Mixin for handling identifier mappings between genes, proteins, and peptides.
-    Provides methods to build, refresh, and update identifier maps, as well as retrieve them.
+    Handles mapping between genes, accessions, and peptides.
+
+    This mixin provides utilities for:
     
+    - Building and caching bidirectional mappings:
+        * For proteins: gene ↔ accession  
+        * For peptides: peptide ↔ protein accession
+
+    - Updating or refreshing identifier maps manually or via UniProt
+    - Automatically filling in missing gene names using the UniProt API
+
+    These mappings are cached and used throughout the `pAnnData` object to support resolution of user queries and consistent gene-accession-peptide tracking.
+
     Functions:
-        _build_identifier_maps: Constructs internal gene/accession maps from `.var`.
-        refresh_identifier_maps: Recomputes identifier mappings.
-        get_identifier_maps: Returns cached maps (accession → gene or vice versa).
-        update_identifier_maps: Updates stored identifier mappings.
-        update_missing_genes: Fills in missing gene names using external databases.
+        _build_identifier_maps: Create forward/reverse maps based on protein or peptide data
+        refresh_identifier_maps: Clear cached mappings to force rebuild
+        get_identifier_maps: Retrieve (gene → acc, acc → gene) or (peptide ↔ protein) maps
+        update_identifier_maps: Add or overwrite mappings (e.g., manual corrections)
+        update_missing_genes: Fill missing gene names using the UniProt API
     """
 
     def _build_identifier_maps(self, adata, gene_col="Genes"):
         """
-        Builds bidirectional mapping for:
-        - protein: gene ↔ accession
-        - peptide: peptide ↔ protein accession
+        Build bidirectional identifier mappings for genes/proteins or peptides/proteins.
 
-        Returns: (forward, reverse)
+        Depending on whether `adata` is `.prot` or `.pep`, this builds:
+
+        - For proteins: gene ↔ accession
+        - For peptides: peptide ↔ protein accession
+
+        Args:
+            adata (AnnData): Either `self.prot` or `self.pep`.
+            gene_col (str): Column name in `.var` containing gene names (default: "Genes").
+
+        Returns:
+            tuple: A pair of dictionaries (`forward`, `reverse`) for identifier lookup.
+
+        Note:
+            For peptides, mapping relies on `utils.get_pep_prot_mapping()` to resolve protein accessions.
+
+        Raises:
+            Warning if peptide-to-protein mapping cannot be built.
         """
         from pandas import notna
 
@@ -52,7 +76,14 @@ class IdentifierMixin:
 
     def refresh_identifier_maps(self):
         """
-        Refresh all gene/accession map caches.
+        Clear cached identifier maps to force regeneration on next access.
+
+        This removes the following attributes if present:
+        
+        - `_gene_maps_protein`: Gene ↔ Accession map for proteins
+        - `_protein_maps_peptide`: Protein ↔ Peptide map for peptides
+
+        Useful when `.var` annotations are updated and identifier mappings may have changed.
         """
         for attr in ["_gene_maps_protein", "_protein_maps_peptide"]:
             if hasattr(self, attr):
@@ -60,11 +91,24 @@ class IdentifierMixin:
 
     def get_identifier_maps(self, on='protein'):
         """
-        Returns identifier mapping dictionaries:
-        - on='protein': (gene → accession, accession → gene)
-        - on='peptide': (protein accession → peptide, peptide → protein accession)
+        Retrieve gene/accession or peptide/protein mapping dictionaries.
 
-        Alias: get_gene_maps() for compatibility.
+        Depending on the `on` argument, returns a tuple of forward and reverse mappings:
+
+        - If `on='protein'`: (gene → accession, accession → gene)
+
+        - If `on='peptide'`: (protein accession → peptide, peptide → protein accession)
+
+        Note: Alias `get_gene_maps()` also calls this function for compatibility.
+
+        Args:
+            on (str): Source of mapping. Must be `'protein'` or `'peptide'`.
+
+        Returns:
+            Tuple[dict, dict]: (forward mapping, reverse mapping)
+
+        Raises:
+            ValueError: If `on` is not `'protein'` or `'peptide'`.
         """
         if on == 'protein':
             return self._cached_identifier_maps_protein
@@ -78,31 +122,54 @@ class IdentifierMixin:
         """
         Update cached identifier maps with user-supplied mappings.
 
-        Parameters:
+        This function updates the internal forward and reverse identifier maps
+        for either proteins or peptides. Ensures consistency by updating both
+        directions of the mapping.
+
+        - For `'protein'`:
+            * forward: gene → accession  
+            * reverse: accession → gene
+
+        - For `'peptide'`:
+            * forward: protein accession → peptide
+            * reverse: peptide → protein accession
+
+        Args:
             mapping (dict): Dictionary of mappings to add.
-            on (str): 'protein' or 'peptide' — which set of maps to update.
-            direction (str): 'forward' or 'reverse'.
-                - For 'protein':
-                    forward: gene → accession
-                    reverse: accession → gene
-                - For 'peptide':
-                    forward: protein accession → peptide
-                    reverse: peptide → protein accession
-            overwrite (bool): If True, overwrite existing entries.
-            verbose (bool): If True, print a summary of the update.
+            on (str): Which maps to update. Must be `'protein'` or `'peptide'`.
+            direction (str): `'forward'` or `'reverse'` — determines how the `mapping` should be interpreted.
+            overwrite (bool): If True, allows overwriting existing entries.
+            verbose (bool): If True, prints a summary of updated keys.
 
-        This updates both the forward and reverse maps to maintain consistency.
+        Note:
+            The corresponding reverse map is automatically updated to maintain bidirectional consistency.
 
-        Examples:
-        ---------
-        # Add new gene-to-accession mappings (protein)
-        pdata.update_identifier_maps({'MYGENE1': 'P00001', 'MYGENE2': 'P00002'}, on='protein', direction='forward')
+        Example:
+            Add new gene-to-accession mappings (protein):
 
-        # Add peptide → protein mappings
-        pdata.update_identifier_maps({'PEPTIDE_ABC': 'P12345'}, on='peptide', direction='reverse')
+                >>> pdata.update_identifier_maps(
+                ...     {'MYGENE1': 'P00001', 'MYGENE2': 'P00002'},
+                ...     on='protein',
+                ...     direction='forward'
+                ... )
 
-        # Overwrite a protein → gene mapping
-        pdata.update_identifier_maps({'P12345': 'NEWGENE'}, on='protein', direction='reverse', overwrite=True)
+            Add peptide → protein mappings:
+
+                >>> pdata.update_identifier_maps(
+                ...     {'PEPTIDE_ABC': 'P12345'},
+                ...     on='peptide',
+                ...     direction='reverse'
+                ... )
+
+            Overwrite a protein → gene mapping:
+
+                >>> pdata.update_identifier_maps(
+                ...     {'P12345': 'NEWGENE'},
+                ...     on='protein',
+                ...     direction='reverse',
+                ...     overwrite=True
+                ... )
+
         """
         if on == 'protein':
             forward, reverse = self._cached_identifier_maps_protein
@@ -187,8 +254,29 @@ class IdentifierMixin:
 
     def update_missing_genes(self, gene_col="Genes", verbose=True):
         """
-        Fills missing gene names in .prot.var[gene_col] using UniProt API.
-        If UniProt returns no match, fills with 'UNKNOWN_<accession>'.
+        Fill missing gene names in `.prot.var` using UniProt API.
+
+        This function searches for missing values in the specified gene column
+        and attempts to fill them by querying the UniProt API using protein
+        accession IDs. If a gene name cannot be found, a placeholder
+        'UNKNOWN_<accession>' is used instead.
+
+        Args:
+            gene_col (str): Column name in `.prot.var` to update (default: "Genes").
+            verbose (bool): Whether to print summary information (default: True).
+
+        Returns:
+            None
+
+        Note:
+            - This function only operates on `.prot.var`, not `.pep.var`.
+            - If UniProt is unavailable or returns no match, the missing entry is filled as `'UNKNOWN_<accession>'`.
+            - To manually correct unknown entries later, use `update_identifier_maps()` with `direction='reverse'`.
+
+        Example:
+            Automatically fill missing gene names using UniProt:
+
+                >>> pdata.update_missing_genes()
         """
         var = self.prot.var
 

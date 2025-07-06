@@ -7,48 +7,97 @@ from scviz.utils import format_log_prefix
 
 class EditingMixin:
     """
-    Handles direct editing and exporting of data matrices and metadata.
+    Provides utilities for modifying core components of a `pAnnData` object, including 
+    matrix layers, abundance formatting, exports, and the protein–peptide mapping.
+
+    This mixin includes utilities for:
+
+    - Replacing `.X` with a specific layer from protein or peptide data.
+    - Extracting long-form abundance DataFrames with metadata for plotting or analysis.
+    - Exporting internal data (summary, matrix layers) to disk.
+    - Setting or updating the RS (protein × peptide) relational mapping matrix.
 
     Functions:
-        set_X: Updates `.X` matrix for `.prot` or `.pep`.
-        get_abundance: Retrieves abundance values from a specified layer.
-        export: Exports AnnData matrices and metadata to files.
+        set_X: Sets the `.X` matrix of protein or peptide data to a specified layer.
+        get_abundance: Returns long-form abundance + metadata for selected features.
+        export: Exports summary, matrix values, and layers to CSV.
+        _set_RS: Sets the RS (protein × peptide) mapping matrix, with optional validation.
     """
+
     def set_X(self, layer, on = 'protein'):
-        # defines which layer to set X to
-            if not self._check_data(on): # type: ignore[attr-defined]
-                pass
-
-            if on == 'protein':
-                if layer not in self.prot.layers: # type: ignore[attr-defined]
-                    raise ValueError(f"Layer {layer} not found in protein data.")
-                self.prot.X = self.prot.layers[layer] # type: ignore[attr-defined]
-                print(f"{format_log_prefix('info_only', indent=2)} Set {on} data to layer {layer}.")
-
-            else:
-                if layer not in self.pep.layers: # type: ignore[attr-defined]
-                    raise ValueError(f"Layer {layer} not found in peptide data.")
-                self.pep.X = self.pep.layers[layer] # type: ignore[attr-defined]
-                print(f"{format_log_prefix('info_only', indent=2)} Set {on} data (.X) to layer {layer}.")
-
-            self._history.append(f"{on}: Set X to layer {layer}.") # type: ignore[attr-defined]
-
-    def get_abundance(self, namelist=None, layer='X', on='protein',
-                    classes=None, log=True, x_label='gene'):
         """
-        Extract long-form abundance DataFrame from a pAnnData object.
+        Set the `.X` matrix of protein or peptide data to a specified layer.
 
-        Parameters:
-            pdata: pAnnData object
-            namelist: list of accessions or genes to extract (optional)
-            layer: which data layer to use (default: 'X')
-            on: 'protein' or 'peptide'
-            classes: obs column or list of columns to group by
-            log: whether to apply log2 transform
-            x_label: 'gene' or 'accession'
+        This method replaces the active `.X` matrix with the contents of a named layer 
+        from `.prot.layers` or `.pep.layers`. This is useful for switching between 
+        different processing stages (e.g., normalized, imputed, or raw data).
+
+        Args:
+            layer (str): Name of the data layer to assign to `.X`.
+            on (str): Whether to operate on `"protein"` or `"peptide"` data (default is `"protein"`).
 
         Returns:
-            pd.DataFrame with abundance + metadata
+            None
+
+        Example:
+            Set the protein matrix `.X` to the "normalized" layer:
+
+                >>> pdata.set_X(layer="normalized", on="protein")
+
+            Set the peptide matrix `.X` to the "imputed" layer:
+
+                >>> pdata.set_X(layer="imputed", on="peptide")
+        """
+        # defines which layer to set X to
+        if not self._check_data(on): # type: ignore[attr-defined]
+            pass
+
+        if on == 'protein':
+            if layer not in self.prot.layers: # type: ignore[attr-defined]
+                raise ValueError(f"Layer {layer} not found in protein data.")
+            self.prot.X = self.prot.layers[layer] # type: ignore[attr-defined]
+            print(f"{format_log_prefix('info_only', indent=2)} Set {on} data to layer {layer}.")
+
+        else:
+            if layer not in self.pep.layers: # type: ignore[attr-defined]
+                raise ValueError(f"Layer {layer} not found in peptide data.")
+            self.pep.X = self.pep.layers[layer] # type: ignore[attr-defined]
+            print(f"{format_log_prefix('info_only', indent=2)} Set {on} data (.X) to layer {layer}.")
+
+        self._history.append(f"{on}: Set X to layer {layer}.") # type: ignore[attr-defined]
+
+    def get_abundance(self, namelist=None, layer='X', on='protein', classes=None, log=True, x_label='gene'):
+        """
+        Extract a long-form abundance DataFrame from a pAnnData object.
+
+        This method returns a melted (long-form) DataFrame containing abundance values
+        along with optional sample metadata and protein/peptide annotations.
+
+        Args:
+            namelist (list of str, optional): List of accessions or gene names to extract. If None, returns all features.
+            layer (str): Name of the data layer to use (default is "X").
+            on (str): Whether to extract from "protein" or "peptide" data.
+            classes (str or list of str, optional): Sample-level `.obs` column(s) to include for grouping or plotting.
+            log (bool): If True, applies log2 transform to abundance values.
+            x_label (str): Whether to label features by "gene" or "accession" in the output.
+
+        Returns:
+            pd.DataFrame: Long-form DataFrame with abundance values and associated metadata.
+
+        Example:
+            Extract abundance values for selected proteins, grouped by sample-level metadata:
+
+                >>> df_abund = pdata.get_abundance(
+                ...     namelist=["UBE4B", "GAPDH"],
+                ...     on="protein",
+                ...     classes=["treatment", "cellline"]
+                ... )
+
+        Note:
+            This method is also available as a utility function:
+
+                >>> from scutils import get_abundance
+                >>> df_abund = get_abundance(pdata, namelist=["UBE4B", "GAPDH"], on="protein", classes=["treatment", "cellline"])
         """
 
         gene_to_acc, _ = self.get_gene_maps(on='protein' if on == 'peptide' else on) # type: ignore[attr-defined]
@@ -141,9 +190,22 @@ class EditingMixin:
         return df
 
     def export(self, filename, format = 'csv'):
-        # export data, each layer as a separate file
-        
-        # if filename not specified, use current date and time
+        """
+        Export the pAnnData object's contents to file, including layers and summary metadata.
+
+        This method saves the summary table, protein matrix, and all data layers as separate 
+        CSV files using the specified filename as a prefix.
+
+        Args:
+            filename (str): Prefix for exported files. If None, uses the current date and time.
+            format (str): File format to export (default is "csv").
+
+        Returns:
+            None
+
+        Todo:
+            Add example usage showing how to export data and where files are saved. (HDF5, Parquet?)
+        """
         if filename is None:
             filename = setup.get_datetime()
 
@@ -158,17 +220,20 @@ class EditingMixin:
             for layer in self.prot.layers:
                 self.prot.layers[layer].toarray().to_csv(f"{filename}_protein_{layer}.csv")
 
-
-
     def _set_RS(self, rs, debug=False, validate=True):
         """
-        Internal method to set the RS (protein × peptide) mapping matrix.
-        Transposes the input if it's in peptide × protein format.
+        Set the RS (protein × peptide) mapping matrix.
 
-        Parameters:
-        - rs (array or sparse matrix): The new RS matrix
-        - debug (bool): Print debug info
-        - validate (bool): If True (default), check that RS shape matches .prot and .pep
+        This internal method assigns a new RS matrix to the object. If the input appears 
+        to be in peptide × protein format, it will be automatically transposed.
+
+        Args:
+            rs (np.ndarray or sparse matrix): The new RS matrix to assign.
+            debug (bool): If True, prints diagnostic information.
+            validate (bool): If True (default), checks that the RS shape matches `.prot` and `.pep`.
+
+        Returns:
+            None
         """
         if debug:
             print(f"Setting rs matrix with dimensions {rs.shape}")

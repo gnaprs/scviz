@@ -2,20 +2,41 @@ import copy
 
 class BaseMixin:
     """
-    Core base functions for the pAnnData object.
+    Core base methods for pAnnData.
+
+    This mixin provides essential utility and management functions for cloning, 
+    checking, and managing core attributes of a `pAnnData` object. These methods
+    serve as foundational building blocks for other mixins and functions.
+
+    Features:
+    
+    - Checks presence of data (.prot or .pep)
+    - Safe object copying with state preservation
+    - Internal metadata management (stats, history, summary)
 
     Functions:
-        _has_data: Returns True if either `.prot` or `.pep` is not None.
-        _copy: Returns a deep copy of the pAnnData object.
+        _has_data: Check whether .prot and/or .pep data are present  
+        copy: Return a new `pAnnData` object with retained internal state
     """
     def _has_data(self) -> bool:
-        """Check whether .prot and .pep data are available."""
+        """
+        Check whether the pAnnData object contains either protein or peptide data.
+
+        Returns:
+            bool: True if either .prot or .pep is not None; otherwise False.
+        """
         return self.prot is not None or self.pep is not None # type: ignore[attr-defined]
 
     def copy(self):
         """
-        Return a new pAnnData object with the current state of all components.
-        This avoids full deepcopy and ensures filtered state is retained.
+        Return a new `pAnnData` object with the current state of all components.
+
+        This method performs a shallow copy of core data (.prot, .pep) and a deep copy of internal attributes
+        (e.g., RS matrix, summary, stats, and cached maps). It avoids full deepcopy for efficiency and retains
+        the current filtered or processed state of the object.
+
+        Returns:
+            pAnnData: A new object containing copies of the current data and metadata.
         """
         new_obj = self.__class__.__new__(self.__class__)
 

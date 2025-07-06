@@ -9,22 +9,30 @@ import warnings
 
 class FilterMixin:
     """
-    Provides flexible filtering and annotation for samples, proteins, and peptides.
+    Provides flexible filtering and annotation methods for samples, proteins, and peptides.
+
+    This mixin includes utilities for:
+
+    - Filtering proteins and peptides by metadata conditions, group-level detection, or peptide mapping structure.
+    - Filtering samples based on class annotations, numeric thresholds, file lists, or query strings.
+    - Annotating detection status ("Found In") across samples and class-based groups.
+    - Managing and validating the protein–peptide relational structure (RS matrix) after filtering.
 
     Functions:
-        filter_prot: Filters proteins using `.var` metadata or conditions.
-        filter_prot_found: Keeps proteins found in a minimum number of samples/groups.
-        _filter_sync_peptides_to_proteins: Removes peptides orphaned by protein filters.
-        filter_sample: Filters samples using metadata, thresholds, or queries.
-        _filter_sample_metadata: Internal method for metadata-based sample filters.
-        _filter_sample_values: Filters samples based on value thresholds.
-        _filter_sample_query: Parses and applies string-based queries.
-        filter_rs: Filters protein–peptide mappings by peptide count.
-        _apply_rs_filter: Internal helper to apply RS-based filters.
-        _format_filter_query: Formats filter conditions for logging.
-        annotate_found: Adds `.var['Found_in_X']` indicators to proteins/peptides.
-        _annotate_found_samples: Helper for group-based "found-in" annotations.
+        filter_prot: Filters proteins using `.var` metadata conditions or a list of accessions/genes to retain.
+        filter_prot_found: Keeps proteins or peptides found in a minimum number or proportion of samples within a group or file list.
+        _filter_sync_peptides_to_proteins: Removes peptides orphaned by upstream protein filtering.
+        filter_sample: Filters samples using categorical metadata, numeric thresholds, or file/sample lists.
+        _filter_sample_metadata: Internal helper for filtering samples using `.summary` conditions or name lists.
+        _filter_sample_values: Filters samples using dictionary-style matching on metadata fields.
+        _filter_sample_query: Parses and applies a raw pandas-style query string to `.obs` or `.summary`.
+        filter_rs: Filters the RS matrix by peptide count and ambiguity, and updates `.prot`/`.pep` accordingly.
+        _apply_rs_filter: Applies protein/peptide masks to `.prot`, `.pep`, and `.rs` matrices.
+        _format_filter_query: Formats filter conditions for `.eval()` by quoting fields and handling `includes` syntax.
+        annotate_found: Adds group-level "Found In" indicators to `.prot.var` or `.pep.var`.
+        _annotate_found_samples: Computes per-sample detection flags for use by `annotate_found()`.
     """
+    
     def filter_prot(self, condition = None, accessions=None, return_copy = 'True', debug=False):
         """
         Filter protein data based on metadata conditions or accession list (protein name and gene name).
@@ -46,7 +54,7 @@ class FilterMixin:
             pAnnData (pAnnData): Returns a filtered pAnnData object if `return_copy=True`. 
             None (None): Otherwise, modifies in-place and returns None.
 
-        Examples:
+        Example:
             Filter by metadata condition:
 
                 >>> condition = "Protein FDR Confidence: Combined == 'High'"
@@ -164,24 +172,33 @@ class FilterMixin:
 
     def filter_prot_found(self, group, min_ratio=None, min_count=None, on='protein', return_copy=True, verbose=True):
         """
-        Filters proteins or peptides based on the 'Found In' ratio for a given class grouping or file-level detection.
+        Filter proteins or peptides based on 'Found In' detection across samples or groups.
 
-        Parameters:
-        - group (str or list): Group label as used in 'Found In: {group} ratio' (e.g. 'HCT116_DMSO') or file(s) (e.g., ['F1', 'F2']).
-        - min_ratio (float): Minimum proportion of samples (0.0 - 1.0) in which the feature must be found (ignored for file-based). 
-        - min_count (int): Minimum number of samples the feature must be found in (alternative to ratio) (ignored for file-based).
-        - on (str): 'protein' or 'peptide'
-        - return_copy (bool): Return a filtered copy (default=True)
-        - verbose (bool): If True, prints verbose info
+        This method filters features by checking whether they are found in a minimum number or proportion 
+        of samples, either at the group level (e.g., biological condition) or based on individual files.
+
+        Args:
+            group (str or list of str): Group name(s) corresponding to 'Found In: {group} ratio' 
+                (e.g., "HCT116_DMSO") or a list of filenames (e.g., ["F1", "F2"]).
+            min_ratio (float, optional): Minimum proportion (0.0–1.0) of samples the feature must be 
+                found in. Ignored for file-based filtering.
+            min_count (int, optional): Minimum number of samples the feature must be found in. Alternative 
+                to `min_ratio`. Ignored for file-based filtering.
+            on (str): Feature level to filter: either "protein" or "peptide".
+            return_copy (bool): If True, returns a filtered copy. If False, modifies in place.
+            verbose (bool): If True, prints verbose summary information.
 
         Returns:
-        - Filtered pAnnData object (if `return_copy=True`), else modifies in place.
-        
+            pAnnData: A filtered pAnnData object if `return_copy=True`; otherwise, modifies in place and returns None.
+
         Example:
-        # Filter proteins found in both AS_sc and AS_kd with at least 2 samples each
-        >>> pdata.filter_prot_found(group=["AS_sc", "AS_kd"], min_count=2)
-        # Filter proteins found in all 3 input files
-        >>> pdata.filter_prot_found(group=["F1", "F2", "F3"])
+            Filter proteins found in both "groupA" and "groupB" groups, in at least 2 samples each:
+
+                >>> pdata.filter_prot_found(group=["groupA", "groupB"], min_count=2)
+
+            Filter proteins found in all three input files:
+
+                >>> pdata.filter_prot_found(group=["F1", "F2", "F3"])
         """
         if not self._check_data(on): # type: ignore[attr-defined]
             return
@@ -307,12 +324,19 @@ class FilterMixin:
         return filtered if return_copy else None
 
     def _filter_sync_peptides_to_proteins(self, original, updated_prot, debug=None):
-        """Helper function to filter peptides based on protein filtering. Returns inputs needed for _apply_rs_filter.
+        """
+        Helper function to filter peptides based on the updated protein list.
 
-        Parameters:
-        - original (pAnnData): Original pAnnData object before filtering.
-        - updated_prot (adata): Updated protein data to filter against.
-        - debug: Debugging flag.
+        This method determines which peptides to retain after protein-level filtering,
+        and returns the necessary inputs for `_apply_rs_filter`.
+
+        Args:
+            original (pAnnData): Original pAnnData object before filtering.
+            updated_prot (AnnData): Updated protein AnnData object to filter against.
+            debug (bool, optional): If True, prints debugging information.
+
+        Returns:
+            tuple: Inputs needed for downstream `_apply_rs_filter` operation.
         """
         if debug:
             print(f"{format_log_prefix('info')} Applying RS-based peptide sync-up on peptides after protein filtering...")
@@ -334,44 +358,58 @@ class FilterMixin:
 
     def filter_sample(self, values=None, exact_cases=False, condition=None, file_list=None, min_prot=None, return_copy=True, debug=False, query_mode=False):
         """
-        Unified method to filter samples in a pAnnData object.
+        Filter samples in a pAnnData object based on categorical, numeric, or identifier-based criteria.
 
-        This function supports three types of filtering input. You must provide **exactly one** of the following:
+        You must specify **exactly one** of the following:
         
-        - `values` (dict or list of dict): For filtering samples based on categorical metadata.
-            - Example: `{'treatment': ['kd', 'sc'], 'cellline': 'AS'}`
-            - Matches rows in `.summary` or `.obs` with those field values.
+        - `values`: Dictionary or list of dictionaries specifying class-based filters (e.g., treatment, cellline).
+        - `condition`: A string condition evaluated against summary-level numeric metadata (e.g., protein count).
+        - `file_list`: List of sample or file names to retain.
 
-        - `condition` (str): A condition string to evaluate against sample-level numeric metadata (summary).
-            - Example: `"protein_count > 1000"`
-            - This should reference columns in `pdata.summary`.
-
-        - `file_list` (list): A list of sample names or file identifiers to keep.
-            - Example: `['Sample_1', 'Sample_2']`
-            - Filters to only those samples (must match obs_names).
-
-        Parameters:
-        - values (dict or list of dict): Categorical value filter (if used).
-        - exact_cases (bool): Use exact combination matching when `values` is provided.
-        - condition (str): Summary-level numeric filter condition.
-        - file_list (list): List of sample identifiers to keep.
-        - min_prot (int): Minimum number of proteins required to keep a sample.
-        - return_copy (bool): If True, returns a filtered copy. Otherwise modifies in place.
-        - debug (bool): If True, print filter queries/messages.
+        Args:
+            values (dict or list of dict, optional): Categorical metadata filter. Matches rows in `.summary` or `.obs` with those field values.
+                Example: `{'treatment': 'kd', 'cellline': 'A'}`.
+            exact_cases (bool): If True, uses exact match across all class values when `values` is a list of dicts.
+            condition (str, optional): Logical condition string referencing summary columns. This should reference columns in `pdata.summary`.
+                Example: `"protein_count > 1000"`.
+            file_list (list of str, optional): List of sample names or file identifiers to keep. Filters to only those samples (must match obs_names).
+            min_prot (int, optional): Minimum number of proteins required in a sample to retain it.
+            return_copy (bool): If True, returns a filtered pAnnData object; otherwise modifies in place.
+            debug (bool): If True, prints query strings and filter summaries.
+            query_mode (bool): If True, performs filtering using `.query()` evaluation logic.
 
         Returns:
-        - Filtered pAnnData object (if `return_copy=True`), otherwise modifies in place and returns None.
+            pAnnData: Filtered pAnnData object if `return_copy=True`; otherwise, modifies in place and returns None.
 
         Raises:
-        - ValueError if more than one or none of `values`, `condition`, or `file_list` are specified.
+            ValueError: If more than one or none of `values`, `condition`, or `file_list` is specified.
 
-        Examples:
-        ---------
-        >>> pdata.filter_sample(values={'treatment': 'kd', 'cellline': 'AS'})
-        >>> pdata.filter_sample(values=[{'treatment': 'kd', 'cellline': 'AS'}, {'treatment': 'sc', 'cellline': 'BE'}], exact_cases=True)
-        >>> pdata.filter_sample(condition="protein_count > 1000")
-        >>> pdata.filter_sample(min_prot=1000)
-        >>> pdata.filter_sample(file_list=['Sample_001', 'Sample_007'])
+        Example:
+            Filter by metadata values:
+
+                >>> pdata.filter_sample(values={'treatment': 'kd', 'cellline': 'A'})
+
+            Filter with multiple exact matching cases:
+
+                >>> pdata.filter_sample(
+                ...     values=[
+                ...         {'treatment': 'kd', 'cellline': 'A'},
+                ...         {'treatment': 'sc', 'cellline': 'B'}
+                ...     ],
+                ...     exact_cases=True
+                ... )
+
+            Filter by numeric condition on summary:
+
+                >>> pdata.filter_sample(condition="protein_count > 1000")
+
+            Filter samples with fewer than 1000 proteins:
+
+                >>> pdata.filter_sample(min_prot=1000)
+
+            Keep specific samples by name:
+
+                >>> pdata.filter_sample(file_list=['Sample_001', 'Sample_007'])
         """
 
         # Ensure exactly one of the filter modes is specified
@@ -414,29 +452,34 @@ class FilterMixin:
 
     def _filter_sample_metadata(self, condition = None, return_copy = True, file_list=None, debug=False):
         """
-        Filter samples in a pAnnData object based on numeric summary conditions or a file/sample list.
+        Filter samples based on numeric metadata conditions or a list of sample identifiers.
 
-        This method allows filtering using:
-        - A string condition referencing columns in `.summary` (e.g. "protein_count > 1000"), or
-        - A list of sample identifiers to retain (e.g. filenames or obs_names).
+        This internal method supports two modes:
+        
+        - A string `condition` evaluated against `.summary` (e.g., `"protein_count > 1000"`).
+        - A `file_list` of sample names or identifiers to retain (e.g., filenames or `.obs_names`).
 
-        Parameters:
-        - condition (str): A filter condition string evaluated on `pdata.summary`.
-        - file_list (list): A list of sample identifiers to retain.
-        - return_copy (bool): Return a filtered copy (True) or modify in place (False).
-        - debug (bool): Print the query string or summary info.
+        Args:
+            condition (str, optional): Logical condition string referencing columns in `.summary`.
+            file_list (list of str, optional): List of sample identifiers to keep.
+            return_copy (bool): If True, returns a filtered pAnnData object. If False, modifies in place.
+            debug (bool): If True, prints the query string or filtering summary.
 
         Returns:
-        - Filtered pAnnData object (or None if in-place).
+            pAnnData: Filtered pAnnData object if `return_copy=True`; otherwise, modifies in place and returns None.
 
         Note:
-        This method is used internally by `filter_sample()`. For general-purpose filtering, it's recommended
-        to use `filter_sample()` and pass either `condition=...` or `file_list=...`.
+            This method is intended for internal use by `filter_sample()`. For general-purpose filtering, 
+            use `filter_sample()` with `condition=...` or `file_list=...`.
 
         Example:
-        >>> pdata.filter_sample_metadata("protein_count > 1000")
-        or
-        >>> pdata.filter_sample_metadata(file_list = ['fileA', 'fileB'])
+            Filter samples with more than 1000 proteins:
+
+                >>> pdata.filter_sample_metadata(condition="protein_count > 1000")
+
+            Keep only specific sample files:
+
+                >>> pdata.filter_sample_metadata(file_list=['fileA', 'fileB'])
         """
         if not self._has_data(): # type: ignore[attr-defined], ValidationMixin
             pass
@@ -514,37 +557,41 @@ class FilterMixin:
 
     def _filter_sample_values(self, values, exact_cases, verbose=True, debug=False, return_copy=True):
         """
-        Filter samples in a pAnnData object using dictionary-style categorical matching.
+        Filter samples using dictionary-style categorical matching.
 
-        This method allows filtering based on class-like annotations (e.g. treatment, cellline)
-        using either simple OR logic within fields, or exact AND combinations across fields.
+        This internal method filters samples based on class-like annotations (e.g., treatment, cellline),
+        using either loose field-wise filtering or strict combination matching.
 
-        Parameters:
-        - pdata (AnnData): Input AnnData object
-        - values (dict or list of dict): Filtering conditions
-            - If `exact_cases=False`: dictionary of field: values (OR within field, AND across fields)
-            - If `exact_cases=True`: list of dictionaries, each defining an exact match case
-        - exact_cases (bool): Enable exact combination matching
-        - debug (bool): Suppress query printing
-        - return_copy (bool): Return a copy of the filtered object
+        Args:
+            values (dict or list of dict): Filtering conditions.
+                - If `exact_cases=False`: A single dictionary with field: list of values. 
+                Applies OR logic within fields and AND logic across fields.
+                - If `exact_cases=True`: A list of dictionaries, each representing an exact combination of field values.
+            exact_cases (bool): If True, performs exact match filtering using the provided list of dictionaries.
+            verbose (bool): If True, prints a summary of the filtering result.
+            debug (bool): If True, prints internal queries and matching logic.
+            return_copy (bool): If True, returns a filtered copy. Otherwise modifies in place.
 
         Returns:
-        - AnnData: Filtered view of input data
+            AnnData: Filtered view of the input AnnData object if `return_copy=True`; otherwise modifies in place and returns None.
 
         Note:
-        This method is used internally by `filter_sample()`. For most use cases, calling `filter_sample()`
-        directly is preferred.
-        
-        Examples:
-        ---------
-        >>> pdata.filter_sample_values(values={'treatment': ['kd', 'sc'], 'cellline': 'AS'})
-        # History: Filtered by loose match on: treatment: ['kd', 'sc'], cellline: AS. Number of samples kept: 42. Copy of the filtered AnnData object returned.
+            This method is used internally by `filter_sample()`. For general use, call `filter_sample()` directly.
 
-        >>> pdata.filter_sample_values(pdatvalues=[
-        ...     {'treatment': 'kd', 'cellline': 'AS'},
-        ...     {'treatment': 'sc', 'cellline': 'BE'}
-        ... ], exact_cases=True)
-        # History: Filtered by exact match on: {'treatment': 'kd', 'cellline': 'AS'}; {'treatment': 'sc', 'cellline': 'BE'}. Number of samples kept: 17.
+        Example:
+            Loose field-wise match (OR within fields, AND across fields):
+
+                >>> pdata.filter_sample_values(values={'treatment': ['kd', 'sc'], 'cellline': 'A'})
+
+            Exact combination matching:
+
+                >>> pdata.filter_sample_values(
+                ...     values=[
+                ...         {'treatment': 'kd', 'cellline': 'A'},
+                ...         {'treatment': 'sc', 'cellline': 'B'}
+                ...     ],
+                ...     exact_cases=True
+                ... )
         """
 
         pdata = self.copy() if return_copy else self # type: ignore[attr-defined], EditingMixin
@@ -629,16 +676,20 @@ class FilterMixin:
 
     def _filter_sample_query(self, query_string, source='obs', return_copy=True, debug=False):
         """
-        Filters samples using a raw pandas-style query string on either obs or summary.
+        Filter samples using a raw pandas-style query string on `.obs` or `.summary`.
 
-        Parameters:
-        - query_string (str): A pandas-style query string (e.g., "cellline == 'AS' and treatment in ['kd', 'sc']")
-        - source (str): Either 'obs' or 'summary' — the dataframe to evaluate the query against.
-        - return_copy (bool): Return a new filtered object or modify in place.
-        - debug (bool): Print debug messages.
+        This method allows advanced filtering of samples using logical expressions evaluated 
+        directly on the sample metadata.
+
+        Args:
+            query_string (str): A pandas-style query string. 
+                Example: `"cellline == 'AS' and treatment in ['kd', 'sc']"`.
+            source (str): The metadata source to query — either `"obs"` or `"summary"`.
+            return_copy (bool): If True, returns a filtered pAnnData object; otherwise modifies in place.
+            debug (bool): If True, prints the parsed query and debug messages.
 
         Returns:
-        - Filtered pAnnData object or modifies in place.
+            pAnnData: Filtered pAnnData object if `return_copy=True`; otherwise, modifies in place and returns None.
         """
         pdata = self.copy() if return_copy else self # type: ignore[attr-defined], EditingMixin
         action = "Returning a copy of" if return_copy else "Filtered and modified"
@@ -696,24 +747,30 @@ class FilterMixin:
         validate_after=True
     ):
         """
-        Filters the RS matrix and associated .prot and .pep data.
+        Filter the RS matrix and associated `.prot` and `.pep` data based on peptide-protein relationships.
 
-        Parameters:
-        - min_peptides_per_protein (int, optional): Keep proteins with ≥ this many total peptides
-        - min_unique_peptides_per_protein (int, optional): Keep proteins with ≥ this many unique peptides (default: 2)
-        - max_proteins_per_peptide (int, optional): Remove peptides mapped to > this many proteins
-        - return_copy (bool): Return a filtered copy if True (default), otherwise modify in place
-        - preset (str or dict, optional): Use a predefined filtering strategy:
-            * "default" → unique_peptides ≥ 2
-            * "lenient" → total peptides ≥ 2
-            * dict → custom filter dictionary (same keys as above)
-        - validate_after (bool): If True (default), run self.validate() after filtering
+        This method applies rules for keeping proteins with sufficient peptide evidence and/or removing
+        ambiguous peptides. It also updates internal mappings accordingly.
+
+        Args:
+            min_peptides_per_protein (int, optional): Minimum number of total peptides required per protein.
+            min_unique_peptides_per_protein (int, optional): Minimum number of unique peptides required per protein 
+                (default is 2).
+            max_proteins_per_peptide (int, optional): Maximum number of proteins a peptide can map to; peptides 
+                exceeding this will be removed.
+            return_copy (bool): If True (default), returns a filtered pAnnData object. If False, modifies in place.
+            preset (str or dict, optional): Predefined filter presets:
+                - `"default"` → unique peptides ≥ 2
+                - `"lenient"` → total peptides ≥ 2
+                - A dictionary specifying filter thresholds manually.
+            validate_after (bool): If True (default), calls `self.validate()` after filtering.
 
         Returns:
-        - pAnnData: Filtered copy (if return_copy=True), or None
+            pAnnData: Filtered pAnnData object if `return_copy=True`; otherwise, modifies in place and returns None.
 
-        Side effects:
-        - Adds `.prot.uns['filter_rs']` dictionary with protein/peptide indices kept and summary
+        Note:
+            Stores filter metadata in `.prot.uns['filter_rs']`, including indices of proteins/peptides kept and 
+            filtering summary.
         """
         if self.rs is None: # type: ignore[attr-defined]
             print("⚠️ No RS matrix to filter.")
@@ -828,15 +885,23 @@ class FilterMixin:
         debug=True
     ):
         """
-        Applies filtering to .prot, .pep, and .rs based on provided boolean masks or lists of names.
-        Allows explicitly passing original axis names to avoid mismatches when working with a filtered copy.
+        Apply filtering to `.prot`, `.pep`, and `.rs` based on protein/peptide masks or name lists.
 
-        Parameters:
-        - keep_proteins: list of protein names or boolean mask (length = original RS rows)
-        - keep_peptides: list of peptide names or boolean mask (length = original RS cols)
-        - orig_prot_names: list/array of protein names corresponding to RS rows
-        - orig_pep_names: list/array of peptide names corresponding to RS cols
-        - debug (bool): Print filtering info
+        This method filters the relational structure (RS matrix) and associated data objects by retaining
+        only the specified proteins and/or peptides. Original axis names can be provided to ensure correct
+        alignment after prior filtering steps.
+
+        Args:
+            keep_proteins (list or np.ndarray or bool array, optional): List of protein names or boolean mask 
+                indicating which proteins (RS matrix rows) to keep.
+            keep_peptides (list or np.ndarray or bool array, optional): List of peptide names or boolean mask 
+                indicating which peptides (RS matrix columns) to keep.
+            orig_prot_names (list or np.ndarray, optional): Original protein names corresponding to RS matrix rows.
+            orig_pep_names (list or np.ndarray, optional): Original peptide names corresponding to RS matrix columns.
+            debug (bool): If True, prints filtering details and index alignment diagnostics.
+
+        Returns:
+            None
         """
 
         if self.rs is None: # type: ignore[attr-defined]
@@ -901,19 +966,23 @@ class FilterMixin:
 
     def _format_filter_query(self, condition, dataframe):
         """
-        Formats a query string for filtering a DataFrame with potentially complex column names. Used in `filter_sample_metadata()` and `filter_prot()`.
+        Format a condition string for safe evaluation on a DataFrame with complex column names.
 
-        - Wraps column names containing spaces/special characters in backticks for `pandas.eval()`.
-        - Supports custom `includes` syntax for substring matching, e.g.:
-            "Description includes 'p97'" → `Description.str.contains('p97', case=False, na=False)`
-        - Auto-quotes unquoted string values when column dtype is object or category.
+        This method prepares a query string for use with `pandas.eval()` or `.query()` by:
+        - Wrapping column names containing spaces or special characters in backticks.
+        - Converting custom `includes` syntax (for substring matching) into `.str.contains(...)` expressions.
+        - Quoting unquoted string values automatically for object/category columns.
 
-        Parameters:
-        - condition (str): The condition string to parse.
-        - dataframe (pd.DataFrame): DataFrame whose columns will be used for parsing.
+        Args:
+            condition (str): The condition string to parse and format.
+            dataframe (pd.DataFrame): The DataFrame whose column names and dtypes are used for formatting.
 
         Returns:
-        - str: A condition string formatted for pandas `.eval()`
+            str: A cleaned and properly formatted condition string suitable for `.eval()` or `.query()`.
+
+        Note:
+            This is an internal helper used by methods such as `filter_sample_metadata()` and `filter_prot()` 
+            to support user-friendly string-based queries.
         """
 
         # Wrap column names with backticks if needed
@@ -945,11 +1014,22 @@ class FilterMixin:
 
     def _annotate_found_samples(self, threshold=0.0, layer='X'):
         """
-        Internal method. Adds per-sample 'Found In' flags to .prot.var and .pep.var.
+        Annotate proteins and peptides with per-sample 'Found In' flags.
 
-        Parameters:
-        - threshold (float): Minimum value to consider as 'found'.
-        - layer (str): Data layer to use.
+        For each sample, this method adds boolean indicators to `.prot.var` and `.pep.var` 
+        indicating whether the feature was detected (i.e. exceeds the given threshold).
+
+        Args:
+            threshold (float): Minimum value to consider a feature as "found" (default is 0.0).
+            layer (str): Name of the data layer to evaluate (e.g., "X", "imputed", etc.).
+
+        Returns:
+            None
+
+        Note:
+            This is an internal helper used to support downstream grouping-based detection 
+            (e.g., in `annotate_found_in()`).
+            Adds new columns to `.var` of the form: `'Found In: <sample>' → bool`.
         """
         for level in ['prot', 'pep']:
             adata = getattr(self, level)
@@ -975,13 +1055,29 @@ class FilterMixin:
 
     def annotate_found(self, classes=None, on='protein', layer='X', threshold=0.0):
         """
-        Adds group-level 'Found In' annotations for proteins or peptides.
+        Add group-level 'Found In' annotations for proteins or peptides.
 
-        Parameters:
-        - classes (str or list): Sample-level class/grouping column(s) in .sample.obs.
-        - on (str): 'protein' or 'peptide'.
-        - layer (str): Layer to use (default='X').
-        - threshold (float): Minimum intensity to be considered 'found'.
+        This method computes detection flags across groups of samples, based on a minimum intensity 
+        threshold, and stores them in `.prot.var` or `.pep.var` as new boolean columns.
+
+        Args:
+            classes (str or list of str): Sample-level class/grouping column(s) in `.sample.obs`.
+            on (str): Whether to annotate 'protein' or 'peptide' level features.
+            layer (str): Data layer to use for evaluation (default is "X").
+            threshold (float): Minimum intensity value to be considered "found".
+
+        Returns:
+            None
+
+        Example:
+            Annotate proteins by group using sample-level metadata:
+
+                >>> pdata.annotate_found(classes=["group", "condition"], on="protein")
+
+            Filter for proteins found in at least 20% of samples from a given group:
+
+                >>> pdata_filtered = pdata.filter_prot_found(group="Group_A", min_ratio=0.2)
+                >>> pdata_filtered.prot.var
         """
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             return

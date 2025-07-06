@@ -11,23 +11,55 @@ from scipy import sparse
 
 class AnalysisMixin:
     """
-    Statistical and dimensionality reduction methods for bulk and single-cell proteomics.
+    Provides core statistical and dimensionality reduction tools for analyzing single-cell proteomics data.
+
+    This mixin includes functionality for:
+
+    - Differential expression (DE) analysis using t-tests, Mann–Whitney U, or Wilcoxon signed-rank tests  
+    - Ranking proteins or peptides by abundance within groups  
+    - Coefficient of Variation (CV) computation  
+    - Missing value imputation (global or group-wise) using statistical or KNN-based methods  
+    - Dimensionality reduction and clustering using PCA, UMAP, and Leiden  
+    - Neighbor graph construction for downstream manifold learning  
+    - Cleaning `.X` matrices by replacing NaNs  
+    - Row-wise normalization across multiple strategies  
+
+    All functions are compatible with both protein- and peptide-level data and support use of AnnData layers.
 
     Functions:
-        cv: Computes coefficient of variation.
-        de: Runs differential expression analysis.
-        rank: Ranks features using group separation metrics.
-        impute: Fills in missing values using KNN or class-based strategies.
-        normalize: Row-wise normalization across proteins or peptides.
-        _normalize_helper: Internal logic for normalization routines.
-        clean_X: NaN or outlier clean-up of `.X`.
-        namissingvalues: Counts missing values across samples or features.
-        neighbor: Builds neighbor graph using Scanpy.
-        leiden: Runs community detection on the neighbor graph.
-        umap: Performs UMAP dimensionality reduction.
-        pca: Principal component analysis.
+        cv: Compute coefficient of variation (CV) for each feature across or within sample groups.
+        de: Perform differential expression analysis between two sample groups.
+        rank: Rank features by mean abundance, compute standard deviation and numeric rank.
+        impute: Impute missing values globally or within groups using mean, median, min, or KNN.
+        neighbor: Compute neighborhood graph using PCA (or another embedding) for clustering or UMAP.
+        leiden: Run Leiden clustering on neighborhood graph, storing labels in `.obs['leiden']`.
+        umap: Perform UMAP dimensionality reduction using previously computed neighbors.
+        pca: Run PCA on normalized expression matrix, handling NaN exclusion and reinsertion of features.
+        clean_X: Replace NaNs in `.X` or a specified layer, optionally backing up the original.
+        _normalize_helper: Internal helper to compute per-sample scaling across multiple normalization methods.
     """
+
     def cv(self, classes = None, on = 'protein', layer = "X", debug = False):
+        """
+        Compute the coefficient of variation (CV) for each feature across sample groups.
+
+        This method calculates CV for each protein or peptide across all samples in each group,
+        storing the result as new columns in `.var`, one per group.
+
+        Args:
+            classes (str or list of str, optional): Sample-level class or list of classes used to define groups.
+            on (str): Whether to compute CV on "protein" or "peptide" data.
+            layer (str): Data layer to use for computation (default is "X").
+            debug (bool): If True, prints debug information while filtering groups.
+
+        Returns:
+            None
+
+        Example:
+            Compute per-group CV for proteins using a custom normalization layer:
+
+                >>> pdata.cv(classes=["group", "condition"], on="protein", layer="X_norm")
+        """
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             pass
 
@@ -48,46 +80,53 @@ class AnalysisMixin:
     # TODO: implement methods for calculdating fold change, 1. mean, 2. prot pairwise median, or 3. pep pairwise median (will need to refer to RS)
     def de(self, values=None, class_type=None, method='ttest', layer='X', pval=0.05, log2fc=1.0, fold_change_mode='mean'):
         """
-        Calculate differential expression (DE) of proteins across different groups.
+        Perform differential expression (DE) analysis on proteins across sample groups.
 
-        This function calculates the DE of proteins across different groups. The cases to compare can be specified, and the method to use for DE can be specified as well.
-        Supports legacy (class_type + values) or new dictionary-style filtering.
+        This method compares protein abundance between two sample groups using a specified
+        statistical test and fold change method. Input groups can be defined using either
+        legacy-style (`class_type` + `values`) or dictionary-style filters.
 
-        Parameters:
-        values : list of dict or list of list
-            Two sample group filters to compare. Each group should be either:
-            - A dictionary of {class: value} (e.g., {'cellline': 'HCT116', 'treatment': 'DMSO'})
-            - A list of values (legacy-style) if `class_type` is provided
-        class_type : str or list of str, optional
-            Legacy-style class label(s). Used only if values is a list of value combinations.
-        method : str
-            Statistical test to use. Options: 'ttest', 'mannwhitneyu', 'wilcoxon'.
-        layer : str
-            Data layer to use for DE (e.g., "X", "X_raw", "X_mbr").
-        pval : float
-            P-value cutoff for significance labeling.
-        log2fc : float
-            Log2 fold change threshold for labeling.
-        fold_change_mode : str
-            Method for computing fold change. Options:
-            - 'mean' : log2(mean(group1) / mean(group2))
-            - 'pairwise_median' : median of all pairwise log2 ratios
-            - 'pep_pairwise_median' : median of all pairwise log2 ratios for peptides per protein
+        Args:
+            values (list of dict or list of list): Sample group filters to compare.
+
+                - Dictionary-style (recommended): [{'cellline': 'HCT116', 'treatment': 'DMSO'}, {...}]
+                - Legacy-style (if `class_type` is provided): [['HCT116', 'DMSO'], ['HCT116', 'DrugX']]
+
+            class_type (str or list of str, optional): Legacy-style class label(s) to interpret `values`.
+
+            method (str): Statistical test to use. Options: "ttest", "mannwhitneyu", "wilcoxon".
+
+            layer (str): Name of the data layer to use (default is "X").
+
+            pval (float): P-value cutoff used for labeling significance.
+
+            log2fc (float): Minimum log2 fold change threshold for significance labeling.
+
+            fold_change_mode (str): Strategy for computing fold change. Options:
+
+                - "mean": log2(mean(group1) / mean(group2))
+                - "pairwise_median": median of all pairwise log2 ratios
+                - "pep_pairwise_median": median of peptide-level pairwise log2 ratios, aggregated per protein
 
         Returns:
-        df_stats : pandas.DataFrame
-            A DataFrame containing log2 fold change, p-values, and significance labels for each protein.
+            pd.DataFrame: DataFrame with DE statistics including log2 fold change, p-values, and significance labels.
 
-        Examples:
-        # Legacy-style usage
-        >>> pdata.de(class_type=['cellline', 'treatment'],
-        ...          values=[['HCT116', 'DMSO'], ['HCT116', 'DrugX']])
+        Example:
+            Legacy-style DE comparison using class types and value combinations:
 
-        # Dictionary-style usage (recommended)
-        >>> pdata.de(values=[
-        ...     {'cellline': 'HCT116', 'treatment': 'DMSO'},
-        ...     {'cellline': 'HCT116', 'treatment': 'DrugX'}
-        ... ])
+                >>> pdata.de(
+                ...     class_type=["cellline", "treatment"],
+                ...     values=[["HCT116", "DMSO"], ["HCT116", "DrugX"]]
+                ... )
+
+            Dictionary-style (recommended) DE comparison:
+
+                >>> pdata.de(
+                ...     values=[
+                ...         {"cellline": "HCT116", "treatment": "DMSO"},
+                ...         {"cellline": "HCT116", "treatment": "DrugX"}
+                ...     ]
+                ... )
         """
 
         # --- Handle legacy input ---
@@ -243,6 +282,26 @@ class AnalysisMixin:
 
     # TODO: Need to figure out how to make this interface with plot functions, probably do reordering by each class_value within the loop?
     def rank(self, classes = None, on = 'protein', layer = "X"):
+        """
+        Rank proteins or peptides by average abundance across sample groups.
+
+        This method computes the average and standard deviation for each feature within 
+        each group and assigns a rank (highest to lowest) based on the group-level mean.
+        The results are stored in `.var` with one set of columns per group.
+
+        Args:
+            classes (str or list of str, optional): Sample-level class/grouping column(s) in `.obs`.
+            on (str): Whether to compute ranks on "protein" or "peptide" data.
+            layer (str): Name of the data layer to use (default is "X").
+
+        Returns:
+            None
+
+        Example:
+            Rank proteins by average abundance across treatment groups:
+
+                >>> pdata.rank(classes="treatment", on="protein", layer="X_norm")
+        """
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             pass
 
@@ -270,14 +329,42 @@ class AnalysisMixin:
 
     def impute(self, classes=None, layer="X", method='mean', on='protein', set_X=True, **kwargs):
         """
-        Impute missing values across samples (globally or within classes) using SimpleImputer.
+        Impute missing values across samples globally or within groups.
 
-        Parameters:
-            classes (str or list): Class columns in .obs to group by.
-            layer (str): Data layer to impute from.
-            method (str): 'mean', 'median', or 'min'.
-            on (str): 'protein' or 'peptide'.
-            set_X (bool): Whether to set .X to the imputed result.
+        This method imputes missing values in the specified data layer using one of several strategies.
+        It supports both global (across all samples) and group-wise imputation based on sample classes.
+
+        Args:
+            classes (str or list of str, optional): Sample-level class/grouping column(s). If None, imputation is global.
+            layer (str): Data layer to impute from (default is "X").
+            method (str): Imputation strategy to use. Options include:
+
+                - "mean": Fill missing values with the mean of each feature.
+                - "median": Fill missing values with the median of each feature.
+                - "min": Fill with the minimum observed value (0 if all missing).
+                - "knn": Use K-nearest neighbors (only supported for global imputation).
+
+            on (str): Whether to impute "protein" or "peptide" data.
+            set_X (bool): If True, updates `.X` to use the imputed result.
+            **kwargs: Additional arguments passed to the imputer (e.g., `n_neighbors` for KNN).
+
+        Returns:
+            None
+
+        Example:
+            Globally impute missing values using the median strategy:
+
+                >>> pdata.impute(method="median", on="protein")
+
+            Group-wise imputation based on treatment:
+
+                >>> pdata.impute(classes="treatment", method="mean", on="protein")
+
+        Note:
+            - KNN imputation is only supported for global (non-grouped) mode.
+            - Features that are entirely missing within a group or across all samples are skipped and preserved as NaN.
+            - Imputed results are stored in a new layer named `"X_impute_<method>"`.
+            - Imputation summaries are printed to the console by group or overall.
         """
         from sklearn.impute import SimpleImputer, KNNImputer
         from scipy import sparse
@@ -436,11 +523,45 @@ class AnalysisMixin:
             f"{on}: Imputed layer '{layer}' using '{method}' (grouped by {classes if classes else 'ALL'}). Stored in '{layer_name}'."
         )
 
-    # TODO: allow user to pass in own transformer
     def neighbor(self, on = 'protein', layer = "X", use_rep='X_pca', **kwargs):
-        # from sklearn.neighbors import KNeighborsTransformer
-        # >>> transformer = KNeighborsTransformer(n_neighbors=10, metric='manhattan', algorithm='kd_tree')
-        # uses sc.pp.neighbors
+        """
+        Compute a neighbor graph based on protein or peptide data.
+
+        This method builds a nearest-neighbors graph for downstream analysis using 
+        `scanpy.pp.neighbors`. It optionally performs PCA before constructing the graph 
+        if a valid representation is not already available.
+
+        Args:
+            on (str): Whether to use "protein" or "peptide" data.
+            layer (str): Data layer to use (default is "X").
+            use_rep (str): Key in `.obsm` to use for computing neighbors. Default is `"X_pca"`.
+                If `"X_pca"` is requested but not found, PCA will be run automatically.
+            **kwargs: Additional keyword arguments passed to `scanpy.pp.neighbors()`.
+
+        Returns:
+            None
+
+        Example:
+            Compute neighbors using default PCA representation:
+
+                >>> pdata.neighbor(on="protein", layer="X")
+
+            Use a custom representation stored in `.obsm["X_umap"]`:
+
+                >>> pdata.neighbor(on="protein", use_rep="X_umap", n_neighbors=15)
+
+        Note:
+            - The neighbor graph is stored in `.obs["distances"]` and `.obs["connectivities"]`.
+            - Neighbor metadata is stored in `.uns["neighbors"]`.
+            - Automatically calls `self.set_X()` if a non-default layer is specified.
+            - PCA is computed automatically if `use_rep='X_pca'` and not already present.
+
+        Todo:
+            Allow users to supply a custom `KNeighborsTransformer` or precomputed neighbor graph.
+
+                >>> from sklearn.neighbors import KNeighborsTransformer
+                >>> transformer = KNeighborsTransformer(n_neighbors=10, metric='manhattan', algorithm='kd_tree')
+        """
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             pass
         
@@ -479,6 +600,30 @@ class AnalysisMixin:
         print(f"       • uns['neighbors'] (neighbor graph metadata)")
  
     def leiden(self, on = 'protein', layer = "X", **kwargs):
+        """
+        Perform Leiden clustering on protein or peptide data.
+
+        This method runs community detection using the Leiden algorithm based on a precomputed
+        neighbor graph using `scanpy.tl.leiden()`. If neighbors are not already computed, they will be generated automatically.
+
+        Args:
+            on (str): Whether to use "protein" or "peptide" data.
+            layer (str): Data layer to use for clustering (default is "X").
+            **kwargs: Additional keyword arguments passed to `scanpy.tl.leiden()`.
+
+        Returns:
+            None
+
+        Example:
+            Perform Leiden clustering using the default PCA-based neighbors:
+
+                >>> pdata.leiden(on="protein", layer="X", resolution=0.25)
+
+        Note:
+            - Cluster labels are stored in `.obs["leiden"]`.
+            - Neighbor graphs are automatically computed if not present in `.uns["neighbors"]`.
+            - Automatically sets `.X` to the specified layer if it is not already active.
+        """
         # uses sc.tl.leiden with default resolution of 0.25
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             pass
@@ -508,6 +653,31 @@ class AnalysisMixin:
         print(f"       • obs['leiden'] (cluster labels)")
 
     def umap(self, on = 'protein', layer = "X", **kwargs):
+        """
+        Compute UMAP dimensionality reduction on protein or peptide data.
+
+        This method runs UMAP (Uniform Manifold Approximation and Projection) on the selected data layer using `scanpy.tl.umap()`.
+        If neighbor graphs are not already computed, they will be generated automatically.
+
+        Args:
+            on (str): Whether to use "protein" or "peptide" data.
+            layer (str): Data layer to use for UMAP (default is "X").
+            **kwargs: Additional keyword arguments passed to `scanpy.tl.umap()`.
+
+        Returns:
+            None
+
+        Example:
+            Run UMAP using default settings:
+
+                >>> pdata.umap(on="protein", layer="X")
+
+        Note:
+            - UMAP coordinates are stored in `.obsm["X_umap"]`.
+            - UMAP settings are stored in `.uns["umap"]`.
+            - Automatically computes neighbor graphs if not already available.
+            - Will call `.set_X()` if a non-default layer is used.
+        """
         # uses sc.tl.umap
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             pass
@@ -541,6 +711,28 @@ class AnalysisMixin:
         print(f"       • uns['umap'] (UMAP settings)")
 
     def pca(self, on = 'protein', layer = "X", **kwargs):
+        """
+        Perform PCA (Principal Component Analysis) on protein or peptide data.
+
+        This method performs PCA on the selected data layer, after z-score normalization and removal of
+        NaN-containing features. The results are stored in `.obsm["X_pca"]` and `.uns["pca"]`.
+
+        Args:
+            on (str): Whether to use "protein" or "peptide" data.
+            layer (str): Data layer to use for PCA (default is "X").
+            **kwargs: Additional keyword arguments passed to `scanpy.tl.pca()`. For example,
+                `key_added` to store PCA in a different key.
+
+        Returns:
+            None
+
+        Note:
+            - Features (columns) with NaN values are excluded before PCA and then padded with zeros.
+            - PCA scores are stored in `.obsm['X_pca']`.
+            - Principal component loadings, variance ratios, and total variances are stored in `.uns['pca']`.
+            - If you store PCs under a custom key using `key_added`, remember to set `use_rep` when calling `.neighbor()` or `.umap()`.
+        """
+
         # uses sc.tl.pca
         # for kwargs can use key_added to store PCA in a different key - then for neighbors need to specify key by use_rep
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
@@ -761,18 +953,25 @@ class AnalysisMixin:
     
     def _normalize_helper(self, data, method, use_nonmissing, **kwargs):
         """
-        Helper function for row-wise normalization.
+        Perform row-wise normalization using a selected method.
 
-        Parameters:
-        - data (np.ndarray): Data matrix (samples x features).
-        - method (str): Normalization method. One of:
-            'sum', 'mean', 'median', 'max', 'reference_feature',
-            'robust_scale', 'quantile_transform'.
-        - use_nonmissing (bool): If True, only use columns with no missing values
-                                across all samples when computing scaling factors.
+        Used internally by `normalize()` to compute per-sample scaling.
+        Supports reference feature scaling, robust methods, and quantile normalization.
+
+        Args:
+            data (np.ndarray): Sample × feature data matrix.
+            method (str): Normalization strategy. Options:
+                - 'sum'
+                - 'mean'
+                - 'median'
+                - 'max'
+                - 'reference_feature'
+                - 'robust_scale'
+                - 'quantile_transform'
+            use_nonmissing (bool): If True, computes scaling using only columns with no NaNs.
 
         Returns:
-        - np.ndarray: Normalized data.
+            np.ndarray: Normalized data matrix.
         """
 
         if method in {'sum', 'mean', 'median', 'max'}:
@@ -860,20 +1059,22 @@ class AnalysisMixin:
     
     def clean_X(self, on='prot', inplace=True, set_to=0, layer=None, to_sparse=False, backup_layer="X_preclean", verbose=True):
         """
-        Replace NaNs in .prot.X or a specified .prot layer with a given value (default: 0).
-        Optionally saves a backup of the original data to a layer (default: 'X_preclean').
+        Replace NaNs in `.X` or a specified layer with a given value (default: 0).
 
-        Parameters:
-        - on (str): The attribute to clean ('prot' or 'obs').
-        - inplace (bool): If True, overwrite .X or .layers[layer]. If False, return cleaned matrix.
-        - set_to (float): Value to replace NaNs with.
-        - layer (str or None): Target .prot layer to clean (default: .X).
-        - to_sparse (bool): If True, convert result to sparse.
-        - backup_layer (str or None): If inplace=True and layer=None, save .X to this layer (default: 'X_preclean').
-        - verbose (bool): Print status messages.
+        Optionally backs up the original data to a layer (default: `'X_preclean'`) before overwriting.
+        Typically used to prepare data for scanpy or sklearn functions that cannot handle missing values.
+
+        Args:
+            on (str): Target data to clean, either `'protein'` or `'peptide'`.
+            inplace (bool): If True, update `.X` or `.layers[layer]` in place. If False, return cleaned matrix.
+            set_to (float): Value to replace NaNs with (default: 0.0).
+            layer (str or None): If specified, applies to `.layers[layer]`; otherwise uses `.X`.
+            to_sparse (bool): If True, returns a sparse matrix.
+            backup_layer (str or None): If `inplace=True` and `layer=None`, saves the original `.X` to this layer.
+            verbose (bool): Whether to print summary messages.
 
         Returns:
-        - np.ndarray or None: Cleaned matrix if inplace=False, otherwise None.
+            np.ndarray or None: Cleaned matrix if `inplace=False`, otherwise `None`.
         """
         if not self._check_data(on):
             return
