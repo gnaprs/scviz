@@ -180,9 +180,9 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
         prot_var = prot_all.loc[:, 'Protein FDR Confidence: Combined':'# Razor Peptides']
         prot_var.rename(columns={'Gene Symbol': 'Genes'}, inplace=True)
         # prot_obs_names: file names
-        prot_obs_names = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: (F\d+):')[0].values
+        prot_obs_names = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract(r'Abundance: (F\d+):')[0].values
         # prot_obs: sample typing from the column name, drop column if all 'n/a'
-        prot_obs = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
+        prot_obs = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract(r'Abundance: F\d+: (.+)$')[0].values
         prot_obs = pd.DataFrame(prot_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).applymap(str.strip).astype('category')
         if (prot_obs == "n/a").all().any():
             print(f"{format_log_prefix('warn')} Found columns with all 'n/a'. Dropping these columns.")
@@ -212,7 +212,7 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
         # pep_var: peptide metadata
         pep_var = pep_all.loc[:, 'Modifications':'Theo. MH+ [Da]']
         # prot_obs: sample typing from the column name, drop column if all 'n/a'
-        pep_obs = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: F\d+: (.+)$')[0].values
+        pep_obs = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract(r'Abundance: F\d+: (.+)$')[0].values
         pep_obs = pd.DataFrame(pep_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).applymap(str.strip).astype('category')
         if (pep_obs == "n/a").all().any():
             print(f"{format_log_prefix('warn')} Found columns with all 'n/a'. Dropping these columns.")
