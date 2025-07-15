@@ -522,7 +522,7 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
     pca_param = {**default_pca_params, **(pca_params or {})}
 
     if 'X_pca' in adata.obsm and not force:
-        print(f'PCA already exists in {on} data — using existing.')
+        print(f'{utils.format_log_prefix("warn")} PCA already exists in {on} data — using existing. Run with `force=True` to recompute.')
     else:
         print(f'Running PCA on {on} using layer {layer}')
         pdata.pca(on=on, layer=layer, **pca_param)
@@ -531,7 +531,7 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
     pca = adata.uns['pca']
 
     # Get colors
-    color_mapped, cmap_resolved, legend_elements = resolve_pca_colors(adata, classes, cmap, layer=layer)
+    color_mapped, cmap_resolved, legend_elements = resolve_plot_colors(adata, classes, cmap, layer=layer)
 
     # Plot
     if len(plot_pc) == 2:
@@ -598,7 +598,7 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
 
     return ax, pca
 
-def resolve_pca_colors(adata, classes, cmap, layer="X"):
+def resolve_plot_colors(adata, classes, cmap, layer="X"):
     """
     Resolve colors for PCA plot based on classes. Helper function for plot_pca.
     Returns:
@@ -681,7 +681,7 @@ def resolve_pca_colors(adata, classes, cmap, layer="X"):
             gene_map = adata.var["Genes"].to_dict()
             match = [acc for acc, gene in gene_map.items() if gene == classes]
             if match:
-                return resolve_pca_colors(adata, match[0], cmap, layer)
+                return resolve_plot_colors(adata, match[0], cmap, layer)
         raise ValueError("Invalid classes input. Must be None, a protein in var_names, or an obs column/list.")
 
     else:
@@ -705,29 +705,55 @@ def plot_enrichment_svg(*args, **kwargs):
 # TODO
 def plot_umap(ax, pdata, classes = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False):
     """
-    This function plots the Uniform Manifold Approximation and Projection (UMAP) of the protein data.
+    Plot UMAP projection of protein or peptide abundance data.
 
-    Parameters:
-        ax (matplotlib.axes.Axes): The axes to plot on.
-        data (pandas.DataFrame): The protein data to plot.
-        classes (str): The column in the data to color by.
-        cmap (matplotlib.colors.Colormap, optional): The colormap to use for the plot. Defaults to 'viridis'.
-        s (int, optional): The size of the points in the plot. Defaults to 20.
-        alpha (float, optional): The transparency of the points in the plot. Defaults to 0.8.
-        umap_params (dict, optional): A dictionary of parameters to pass to the UMAP function. 
-            Possible keys are 'min_dist', 'n_components', 'metric', and 'random_state'. 
-            Defaults to an empty dictionary, in which case the default UMAP parameters are used.
+    This function projects the data using UMAP and colors samples based on
+    metadata or abundance of a specific feature. Supports categorical or
+    continuous coloring, with automatic handling of legends and colormaps.
+
+    Args:
+        ax (matplotlib.axes.Axes): The axis to plot on (must be 3D if n_components=3).
+        pdata (scviz.pAnnData): The pAnnData object containing .prot, .pep, and .summary.
+        classes (str or list of str or None): 
+            - None: all samples plotted in grey
+            - str: column in `.obs` or a gene/protein to color by
+            - list of str: combine multiple `.obs` columns (e.g., ['cellline', 'day'])
+        layer (str): Data layer to use for UMAP input (default: "X").
+        on (str): Whether to use 'protein' or 'peptide' data (default: 'protein').
+        cmap (str, list, or dict): 
+            - 'default': use internal color scheme
+            - list: list of colors, assigned to class labels in sorted order
+            - dict: {label: color} mapping
+            - str: continuous colormap name (e.g., 'viridis') for abundance coloring
+        s (float): Marker size (default: 20).
+        alpha (float): Marker opacity (default: 0.8).
+        umap_params (dict): Parameters to pass to UMAP (e.g., 'min_dist', 'metric').
+        text_size (int): Font size for axis labels and legend (default: 10).
+        force (bool): If True, re-compute UMAP even if results already exist.
 
     Returns:
-        ax (matplotlib.axes.Axes): The axes with the plot.
+        ax (matplotlib.axes.Axes): The axis with the UMAP plot.
         fit_umap (umap.UMAP): The fitted UMAP object.
 
     Raises:
-        AssertionError: If 'n_components' is 3 but the axes is not a 3D projection.
+        AssertionError: If 'n_components' is 3 and the axis is not 3D.
+
+    Example:
+        Plot by treatment group with default palette:
+
+            >>> plot_umap(ax, pdata, classes='treatment')
+
+        Plot by protein abundance (continuous coloring):
+
+            >>> plot_umap(ax, pdata, classes='P12345', cmap='plasma')
+
+        Plot with custom palette:
+
+            >>> custom_palette = {'ctrl': '#CCCCCC', 'treated': '#E41A1C'}
+            >>> plot_umap(ax, pdata, classes='group', cmap=custom_palette)
     """
     default_umap_params = {'n_components': 2, 'random_state': 42}
     umap_param = {**default_umap_params, **(umap_params if umap_params else {})}
-    color = classes
     
     if umap_param['n_components'] == 3:
         assert ax.name == '3d', "The ax must be a 3D projection, please define projection='3d'"
@@ -741,7 +767,7 @@ def plot_umap(ax, pdata, classes = None, layer = "X", on = 'protein', cmap='defa
  
     if force == False:
         if 'X_umap' in adata.obsm.keys():
-            print(f'UMAP already exists in {on} data, using existing UMAP')
+            print(f'{utils.format_log_prefix("warn")} UMAP already exists in {on} data, using existing UMAP. Run with `force=True` to recompute.')
         else:
             pdata.umap(on=on, layer=layer, **umap_param)
     else:
@@ -751,32 +777,24 @@ def plot_umap(ax, pdata, classes = None, layer = "X", on = 'protein', cmap='defa
     Xt = adata.obsm['X_umap']
     umap = adata.uns['umap']
 
-    y = utils.get_samplenames(adata, color)
-    color_dict = {class_type: i for i, class_type in enumerate(sorted(set(y)))}
-    color_mapped = [color_dict[val] for val in y]
-    n_classes = len(color_dict)
-    if cmap == 'default':  
-        cmap = mcolors.ListedColormap(get_color('colors', n=n_classes))
-    else:
-        cmap = cm.get_cmap(cmap)
-    norm = mcolors.Normalize(vmin=min(color_mapped), vmax=max(color_mapped))
+    color_mapped, cmap_resolved, legend_elements = resolve_plot_colors(adata, classes, cmap, layer=layer)
 
     if umap_param['n_components'] == 1:
-        ax.scatter(Xt[:,0], range(len(Xt)), c=color_mapped, cmap=cmap, s=s, alpha=alpha)
+        ax.scatter(Xt[:,0], range(len(Xt)), c=color_mapped, cmap=cmap_resolved, s=s, alpha=alpha)
         ax.set_xlabel('UMAP 1', fontsize=text_size)
-    if umap_param['n_components'] == 2:
-        ax.scatter(Xt[:,0], Xt[:,1], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
+    elif umap_param['n_components'] == 2:
+        ax.scatter(Xt[:,0], Xt[:,1], c=color_mapped, cmap=cmap_resolved, s=s, alpha=alpha)
         ax.set_xlabel('UMAP 1', fontsize=text_size)
         ax.set_ylabel('UMAP 2', fontsize=text_size)
-    if umap_param['n_components'] == 3:
-        ax.scatter(Xt[:,0], Xt[:,1], Xt[:,2], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
+    elif umap_param['n_components'] == 3:
+        ax.scatter(Xt[:,0], Xt[:,1], Xt[:,2], c=color_mapped, cmap=cmap_resolved, s=s, alpha=alpha)
         ax.set_xlabel('UMAP 1', fontsize=text_size)
         ax.set_ylabel('UMAP 2', fontsize=text_size)
         ax.set_zlabel('UMAP 3', fontsize=text_size)
 
-    # legend
-    legend_elements = [mpatches.Patch(color=cmap(norm(color_dict[key])), label=key) for key in color_dict]
-    ax.legend(handles=legend_elements, title = color, loc='upper right', bbox_to_anchor=(1.3, 1), fontsize=text_size)
+    if legend_elements:
+        legend_title = "/".join(c.capitalize() for c in classes) if isinstance(classes, list) else classes.capitalize()
+        ax.legend(handles=legend_elements, title=legend_title, loc='upper right', bbox_to_anchor=(1.3, 1), fontsize=text_size)
 
     return ax, umap
 
