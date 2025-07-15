@@ -133,7 +133,7 @@ class AnalysisMixin:
         if values is None:
             raise ValueError("Please provide `values` (new format) or both `class_type` and `values` (legacy format).")
 
-        if isinstance(values, list) and all(isinstance(v, list) for v in values) and class_type is not None:
+        if class_type is not None:
             values = utils.format_class_filter(class_type, values, exact_cases=True)
 
         if not isinstance(values, list) or len(values) != 2:
@@ -1079,6 +1079,8 @@ class AnalysisMixin:
         if not self._check_data(on):
             return
         adata = self.prot if on == 'prot' else self.pep
+
+        print(f'{format_log_prefix("user")} Cleaning {on} data: making scanpy compatible, replacing NaNs with {set_to} in {"layer " + layer if layer else ".X"}.')
 
         # Choose source matrix
         X = adata.layers[layer] if layer else adata.X
