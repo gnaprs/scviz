@@ -11,5 +11,3 @@ Mixin for mapping gene, protein and peptide accessions.
     options:
       show_root_heading: false
       heading_level: 3
-      <!-- filters:
-        - "!^__" -->
