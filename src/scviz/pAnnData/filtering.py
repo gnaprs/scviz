@@ -376,7 +376,7 @@ class FilterMixin:
             min_prot (int, optional): Minimum number of proteins required in a sample to retain it.
             return_copy (bool): If True, returns a filtered pAnnData object; otherwise modifies in place.
             debug (bool): If True, prints query strings and filter summaries.
-            query_mode (bool): If True, performs filtering using `.query()` evaluation logic.
+            query_mode (bool): If True, interprets `values` or `condition` as a raw pandas-style `.query()` string and evaluates it directly on `.obs` or `.summary` respectively.
 
         Returns:
             pAnnData: Filtered pAnnData object if `return_copy=True`; otherwise, modifies in place and returns None.
@@ -410,8 +410,20 @@ class FilterMixin:
             Keep specific samples by name:
 
                 >>> pdata.filter_sample(file_list=['Sample_001', 'Sample_007'])
-        """
 
+            For advanced usage using query mode, see the note below.
+
+            !!! note "Advanced Usage"
+                To enable **advanced filtering**, set `query_mode=True` to evaluate raw pandas-style queries:
+
+                - Query `.obs` metadata:
+
+                    >>> pdata.filter_sample(values="cellline == 'AS' and treatment == 'kd'", query_mode=True)
+
+                - Query `.summary` metadata:
+
+                    >>> pdata.filter_sample(condition="protein_count > 1000 and missing_pct < 0.2", query_mode=True)            
+        """
         # Ensure exactly one of the filter modes is specified
         provided = [values, condition, file_list, min_prot]
         if sum(arg is not None for arg in provided) != 1:
