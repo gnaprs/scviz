@@ -625,12 +625,15 @@ def resolve_pca_colors(adata, classes, cmap, layer="X"):
         class_labels = sorted(set(y))
         if cmap == 'default':
             palette = get_color('colors', n=len(class_labels))
+            color_dict = {c: palette[i] for i, c in enumerate(class_labels)}
         elif isinstance(cmap, list):
-            palette = cmap
+            color_dict = {c: cmap[i] for i, c in enumerate(class_labels)}
+        elif isinstance(cmap, dict):
+            color_dict = cmap
         else:
             cmap_obj = cm.get_cmap(cmap)
             palette = [mcolors.to_hex(cmap_obj(i / max(len(class_labels) - 1, 1))) for i in range(len(class_labels))]
-        color_dict = {c: palette[i] for i, c in enumerate(class_labels)}
+            color_dict = {c: palette[i] for i, c in enumerate(class_labels)}
         color_mapped = [color_dict[val] for val in y]
         legend_elements = [mpatches.Patch(color=color_dict[c], label=c) for c in class_labels]
         return color_mapped, None, legend_elements
@@ -641,12 +644,15 @@ def resolve_pca_colors(adata, classes, cmap, layer="X"):
         class_labels = sorted(set(y))
         if cmap == 'default':
             palette = get_color('colors', n=len(class_labels))
+            color_dict = {c: palette[i] for i, c in enumerate(class_labels)}
         elif isinstance(cmap, list):
-            palette = cmap
+            color_dict = {c: cmap[i] for i, c in enumerate(class_labels)}
+        elif isinstance(cmap, dict):
+            color_dict = cmap
         else:
             cmap_obj = cm.get_cmap(cmap)
             palette = [mcolors.to_hex(cmap_obj(i / max(len(class_labels) - 1, 1))) for i in range(len(class_labels))]
-        color_dict = {c: palette[i] for i, c in enumerate(class_labels)}
+            color_dict = {c: palette[i] for i, c in enumerate(class_labels)}
         color_mapped = [color_dict[val] for val in y]
         legend_elements = [mpatches.Patch(color=color_dict[c], label=c) for c in class_labels]
         return color_mapped, None, legend_elements
