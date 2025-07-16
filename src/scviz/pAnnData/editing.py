@@ -189,7 +189,7 @@ class EditingMixin:
 
         return df
 
-    def export(self, filename, format = 'csv'):
+    def export(self, filename, format = 'csv', verbose = True):
         """
         Export the pAnnData object's contents to file, including layers and summary metadata.
 
@@ -199,6 +199,7 @@ class EditingMixin:
         Args:
             filename (str): Prefix for exported files. If None, uses the current date and time.
             format (str): File format to export (default is "csv").
+            verbose (bool): Whether to print progress messages.
 
         Returns:
             None
@@ -212,13 +213,62 @@ class EditingMixin:
         if not self._has_data():
             raise ValueError("No data found in pAnnData object.")
         
-        # export summary
-        self._summary.to_csv(f"{filename}_summary.csv")
+        if verbose:
+            print(f"{format_log_prefix('user')} Exporting pAnnData to <{filename}>...")
+        
+        # --- Summary ---
+        self.summary.to_csv(f"{filename}_summary.csv")
+        if verbose:
+            print(f"{format_log_prefix('result_only',2)} Exported summary table → {filename}_summary.csv")
 
+        # --- Protein matrix ---
         if self.prot is not None:
             self.prot.to_df().to_csv(f"{filename}_protein.csv")
+            if verbose:
+                print(f"{format_log_prefix('result_only',2)} Exported protein matrix → {filename}_protein.csv")
+
             for layer in self.prot.layers:
-                self.prot.layers[layer].toarray().to_csv(f"{filename}_protein_{layer}.csv")
+                arr = self.prot.layers[layer]
+                if hasattr(arr, 'toarray'):
+                    arr = arr.toarray()
+                df = pd.DataFrame(arr, index=self.prot.obs_names, columns=self.prot.var_names)
+                df.to_csv(f"{filename}_protein_{layer}.csv")
+                if verbose:
+                    print(f"{format_log_prefix('result_only',2)} Exported protein layer '{layer}' → {filename}_protein_{layer}.csv")
+
+        # --- Peptide matrix ---
+        if self.pep is not None:
+            self.pep.to_df().to_csv(f"{filename}_peptide.csv")
+            if verbose:
+                print(f"{format_log_prefix('result_only',2)} Exported peptide matrix → {filename}_peptide.csv")
+
+            for layer in self.pep.layers:
+                arr = self.pep.layers[layer]
+                if hasattr(arr, 'toarray'):
+                    arr = arr.toarray()
+                df = pd.DataFrame(arr, index=self.pep.obs_names, columns=self.pep.var_names)
+                df.to_csv(f"{filename}_peptide_{layer}.csv")
+                if verbose:
+                    print(f"{format_log_prefix('result_only',2)} Exported peptide layer '{layer}' → {filename}_peptide_{layer}.csv")
+
+    def export_morpheus(self, filename='pdata', on='protein'):
+        if not self._check_data(on):  # type: ignore[attr-defined], ValidationMixin
+            return
+
+        adata = self.prot if on == 'protein' else self.pep
+
+        # alternatively, use morpheus to plot clustermap
+        # will need two things
+        # 1. dataset (proteins in column, samples in rows)
+        dense_matrix = adata.X.toarray()
+        df = pd.DataFrame(dense_matrix, index=adata.obs_names, columns=adata.var_names)
+        df.to_csv(f'{filename}_protein_matrix.csv')
+        # 2. File Annotations (each sample in a row, different annotations in columns)
+        adata.obs.to_csv(f'{filename}_protein_annotations.csv')
+        # 3. Protein Annotations (each protein in a row, different annotations in columns)
+        adata.var.to_csv(f'{filename}_protein_annotations.csv')
+
+        print(f"{format_log_prefix('result')} Morpheus export complete.")
 
     def _set_RS(self, rs, debug=False, validate=True):
         """

@@ -1106,8 +1106,15 @@ def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold
     Use the helper function `add_volcano_legend(ax)` to add standard volcano legend handles.
 
     Example:
-    >>> ax, df = plot_volcano(ax, pdata, classes='cellline', values=['A', 'B'])
-    >>> add_volcano_legend(ax)
+        Dictionary Style Input:
+        
+        >>> values = [{"cellline": "HCT116", "treatment": "DMSO"}, {"cellline": "HCT116", "treatment": "DrugX"}]
+        >>> ax, df = plot_volcano(ax, pdata, classes='cellline', values=values)
+    
+        Legacy Mode Input:
+
+        >>> ax, df = plot_volcano(ax, pdata, classes='cellline', values=['A', 'B'])
+        >>> add_volcano_legend(ax)
     """
     import numpy as np
     import pandas as pd

@@ -808,25 +808,6 @@ class AnalysisMixin:
         print(f"{format_log_prefix('result_only', indent=2)} Harmony batch correction complete. Results stored in:")
         print(f"       • obsm['X_pca_harmony'] (PCA coordinates)")
 
-    def morpheus_export(self, filename='pdata', on='protein'):
-        if not self._check_data(on):  # type: ignore[attr-defined], ValidationMixin
-            return
-
-        adata = self.prot if on == 'protein' else self.pep
-
-        # alternatively, use morpheus to plot clustermap
-        # will need two things
-        # 1. dataset (proteins in column, samples in rows)
-        dense_matrix = adata.X.toarray()
-        df = pd.DataFrame(dense_matrix, index=adata.obs_names, columns=adata.var_names)
-        df.to_csv(f'{filename}_protein_matrix.csv')
-        # 2. File Annotations (each sample in a row, different annotations in columns)
-        adata.obs.to_csv(f'{filename}_protein_annotations.csv')
-        # 3. Protein Annotations (each protein in a row, different annotations in columns)
-        adata.var.to_csv(f'{filename}_protein_annotations.csv')
-
-        print(f"{format_log_prefix('result')} Morpheus export complete.")
-
     def nanmissingvalues(self, on = 'protein', limit = 0.5):
         # sets columns (proteins and peptides) with > limit (default 0.5) missing values to NaN across all samples
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
