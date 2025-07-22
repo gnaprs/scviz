@@ -66,7 +66,7 @@ class EnrichmentMixin:
             batch = missing[i:i + batch_size]
             print(f"{format_log_prefix('info')} Querying STRING for batch {i // batch_size + 1} ({len(batch)} identifiers)...") if debug else None
 
-            url = "https://version-12-0.string-db.org/api/tsv-no-header/get_string_ids"
+            url = "https://string-db.org/api/tsv-no-header/get_string_ids"
             params = {
                 "identifiers": "\r".join(batch),
                 "limit": 1,
@@ -213,7 +213,7 @@ class EnrichmentMixin:
         """
         def query_functional_enrichment(query_ids, species_id, background_ids=None, debug=False):
             # print(f"{format_log_prefix('info_only',2)} Running enrichment on {len(query_ids)} STRING IDs (species {species_id})...")
-            url = "https://version-12-0.string-db.org/api/json/enrichment"
+            url = "https://string-db.org/api/json/enrichment"
             payload = {
                 "identifiers": "%0d".join(query_ids),
                 "species": species_id,
