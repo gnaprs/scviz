@@ -514,11 +514,11 @@ class FilterMixin:
             # filtered_queries = pdata._summary.eval(formatted_condition)
             filtered_samples = pdata._summary[pdata._summary.eval(formatted_condition)] # type: ignore[attr-defined]
             index_filter = filtered_samples.index
-            message = f"{action} data based on sample condition: {condition}. Number of samples kept: {len(filtered_samples)}."
+            message = f"{action} data based on sample condition: {condition}. Number of samples kept: {len(filtered_samples)}. Samples dropped: {len(pdata.summary) - len(filtered_samples)}"
             # Number of samples dropped: {len(pdata._summary) - len(filtered_samples)}
         elif file_list is not None:
             index_filter = file_list
-            message = f"{action} data based on sample file list. Number of samples kept: {len(file_list)}."
+            message = f"{action} data based on sample file list. Number of samples kept: {len(file_list)}. Samples dropped: {len(pdata.summary) - len(file_list)}"
             missing = [f for f in file_list if f not in pdata.prot.obs_names]
             if missing:
                 warnings.warn(f"Some sample IDs not found: {missing}")
@@ -557,7 +557,7 @@ class FilterMixin:
                 if missing:
                     message += f"    → Missing samples ignored: {len(missing)}\n"
 
-            message += f"    → Samples kept: {len(pdata.prot.obs)}"
+            message += f"    → Samples kept: {len(pdata.prot.obs)}, Samples dropped: {len(pdata.summary) - len(filtered_samples)}"
             message += f"\n    → Proteins kept: {len(pdata.prot.var)}"
 
         # Logging and history updates
@@ -677,7 +677,7 @@ class FilterMixin:
                     valstr = v if isinstance(v, str) else ", ".join(map(str, v))
                     message += f"      - {k}: {valstr}\n"
 
-            message += f"    → Samples kept: {n_samples}"
+            message += f"    → Samples kept: {n_samples}, Samples dropped: {len(pdata.summary) - n_samples}"
             message += f"\n    → Proteins kept: {len(pdata.prot.var)}"
 
         print(message) if verbose else None
@@ -737,7 +737,7 @@ class FilterMixin:
             f"{log_prefix} Filtering samples [query]:\n"
             f"    {action} sample data based on query string:\n"
             f"   🔸 Query: {query_string}\n"
-            f"    → Samples kept: {n_samples}\n"
+            f"    → Samples kept: {n_samples}, Samples dropped: {len(pdata.summary) - n_samples}\n"
             f"    → Proteins kept: {len(pdata.prot.var)}"
         )
 
