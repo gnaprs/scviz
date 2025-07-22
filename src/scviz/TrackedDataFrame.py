@@ -7,6 +7,10 @@ class TrackedDataFrame(pd.DataFrame):
     """
     _metadata = ["_parent", "_mark_stale_fn"]
 
+    @property
+    def _constructor(self):
+        return TrackedDataFrame
+
     def __new__(cls, *args, **kwargs):
         return super().__new__(cls)
 
@@ -14,6 +18,9 @@ class TrackedDataFrame(pd.DataFrame):
         super().__init__(*args, **kwargs)
         self._parent = parent
         self._mark_stale_fn = mark_stale_fn
+        # Bind raw .loc/.iloc for safe use
+        self._raw_loc = super().loc
+        self._raw_iloc = super().iloc
 
     def __repr__(self):
         base = super().__repr__()
@@ -41,3 +48,13 @@ class TrackedDataFrame(pd.DataFrame):
     def pop(self, *args, **kwargs):
         self._mark_stale()
         return super().pop(*args, **kwargs)
+
+    @property
+    def loc(self):
+        self._mark_stale()
+        return super().loc
+
+    @property
+    def iloc(self):
+        self._mark_stale()
+        return super().iloc
