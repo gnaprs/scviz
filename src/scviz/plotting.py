@@ -333,7 +333,7 @@ def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
     on (str): 'protein' or 'peptide'.
     classes (str or list): obs column(s) to group by (used for color).
     return_df (bool): If True, return DataFrame with replicate + summary values.
-    order (list): Custom order of classes.
+    order (dict): Custom order of classes. For example, order={"condition": ["sc", "kd"]},  # 'sc' appears before 'kd'
     palette (list or dict): Color palette.
     log (bool): Plot log2(abundance).
     facet (str or None): obs column to facet by.
@@ -351,6 +351,32 @@ def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
         pdata, namelist=namelist, layer=layer, on=on,
         classes=classes, log=log, x_label=x_label
     )
+
+    # --- Handle custom class ordering ---
+    if classes is not None and order is not None:
+        unused = set(order) - (set([classes]) if isinstance(classes, str) else set(classes))
+        if unused:
+            print(f"⚠️ Unused keys in `order`: {unused} (not in `classes`)")
+            
+        if isinstance(classes, str):
+            if classes in order:
+                cat_type = pd.api.types.CategoricalDtype(order[classes], ordered=True)
+                df['class'] = df['class'].astype(cat_type)
+        else:
+            for cls in classes:
+                if cls in order and cls in df.columns:
+                    cat_type = pd.api.types.CategoricalDtype(order[cls], ordered=True)
+                    df[cls] = df[cls].astype(cat_type)
+
+    # --- Sort the dataframe so group order is preserved in plotting ---
+    if classes is not None:
+        sort_cols = ['x_label_name']
+        if isinstance(classes, str):
+            sort_cols.append('class')
+        else:
+            sort_cols.extend(classes)
+        df = df.sort_values(by=sort_cols)
+
 
     # Add facet column (plotting only)
     df['facet'] = df[facet] if facet else 'all'
@@ -524,7 +550,6 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
     if 'X_pca' in adata.obsm and not force:
         print(f'{utils.format_log_prefix("warn")} PCA already exists in {on} data — using existing. Run with `force=True` to recompute.')
     else:
-        print(f'Running PCA on {on} using layer {layer}')
         pdata.pca(on=on, layer=layer, **pca_param)
 
     X_pca = adata.obsm['X_pca']
@@ -840,7 +865,7 @@ def plot_pca_scree(ax, pca):
     return ax
 
 def plot_clustermap(ax, pdata, on='prot', classes=None, layer="X", x_label='accession', namelist=None, lut=None, log2=True,
-                    cmap="coolwarm", figsize=(6, 10), force=False, impute=None, **kwargs):
+                    cmap="coolwarm", figsize=(6, 10), force=False, impute=None, order=None, **kwargs):
     """
     Plot a clustered heatmap (proteins × samples) with optional column annotations and hierarchical clustering.
 
@@ -874,10 +899,19 @@ def plot_clustermap(ax, pdata, on='prot', classes=None, layer="X", x_label='acce
         impute: Imputation strategy used when force=True. Options:
             - 'row_min': fill NaNs with minimum value in that protein row
             - 'global_min': fill NaNs with global minimum value in matrix
+        order: dict. Optional custom order for categorical annotations.
+            This allows you to specify the order of categories for each annotation.
+        
+            Example:
+                order = {
+                    "cell_line": ["AS", "BE"],
+                    "condition": ["kd", "sc"],
+                    "treatment": ["CO", "RA"]
+                }
 
         **kwargs: Additional arguments passed to seaborn.clustermap().
             Common options:
-                - z_score (int): Normalize rows (0) or columns (1).
+                - z_score (int): Normalize rows (0, features) or columns (1, samples).
                 - standard_scale (int): Scale rows or columns to unit variance.
                 - center (float): Value to center colormap on (e.g., 0 with z_score).
                 - col_cluster (bool): Whether to cluster columns (samples). Default: False
@@ -939,6 +973,21 @@ def plot_clustermap(ax, pdata, on='prot', classes=None, layer="X", x_label='acce
             split_labels = [[part.strip() for part in s.split(",")] for s in sample_labels]
             annotations = pd.DataFrame(split_labels, index=adata.obs_names, columns=classes)
 
+        # Optional: apply custom category order from `order` dict
+        if order is not None and isinstance(order, dict):
+            for col in classes:
+                if col in annotations.columns and col in order:
+                    cat_type = pd.api.types.CategoricalDtype(order[col], ordered=True)
+                    annotations[col] = annotations[col].astype(cat_type)
+            unused_keys = set(order) - set(classes)
+            if unused_keys:
+                print(f"⚠️ Unused keys in `order`: {unused_keys} (not present in `classes`)")
+
+        # Sort columns (samples) by class hierarchy
+        sort_order = annotations.sort_values(by=classes).index
+        df = df[sort_order]
+        annotations = annotations.loc[sort_order]
+
         if lut is None:
             lut = {}
 
@@ -967,9 +1016,9 @@ def plot_clustermap(ax, pdata, on='prot', classes=None, layer="X", x_label='acce
     # --- Step 3: Clustermap defaults (user-overridable) ---
     col_cluster = kwargs.pop("col_cluster", False)
     row_cluster = kwargs.pop("row_cluster", True)
-    linewidth = kwargs.pop("linewidth", 0.1)
-    yticklabels = kwargs.pop("yticklabels", True)
-    xticklabels = kwargs.pop("xticklabels", True)
+    linewidth = kwargs.pop("linewidth", 0)
+    yticklabels = kwargs.pop("yticklabels", False)
+    xticklabels = kwargs.pop("xticklabels", False)
     colors_ratio = kwargs.pop("colors_ratio", (0.03, 0.02))
     if kwargs.get("z_score", None) == 0:
         zero_var_rows = df.var(axis=1) == 0
@@ -1007,7 +1056,7 @@ def plot_clustermap(ax, pdata, on='prot', classes=None, layer="X", x_label='acce
                                    frameon=False)
         
     # --- Step 6: Row label remapping ---
-    if x_label == "gene":
+    if x_label == "gene" and xticklabels:
         _ , prot_map = pdata.get_gene_maps(on='protein' if on == 'prot' else 'peptide')
         row_labels = [prot_map.get(row, row) for row in g.data2d.index]
         g.ax_heatmap.set_yticklabels(row_labels, rotation=0)
@@ -1077,27 +1126,27 @@ def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold
     Alternatively, can use pre-calculated DE data (see pdata.de() dataframe for example input).
 
     Parameters:
-    ax (matplotlib.axes.Axes): The axes on which to plot.
-    pdata (scviz.pAnnData): The input pdata object.
-    classes (str): The class type to use for the comparison.
-    values (list or dict): The values to compare. Can be legacy list format or new dict format.
-    method (str, optional): The method to use for the comparison. Defaults to 'ttest'.
-    fold_change_mode : str
-        Method for computing fold change. Options:
-        - 'mean' : log2(mean(group1) / mean(group2))
-        - 'pairwise_median' : median of all pairwise log2 ratios
-    label (int or list): The genes to highlight. If an int, the top and bottom n genes are shown. If a list, only those genes are shown. Can also accept list with 2 numbers to show top and bottom n genes [top, bottom]. If none, no labels will be plotted.
-    label_type (str, optional): Label type. Currently only 'Gene' is recommended.
-    color (dict, optional): A dictionary mapping significance to colors. Defaults to grey/red/blue.
-    alpha (float, optional): Scatter dot transparency. Defaults to 0.5.
-    pval (float, optional): The p-value threshold for significance. Defaults to 0.05.
-    log2fc (float, optional): The log2 fold change threshold for significance. Defaults to 1.
-    linewidth (float, optional): The linewidth for the threshold lines. Defaults to 0.5.
-    fontsize (int, optional): Fontsize for gene labels. Defaults to 8.
-    no_marks (bool, optional): If True, suppress volcano point coloring. All points are grey.
-    de_data (pd.DataFrame): Optional pre-computed DE dataframe. Must contain 'log2fc', 'p_value', 'significance'.
-    return_df (bool, optional): If True, return the dataframe used for plotting.
-    **kwargs: Extra kwargs passed to matplotlib scatter plot.
+        ax (matplotlib.axes.Axes): The axes on which to plot.
+        pdata (scviz.pAnnData): The input pdata object.
+        classes (str): The class type to use for the comparison.
+        values (list or dict): The values to compare. Can be legacy list format or new dict format.
+        method (str, optional): The method to use for the comparison. Defaults to 'ttest'.
+        fold_change_mode : str
+            Method for computing fold change. Options:
+            - 'mean' : log2(mean(group1) / mean(group2))
+            - 'pairwise_median' : median of all pairwise log2 ratios
+        label (int or list): The genes to highlight. If an int, the top and bottom n genes are shown. If a list, only those genes are shown. Can also accept list with 2 numbers to show top and bottom n genes [top, bottom]. If none, no labels will be plotted.
+        label_type (str, optional): Label type. Currently only 'Gene' is recommended.
+        color (dict, optional): A dictionary mapping significance to colors. Defaults to grey/red/blue.
+        alpha (float, optional): Scatter dot transparency. Defaults to 0.5.
+        pval (float, optional): The p-value threshold for significance. Defaults to 0.05.
+        log2fc (float, optional): The log2 fold change threshold for significance. Defaults to 1.
+        linewidth (float, optional): The linewidth for the threshold lines. Defaults to 0.5.
+        fontsize (int, optional): Fontsize for gene labels. Defaults to 8.
+        no_marks (bool, optional): If True, suppress volcano point coloring. All points are grey.
+        de_data (pd.DataFrame): Optional pre-computed DE dataframe. Must contain 'log2fc', 'p_value', 'significance'.
+        return_df (bool, optional): If True, return the dataframe used for plotting.
+        **kwargs: Extra kwargs passed to matplotlib scatter plot.
 
     Returns:
     matplotlib.axes.Axes or (ax, df)
