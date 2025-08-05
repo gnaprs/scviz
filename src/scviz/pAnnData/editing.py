@@ -251,6 +251,45 @@ class EditingMixin:
                 if verbose:
                     print(f"{format_log_prefix('result_only',2)} Exported peptide layer '{layer}' → {filename}_peptide_{layer}.csv")
 
+    def export_layer(self, layer_name, filename=None, on='protein', obs_names=None, var_names=None, transpose=False):
+        """
+        Export a specified layer from the protein or peptide data to CSV with labeled rows and columns.
+
+        Args:
+            layer_name (str): Name of the layer to export (e.g., "X_raw").
+            filename (str, optional): Output file name. Defaults to "<layer_name>.csv".
+            on (str): One of 'protein' or 'peptide' to specify which data to use.
+            obs_names (str or None): If a string, the column name in .obs to use for row labels.
+            var_names (str or None): If a string, the column name in .var to use for column labels.
+            transpose: If True, then export as proteins/peptides (rows) by samples (columns)
+
+        Returns:
+            None
+        """
+        # Select the appropriate AnnData object
+        adata = self.prot if on == 'protein' else self.pep
+        layer = adata.layers[layer_name]
+
+        # Convert to dense array if needed
+        if not isinstance(layer, pd.DataFrame):
+            layer = layer.toarray() if hasattr(layer, 'toarray') else layer
+
+        # Get row (obs) and column (var) labels
+        row_labels = adata.obs[obs_names] if obs_names else adata.obs_names
+        col_labels = adata.var[var_names] if var_names else adata.var_names
+
+        # Build the DataFrame
+        if transpose:
+            df = pd.DataFrame(layer.T, columns=row_labels, index=col_labels)
+        else:
+            df = pd.DataFrame(layer, index=row_labels, columns=col_labels)
+
+        # Save to CSV
+        if filename is None:
+            filename = f"{layer_name}.csv"
+        df.to_csv(filename)
+
+
     def export_morpheus(self, filename='pdata', on='protein'):
         if not self._check_data(on):  # type: ignore[attr-defined], ValidationMixin
             return
