@@ -83,9 +83,33 @@ class pAnnData(BaseMixin, ValidationMixin, SummaryMixin, MetricsMixin,
         Import data from a file or URL.
         """
         return import_data(*args, **kwargs)
-    
+
     def __repr__(self):
-        def format_ann(adata, label):
+        def format_summary(summary):
+            if summary is None:
+                return "Summary:\n  None"
+
+            default_cols = {"protein_count", "peptide_count", "protein_quant", "peptide_quant"}
+            grouping_cols = [col for col in summary.columns
+                            if col not in default_cols and summary[col].nunique() < len(summary)]
+
+            avg_prot = summary["protein_count"].mean() if "protein_count" in summary else None
+            avg_quant = summary["protein_quant"].mean() if "protein_quant" in summary else None
+            low_quant = (summary["protein_quant"] < 0.5).sum() if "protein_quant" in summary else None
+
+            lines = []
+            if grouping_cols:
+                lines.append(f"Groups: {', '.join(grouping_cols)}")
+            if avg_prot is not None:
+                lines.append(f"Avg proteins/sample: {avg_prot:.1f}")
+            if avg_quant is not None:
+                lines.append(f"Avg protein quant: {avg_quant:.2f}")
+            if low_quant is not None:
+                lines.append(f"Samples < 50% quant: {low_quant}")
+
+            return "Summary:\n" + "\n".join(f"  {line}" for line in lines) if lines else "Summary:\n  —"
+
+        def format_ann(adata, label, shared_obs=False):
             if adata is None:
                 return f"{label}: None"
 
@@ -95,24 +119,95 @@ class pAnnData(BaseMixin, ValidationMixin, SummaryMixin, MetricsMixin,
             obsm_keys = ', '.join(adata.obsm.keys())
             layers_keys = ', '.join(adata.layers.keys())
 
+            obs_line = "  obs:    (same as protein)" if shared_obs and label == "Peptide" else f"  obs:    {obs_cols or '—'}"
+
             return (f"{label} (shape: {shape_str})\n"
-                    f"  obs:    {obs_cols or '—'}\n"
+                    f"{obs_line}\n"
                     f"  var:    {var_cols or '—'}\n"
                     f"  obsm:   {obsm_keys or '—'}\n"
                     f"  layers: {layers_keys or '—'}")
-            
-        def format_rs(rs):
+
+        def format_rs_summary(rs):
             if rs is None:
-                return "RS: None"
-            return f"RS (shape: {rs.shape[0]} proteins × {rs.shape[1]} peptides)"
-        
-        lines = [
-            "pAnnData object",
-            format_ann(self.prot, "Protein"),
-            format_ann(self.pep, "Peptide"),
-            format_rs(self._rs)
-        ]
-        return "\n\n".join(lines)
+                return "RS:\n  None"
+
+            peptides_per_protein = rs.getnnz(axis=1)
+            unique_mask = rs.getnnz(axis=0) == 1
+            unique_counts = rs[:, unique_mask].getnnz(axis=1)
+
+            mean_pep = peptides_per_protein.mean()
+            mean_uniq = unique_counts.mean()
+            pct_highconf = (unique_counts >= 2).mean() * 100
+
+            return (
+                f"RS (shape: {rs.shape[0]} proteins × {rs.shape[1]} peptides)\n"
+                f"  Avg peptides/protein: {mean_pep:.2f}\n"
+                f"  Avg unique peptides : {mean_uniq:.2f}\n"
+                f"  Proteins with ≥2 unique peptides: {pct_highconf:.1f}%"
+            )
+
+        def format_enrichments(stats):
+            functional = stats.get("functional", {})
+            ppi_keys = stats.get("ppi", {})
+            de_keys = {k for k in stats if "vs" in k and not k.endswith(("_up", "_down"))}
+
+            enriched_de = {
+                meta.get("input_key", k)
+                for k, meta in functional.items()
+                if "vs" in k and meta.get("input_key", None) in de_keys
+            }
+
+            n_de = len(de_keys)
+            n_func = len(functional)
+            n_ppi = len(ppi_keys)
+            n_unenriched = n_de - len(enriched_de)
+
+            lines = []
+            if n_de:
+                lines.append(f"DE comparisons: {n_de}")
+                if n_func:
+                    examples = sorted(k for k in functional if "vs" in k)[:3]
+                    lines.append(f"Functional enrichment: {n_func} result(s) (e.g. {', '.join(examples)})")
+                if n_ppi:
+                    lines.append(f"PPI enrichment: {n_ppi} result(s)")
+                if n_unenriched > 0:
+                    lines.append(f"Pending enrichment: {n_unenriched}")
+            elif n_func or n_ppi:
+                if n_func:
+                    lines.append(f"Functional enrichment: {n_func} result(s)")
+                if n_ppi:
+                    lines.append(f"PPI enrichment: {n_ppi} result(s)")
+
+            if lines:
+                lines.append("↪ Use `pdata.list_enrichments()` for details")
+
+            return "STRING Enrichment:\n" + "\n".join(f"  {line}" for line in lines) if lines else "STRING Enrichment:\n  —"
+
+        shared_obs = self.prot is not None and self.pep is not None and self.prot.obs.equals(self.pep.obs)
+
+        lines = ["pAnnData object"]
+        lines.append("")  # Spacer
+
+        # Summary
+        lines.append(format_summary(self._summary))
+        lines.append("")  # Spacer
+
+        # Protein and Peptide
+        lines.append(format_ann(self.prot, "Protein", shared_obs=shared_obs))
+        lines.append("")  # Spacer
+        lines.append(format_ann(self.pep, "Peptide", shared_obs=shared_obs))
+        lines.append("")  # Spacer
+
+        # RS Matrix
+        lines.append(format_rs_summary(self._rs))
+        lines.append("")  # Spacer
+
+        # Enrichment Summary
+        enrichment_info = format_enrichments(self.stats)
+        lines.append(enrichment_info)
+
+        return "\n".join(lines)
+
 
     # -----------------------------
     # Properties (GETTERS)
