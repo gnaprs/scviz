@@ -503,34 +503,34 @@ class FilterMixin:
         pdata = self.copy() if return_copy else self # type: ignore[attr-defined], EditingMixin
         action = "Returning a copy of" if return_copy else "Filtered and modified"
 
-        print("self.prot id:", id(self.prot)) if debug else None
-        print("pdata.prot id:", id(pdata.prot)) if debug else None
-        print("Length of pdata.prot.obs_names:", len(pdata.prot.obs_names)) if debug else None
+        if debug:
+            print("self.prot id:", id(self.prot))
+            print("pdata.prot id:", id(pdata.prot))
+            print("Length of pdata.prot.obs_names:", len(pdata.prot.obs_names))
 
-        # Define the filtering logic
+        # Determine sample indices to retain
+        index_filter = None
+        missing = []
+
         if condition is not None:
-            formatted_condition = self._format_filter_query(condition, pdata._summary) # type: ignore[attr-defined]
-            print(formatted_condition) if debug else None
-            # filtered_queries = pdata._summary.eval(formatted_condition)
-            filtered_samples = pdata._summary[pdata._summary.eval(formatted_condition)] # type: ignore[attr-defined]
-            index_filter = filtered_samples.index
-            message = f"{action} data based on sample condition: {condition}. Number of samples kept: {len(filtered_samples)}. Samples dropped: {len(pdata.summary) - len(filtered_samples)}"
-            # Number of samples dropped: {len(pdata._summary) - len(filtered_samples)}
+            formatted_condition = self._format_filter_query(condition, pdata._summary)  # type: ignore[attr-defined]
+            if debug:
+                print(formatted_condition)
+            index_filter = pdata._summary[pdata._summary.eval(formatted_condition)].index
         elif file_list is not None:
             index_filter = file_list
-            message = f"{action} data based on sample file list. Number of samples kept: {len(file_list)}. Samples dropped: {len(pdata.summary) - len(file_list)}"
             missing = [f for f in file_list if f not in pdata.prot.obs_names]
             if missing:
                 warnings.warn(f"Some sample IDs not found: {missing}")
-            # Number of samples dropped: {len(pdata._summary) - len(file_list)}
         else:
             # No filtering applied
             message = "No filtering applied. Returning original data."
             return pdata if return_copy else None
 
-        print(f"Length of index_filter: {len(index_filter)}") if debug else None
-        print(f"Length of pdata.prot.obs_names before filter: {len(pdata.prot.obs_names)}") if debug else None
-        print(f"Number of shared samples: {len(pdata.prot.obs_names.intersection(index_filter))}") if debug else None
+        if debug:
+            print(f"Length of index_filter: {len(index_filter)}")
+            print(f"Length of pdata.prot.obs_names before filter: {len(pdata.prot.obs_names)}")
+            print(f"Number of shared samples: {len(pdata.prot.obs_names.intersection(index_filter))}")
 
         # Filter out selected samples from prot and pep
         if pdata.prot is not None:
@@ -557,7 +557,7 @@ class FilterMixin:
                 if missing:
                     message += f"    → Missing samples ignored: {len(missing)}\n"
 
-            message += f"    → Samples kept: {len(pdata.prot.obs)}, Samples dropped: {len(pdata.summary) - len(filtered_samples)}"
+            message += f"    → Samples kept: {len(pdata.prot.obs)}, Samples dropped: {len(pdata.summary) - len(pdata.prot.obs)}"
             message += f"\n    → Proteins kept: {len(pdata.prot.var)}"
 
         # Logging and history updates
