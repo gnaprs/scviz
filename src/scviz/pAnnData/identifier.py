@@ -328,3 +328,70 @@ class IdentifierMixin:
                 print("        ", ", ".join(missing_ids[:5]) + ("..." if unknown > 10 else ""))
                 print("💡 Tip: You can update these using `pdata.update_identifier_maps({'GENE': 'ACCESSION'}, on='protein', direction='reverse', overwrite=True)`")
 
+    def search_annotations(self, query, on='protein', search_columns=None, case=False, return_all_matches=True):
+        """
+        Search protein or peptide annotations for matching biological terms.
+
+        This function scans `.prot.var` or `.pep.var` for entries containing the provided keyword(s),
+        across common annotation fields.
+
+        Args:
+            query (str or list of str): Term(s) to search for (e.g., "keratin", "KRT").
+            on (str): Whether to search `"protein"` or `"peptide"` annotations (default: `"protein"`).
+            search_columns (list of str, optional): Columns to search in. Defaults to common biological fields.
+            case (bool): Case-sensitive search (default: False).
+            return_all_matches (bool): If True, return matches from any column. If False, returns only rows that match all terms.
+
+        Returns:
+            pd.DataFrame: Filtered dataframe with a `Matched` column (True/False) and optionally match columns per term.
+
+        Example:
+            >>> pdata.search_annotations("keratin")
+            >>> pdata.search_annotations(["keratin", "cytoskeleton"], on="peptide", case=False)
+        """
+        import pandas as pd
+
+        adata = self.prot if on == "protein" else self.pep
+        df = adata.var.copy()
+
+        if search_columns is None:
+            search_columns = [
+                "Accession", "Description", "Biological Process", "Cellular Component",
+                "Molecular Function", "Genes", "Gene ID", "Reactome Pathways"
+            ]
+
+        # Ensure index is available as a searchable column
+        df = df.copy()
+        df["Accession"] = df.index.astype(str)
+
+        # Convert query to list
+        if isinstance(query, str):
+            query = [query]
+
+        # Search logic
+        def match_func(val, term):
+            if pd.isnull(val):
+                return False
+            return term in val if case else term.lower() in str(val).lower()
+
+        match_results = pd.DataFrame(index=df.index)
+
+        for term in query:
+            per_col_match = pd.DataFrame({
+                col: df[col].apply(match_func, args=(term,)) if col in df.columns else False
+                for col in search_columns
+            })
+            row_match = per_col_match.any(axis=1)
+            match_results[f"Matched_{term}"] = row_match
+
+        if return_all_matches:
+            matched_any = match_results.any(axis=1)
+        else:
+            matched_any = match_results.all(axis=1)
+
+        result_df = df.copy()
+        result_df["Matched"] = matched_any
+        for col in match_results.columns:
+            result_df[col] = match_results[col]
+
+        return result_df[result_df["Matched"]]
