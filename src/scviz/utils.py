@@ -81,7 +81,8 @@ def format_log_prefix(level: str, indent=None) -> str:
         "result_only": "✅",
         "blank": "",
         "update": "🔄 [UPDATE]",
-        "update_only": "🔄"
+        "update_only": "🔄",
+        "warn_only": "⚠️"
     }
 
     if level not in base_prefixes:
@@ -367,7 +368,7 @@ def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True, debug=F
 
 def get_upset_query(upset_content, present, absent):
     prot_query = upsetplot.query(upset_content, present=present, absent=absent).data['id'].tolist()
-    prot_query_df = get_uniprot_fields(prot_query)
+    prot_query_df = get_uniprot_fields(prot_query,verbose=True)
 
     return prot_query_df
 
@@ -610,7 +611,7 @@ def get_pep_prot_mapping(pdata, return_series=False):
 
 # ----------------
 # API FUNCTIONS (STRING functions in enrichment.py)
-def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], verbose = False):
+def get_uniprot_fields_worker(prot_list, search_fields=None, verbose = False):
     """ Worker function to get data from Uniprot for a list of proteins, used by get_uniprot_fields(). Calls to UniProt REST API, and returns batch of maximum 1024 proteins at a time.
 
     Args:
@@ -726,9 +727,15 @@ def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'prot
                 missing_df[col] = np.nan
         df = pd.concat([df, missing_df], ignore_index=True)
     
+    if 'STRING' in df.columns:
+        # keep first STRING ID (or join all if you prefer)
+        df['STRING_id'] = df['STRING'].apply(
+            lambda s: str(s).split(';')[0].strip() if pd.notna(s) and str(s).strip() else np.nan
+        )
+    
     return df
 
-def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], batch_size=1024, verbose=False):
+def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'organism_id', 'go', 'go_f', 'go_c', 'go_p', 'cc_interaction', 'xref_string'], batch_size=100, verbose=False):
     """ Get data from Uniprot for a list of proteins. Uses get_uniprot_fields_worker to get data in batches of batch_size. For more information, see https://www.uniprot.org/help/return_fields for list of search_fields.
         Current function accepts accession protein list. For more queries, see https://www.uniprot.org/help/query-fields for a list of query fields that can be searched for.
 
@@ -767,7 +774,7 @@ def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_nam
             print(f"Processing batch {batches.index(batch) + 1} of {len(batches)}")
         batch_df = get_uniprot_fields_worker(batch, search_fields)
         full_method_df = pd.concat([full_method_df, batch_df], ignore_index=True)
-    
+
     return full_method_df
 
 # ----------------

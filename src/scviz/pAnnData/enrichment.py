@@ -1,12 +1,13 @@
 import requests
 import pandas as pd
+import numpy as np
 import time
 from io import StringIO
 from IPython.display import SVG, display
 import tempfile
 import os
 
-from scviz.utils import format_log_prefix
+from scviz.utils import format_log_prefix, get_uniprot_fields
 
 class EnrichmentMixin:
     """
@@ -27,13 +28,16 @@ class EnrichmentMixin:
         get_string_mappings: Maps UniProt accessions to STRING IDs using the STRING API.
         resolve_to_accessions: Resolves gene names or mixed inputs to accessions using internal mappings.
         get_string_network_link: Generates a direct STRING network URL for visualization.
-    """   
-    def get_string_mappings(self, identifiers, batch_size=300, debug=False):
+    """
+
+    def get_string_mappings(self, identifiers, overwrite=False, cache_col="STRING", batch_size=100, debug=False):
         """
-        Map UniProt accessions to STRING IDs using the STRING API.
+        Resolve STRING IDs for UniProt accessions with a 2-step strategy:
+        1) Use UniProt stream (fields: xref_string) to fill cache quickly.
+        2) For any still-missing rows, query STRING get_string_ids, batched by organism_id.
 
         This method retrieves corresponding STRING identifiers for a list of UniProt accessions
-        and stores the result in `self.prot.var["String ID"]` for downstream use.
+        and stores the result in `self.prot.var["STRING_id"]` for downstream use.
 
         Args:
             identifiers (list of str): List of UniProt accession IDs to map.
@@ -49,44 +53,128 @@ class EnrichmentMixin:
         print(f"[INFO] Resolving STRING IDs for {len(identifiers)} identifiers...") if debug else None
 
         prot_var = self.prot.var
-        if "String ID" not in prot_var.columns:
-            prot_var["String ID"] = pd.NA
-
+        if cache_col not in prot_var.columns:
+            prot_var[cache_col] = pd.NA
+        
         # Use cached STRING IDs if available
         valid_ids = [i for i in identifiers if i in prot_var.index]
-        existing = prot_var.loc[valid_ids, "String ID"]
+        existing = prot_var.loc[valid_ids, cache_col]
         found_ids = {i: sid for i, sid in existing.items() if pd.notna(sid)}
         missing = [i for i in identifiers if i not in found_ids]
 
+        if overwrite:
+            # If overwriting, treat all valid IDs as missing for fresh pull
+            print(f"{format_log_prefix('info_only',2)} Overwriting cached STRING IDs.")
+            missing = valid_ids
+            found_ids = {}
+
         print(f"{format_log_prefix('info_only',2)} Found {len(found_ids)} cached STRING IDs. {len(missing)} need lookup.")
 
-        all_rows = []
+        print(missing) if debug else None
 
-        for i in range(0, len(missing), batch_size):
-            batch = missing[i:i + batch_size]
-            print(f"{format_log_prefix('info')} Querying STRING for batch {i // batch_size + 1} ({len(batch)} identifiers)...") if debug else None
+        # -----------------------------
+        # Step 1: UniProt stream (fast)         # Use UniProt xref_string field to fill cache quickly
+        # -----------------------------
 
-            url = "https://string-db.org/api/tsv-no-header/get_string_ids"
-            params = {
-                "identifiers": "\r".join(batch),
-                "limit": 1,
-                "echo_query": 1,
-                "caller_identity": "scviz"
-            }
+        uni_results = []  # <- collect for merge into out_df later
+        uni_count = 0
+        species_map = {}
 
+        if missing:
             try:
-                t0 = time.time()
-                response = requests.post(url, data=params)
-                response.raise_for_status()
-                df = pd.read_csv(StringIO(response.text), sep="\t", header=None)
-                df.columns = [
-                    "input_identifier", "input_alias", "string_identifier", "ncbi_taxon_id",
-                    "preferred_name", "annotation", "score"
-                ]
-                print(f"[INFO] Batch completed in {time.time() - t0:.2f}s") if debug else None
-                all_rows.append(df)
+                dfu = get_uniprot_fields(missing, search_fields=['xref_string', 'organism_id'], batch_size=100)
+
+                print(dfu) if debug else None
+
+                if dfu is not None and not dfu.empty:
+                    # Column names can be either of these, depending on API:
+                    entry_col_candidates = ['Entry', 'accession']
+                    xref_col_candidates  = ['Cross-reference (STRING)', 'xref_string', 'STRING_id', 'STRING']
+                    org_col_candidates   = ['Organism (ID)', 'organism_id']
+
+                    entry_col = next((c for c in entry_col_candidates if c in dfu.columns), None)
+                    xref_col  = next((c for c in xref_col_candidates  if c in dfu.columns), None)
+                    org_col   = next((c for c in org_col_candidates   if c in dfu.columns), None)
+
+                    if entry_col and xref_col:
+                        # Parse first STRING ID if multiple are returned
+                        def _first_string(s):
+                            if pd.isna(s):
+                                return np.nan
+                            s = str(s).strip()
+                            if not s:
+                                return np.nan
+                            return s.split(';')[0].strip()
+
+                        dfu['__STRING__'] = dfu[xref_col].apply(_first_string)
+
+                        for _, row in dfu.iterrows():
+                            acc = row[entry_col]
+                            sid = row['__STRING__']
+
+                            # capture organism id if present
+                            if org_col in dfu.columns:
+                                org_val = row[org_col]
+                                if pd.notna(org_val) and str(org_val).strip():
+                                    try:
+                                        species_map[acc] = int(org_val)
+                                    except Exception:
+                                        # keep as raw if not int-castable
+                                        species_map[acc] = org_val
+
+                            if acc in prot_var.index and pd.notna(sid) and str(sid).strip():
+                                if overwrite or pd.isna(prot_var.at[acc, cache_col]) or not str(prot_var.at[acc, cache_col]).strip():
+                                    prot_var.at[acc, cache_col] = sid
+                                    prot_var.at[acc, "ncbi_taxon_id"] = str(species_map.get(acc, np.nan)) if pd.notna(species_map.get(acc, np.nan)) else np.nan
+                                    found_ids[acc] = sid
+                                    uni_results.append({"input_identifier": acc, "string_identifier": sid})
+                                    uni_count += 1
+                print(f"{format_log_prefix('info_only',3)} Cached {uni_count} STRING IDs from UniProt API xref_string.")
             except Exception as e:
-                print(f"[ERROR] Failed on batch {i // batch_size + 1}: {e}")
+                # if debug:
+                print(f"[WARN] UniProt stream step failed: {e}")
+
+        # Recompute missing after UniProt step
+        missing = [i for i in identifiers if i not in found_ids]
+
+        # -----------------------------------------
+        # STEP 2: STRING API for still-missing ones
+        # -----------------------------------------
+
+        if not missing:
+            # nothing left to resolve via STRING
+            if debug:
+                print(f"[INFO] All identifiers resolved via UniProt: {found_ids}")
+            all_rows=[]
+
+        else:
+            all_rows = []
+
+            for i in range(0, len(missing), batch_size):
+                batch = missing[i:i + batch_size]
+                print(f"{format_log_prefix('info')} Querying STRING for batch {i // batch_size + 1} ({len(batch)} identifiers)...") if debug else None
+
+                url = "https://string-db.org/api/tsv-no-header/get_string_ids"
+                params = {
+                    "identifiers": "\r".join(batch),
+                    "limit": 1,
+                    "echo_query": 1,
+                    "caller_identity": "scviz"
+                }
+
+                try:
+                    t0 = time.time()
+                    response = requests.post(url, data=params)
+                    response.raise_for_status()
+                    df = pd.read_csv(StringIO(response.text), sep="\t", header=None)
+                    df.columns = [
+                        "input_identifier", "input_alias", "string_identifier", "ncbi_taxon_id",
+                        "preferred_name", "annotation", "score"
+                    ]
+                    print(f"[INFO] Batch completed in {time.time() - t0:.2f}s") if debug else None
+                    all_rows.append(df)
+                except Exception as e:
+                    print(f"[ERROR] Failed on batch {i // batch_size + 1}: {e}") if debug else None
 
         # Combine all new mappings
         if all_rows:
@@ -97,22 +185,37 @@ class EnrichmentMixin:
                 acc = row["input_identifier"]
                 sid = row["string_identifier"]
                 if acc in self.prot.var.index:
-                    self.prot.var.at[acc, "String ID"] = sid
+                    self.prot.var.at[acc, cache_col] = sid
                     found_ids[acc] = sid
                     updated_ids.append(acc)
                 else:
                     print(f"[DEBUG] Skipping unknown accession '{acc}'")
 
-            print(f"{format_log_prefix('info')} Cached {len(updated_ids)} new STRING ID mappings.")
-        else:
-            print(f"{format_log_prefix('warn')} No STRING mappings returned for the requested identifiers.")
+            print(f"{format_log_prefix('info_only',3)} Cached {len(updated_ids)} new STRING ID mappings from STRING API.")
+        elif missing:
+            print(f"{format_log_prefix('warn_only',3)} No STRING mappings returned from STRING API.")
 
-        # Return final mapping as a DataFrame
+
+        # ------------------------------------
+        # Build and MERGE UniProt results into out_df
+        # ------------------------------------
         out_df = pd.DataFrame.from_dict(found_ids, orient="index", columns=["string_identifier"])
         out_df.index.name = "input_identifier"
         out_df = out_df.reset_index()
-        out_df["ncbi_taxon_id"] = 9606  # default fallback if needed
+
+        if uni_results:
+            uni_df = pd.DataFrame(uni_results).dropna().drop_duplicates(subset=["input_identifier"])
+            out_df = out_df.merge(uni_df, on="input_identifier", how="left", suffixes=("", "_uni"))
+            out_df["string_identifier"] = out_df["string_identifier"].combine_first(out_df["string_identifier_uni"])
+            out_df = out_df.drop(columns=["string_identifier_uni"])
+
+        # Use species_map (from UniProt and/or STRING) for ncbi_taxon_id
+        from_map = out_df["input_identifier"].map(lambda acc: species_map.get(acc, np.nan))
+        from_cache = out_df["input_identifier"].map(lambda acc: prot_var.at[acc, "ncbi_taxon_id"] if acc in prot_var.index else np.nan)
+        out_df["ncbi_taxon_id"] = from_map.combine_first(from_cache)
+
         return out_df
+
 
     def resolve_to_accessions(self, mixed_list):
         """
@@ -212,7 +315,7 @@ class EnrichmentMixin:
             or by visiting the linked STRING URLs.
         """
         def query_functional_enrichment(query_ids, species_id, background_ids=None, debug=False):
-            # print(f"{format_log_prefix('info_only',2)} Running enrichment on {len(query_ids)} STRING IDs (species {species_id})...")
+            print(f"{format_log_prefix('info_only',2)} Running enrichment on {len(query_ids)} STRING IDs (species {species_id})...") if debug else None
             url = "https://string-db.org/api/json/enrichment"
             payload = {
                 "identifiers": "%0d".join(query_ids),
@@ -223,6 +326,7 @@ class EnrichmentMixin:
                 print(f"{format_log_prefix('info_only')} Using background of {len(background_ids)} STRING IDs.")
                 payload["background_string_identifiers"] = "%0d".join(background_ids)
 
+            print(payload) if debug else None
             response = requests.post(url, data=payload)
             response.raise_for_status()
             return pd.DataFrame(response.json())
@@ -250,7 +354,8 @@ class EnrichmentMixin:
                 background_accs = de_df[de_df["significance"] == "not significant"].index.tolist()
 
             if background_accs:
-                bg_map = self.get_string_mappings(background_accs)
+                bg_map = self.get_string_mappings(background_accs,debug=debug)
+                bg_map = bg_map[bg_map["string_identifier"].notna()]
                 background_string_ids = bg_map["string_identifier"].tolist()
 
             if store_key is not None:
@@ -258,22 +363,29 @@ class EnrichmentMixin:
 
             results = {}
             for label, accs in zip(["up", "down"], [up_accs, down_accs]):
+                print(f"\n🔹 {label.capitalize()}-regulated proteins")
                 t0 = time.time()
 
                 if not accs:
                     print(f"{format_log_prefix('warn')} No {label}-regulated proteins to analyze.")
                     continue
 
-                mapping_df = self.get_string_mappings(accs)
+                mapping_df = self.get_string_mappings(accs, debug=debug)
+                mapping_df = mapping_df[mapping_df["string_identifier"].notna()]
                 if mapping_df.empty:
                     print(f"{format_log_prefix('warn')} No valid STRING mappings found for {label}-regulated proteins.")
                     continue
 
                 string_ids = mapping_df["string_identifier"].tolist()
                 inferred_species = mapping_df["ncbi_taxon_id"].mode().iloc[0]
-                species_id = species if species is not None else inferred_species
+                if species is not None:
+                    # check if user species is same as inferred
+                    if inferred_species != species:
+                        print(f"{format_log_prefix('warn',2)} Inferred species ({inferred_species}) does not match user-specified ({species}). Using user-specified species.")
+                    species_id = species
+                else:
+                    species_id = inferred_species
 
-                print(f"\n🔹 {label.capitalize()}-regulated proteins")
                 print(f"   🔸 Proteins: {len(accs)} → STRING IDs: {len(string_ids)}")
                 print(f"   🔸 Species: {species_id} | Background: {'None' if background_string_ids is None else 'custom'}")
                 if label == "up":
@@ -283,7 +395,7 @@ class EnrichmentMixin:
                     if down_unresolved:
                         print(f"{format_log_prefix('warn',2)} Some accessions unresolved for {label}-regulated proteins: {', '.join(down_unresolved)}")
 
-                enrichment_df = query_functional_enrichment(string_ids, species_id, background_string_ids)
+                enrichment_df = query_functional_enrichment(string_ids, species_id, background_string_ids, debug=debug)
                 enrich_key = f"{resolved_key}_{label}"
                 pretty_base = _pretty_vs_key(resolved_key)
                 pretty_key = f"{pretty_base}_{label}"
@@ -317,21 +429,28 @@ class EnrichmentMixin:
                 store_key = f"{prefix}{next_id}"
 
             input_accs, unresolved_accs = self.resolve_to_accessions(genes)
-            mapping_df = self.get_string_mappings(input_accs)
-
+            mapping_df = self.get_string_mappings(input_accs, debug=debug)
+            mapping_df = mapping_df[mapping_df["string_identifier"].notna()]
             if mapping_df.empty:
                 raise ValueError("No valid STRING mappings found for the provided identifiers.")
 
             string_ids = mapping_df["string_identifier"].tolist()
             inferred_species = mapping_df["ncbi_taxon_id"].mode().iloc[0]
-            species_id = species if species is not None else inferred_species
+            if species is not None:
+                # check if user species is same as inferred
+                if inferred_species != species:
+                    print(f"{format_log_prefix('warn',2)} Inferred species ({inferred_species}) does not match user-specified ({species}). Using user-specified species.")
+                species_id = species
+            else:
+                species_id = inferred_species
 
             background_string_ids = None
             if background == "all_quantified":
                 print(f"{format_log_prefix('warn')} Mapping background proteins may take a long time due to batching.")
                 all_accs = list(self.prot.var_names)
                 background_accs = list(set(all_accs) - set(input_accs))
-                bg_map = self.get_string_mappings(background_accs)
+                bg_map = self.get_string_mappings(background_accs, debug=debug)
+                bg_map = bg_map[bg_map["string_identifier"].notna()]
                 background_string_ids = bg_map["string_identifier"].tolist()
 
             print(f"   🔸 Input genes: {len(genes)} → Resolved STRING IDs: {len(string_ids)}")
@@ -339,7 +458,7 @@ class EnrichmentMixin:
             if unresolved_accs:
                 print(f"{format_log_prefix('warn',2)} Some accessions unresolved: {', '.join(unresolved_accs)}")
 
-            enrichment_df = query_functional_enrichment(string_ids, species_id, background_string_ids)
+            enrichment_df = query_functional_enrichment(string_ids, species_id, background_string_ids, debug=debug)
             string_url = self.get_string_network_link(string_ids=string_ids, species=species_id)
 
             self.stats["functional"][store_key] = {
@@ -410,8 +529,8 @@ class EnrichmentMixin:
         print(f"{format_log_prefix('user')} Running STRING PPI enrichment")
         t0 = time.time()
         input_accs, unresolved_accs = self.resolve_to_accessions(genes)
-        mapping_df = self.get_string_mappings(input_accs)
-
+        mapping_df = self.get_string_mappings(input_accs, debug=debug)
+        mapping_df = mapping_df[mapping_df["string_identifier"].notna()]
         if mapping_df.empty:
             raise ValueError("No valid STRING mappings found for the provided genes/accessions.")
 
