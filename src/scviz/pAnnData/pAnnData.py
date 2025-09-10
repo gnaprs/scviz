@@ -8,7 +8,7 @@ from .editing import EditingMixin
 from .filtering import FilterMixin
 from .analysis import AnalysisMixin
 from .enrichment import EnrichmentMixin
-from .io import import_data
+from .io import IOMixin
 
 import pandas as pd
 import anndata as ad
@@ -16,7 +16,7 @@ from scviz.TrackedDataFrame import TrackedDataFrame
 
 class pAnnData(BaseMixin, ValidationMixin, SummaryMixin, MetricsMixin,
                IdentifierMixin, HistoryMixin, EditingMixin, FilterMixin,
-               AnalysisMixin, EnrichmentMixin):
+               AnalysisMixin, EnrichmentMixin, IOMixin):
     """
     Unified data container for protein and peptide expression in single-cell and bulk proteomics.
 
@@ -76,13 +76,6 @@ class pAnnData(BaseMixin, ValidationMixin, SummaryMixin, MetricsMixin,
         self._summary = pd.DataFrame()
         self._stats = {}
         self._summary_is_stale = False
-
-    @classmethod
-    def import_data(cls, *args, **kwargs):
-        """
-        Import data from a file or URL.
-        """
-        return import_data(*args, **kwargs)
 
     def __repr__(self):
         def format_summary(summary):
@@ -207,8 +200,7 @@ class pAnnData(BaseMixin, ValidationMixin, SummaryMixin, MetricsMixin,
         lines.append(enrichment_info)
 
         return "\n".join(lines)
-
-
+    
     # -----------------------------
     # Properties (GETTERS)
     @property

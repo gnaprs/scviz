@@ -338,8 +338,11 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
     prot_obs_names = prot_X_pivot.columns.values
 
     # prot_var: protein metadata (default: Genes, Master.Protein)
-    if 'First.Protein.Description' in report_all.columns:
+    if 'First.Protein.Description' in report_all.columns and 'First.Protein.Description' not in prot_var_columns:
         prot_var_columns.insert(0, 'First.Protein.Description')
+
+    if 'Global.PG.Q.Value' in report_all.columns and 'Global.PG.Q.Value' not in prot_var_columns:
+        prot_var_columns.append('Global.PG.Q.Value')
 
     existing_prot_var_columns = [col for col in prot_var_columns if col in report_all.columns]
     missing_columns = set(prot_var_columns) - set(existing_prot_var_columns)
@@ -357,6 +360,13 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
     else:
         prot_obs = pd.DataFrame(prot_X_pivot.columns.values, columns=['Run'])['Run'].str.split('_', expand=True).rename(columns=dict(enumerate(obs_columns)))
     
+    # PG.Q.Value layer (sample x protein)
+    if 'PG.Q.Value' in report_all.columns:
+        pgq_pivot = report_all.pivot_table(index='Master.Protein', columns='Run', values='PG.Q.Value', aggfunc='first', sort=False)
+        prot_pgq_layer = sparse.csr_matrix(pgq_pivot.values).T
+    else:
+        prot_pgq_layer = None
+
     print(f"Number of files: {len(prot_obs_names)}")
     print(f"Proteins: {len(prot_var)}")
 
@@ -383,6 +393,13 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
     pep_var = report_all.loc[:, existing_pep_var_columns].drop_duplicates(subset='Precursor.Id').drop(columns='Precursor.Id')
     # pep_obs: sample typing from the column name, same as prot_obs
     pep_obs = prot_obs
+
+    # Q.Value layer (sample x peptide)
+    if 'Q.Value' in report_all.columns:
+        pepq_pivot = report_all.pivot_table(index='Precursor.Id', columns='Run', values='Q.Value', aggfunc='first', sort=False)
+        pep_q_layer = sparse.csr_matrix(pepq_pivot.values).T
+    else:
+        pep_q_layer = None
 
     print(f"Peptides: {len(pep_var)}")
 
@@ -414,6 +431,8 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
         prot_obs, prot_var, prot_obs_names, prot_var_names,
         pep_obs, pep_var, pep_obs_names, pep_var_names,
         obs_columns=obs_columns,
+        X_qval_prot=prot_pgq_layer,
+        X_qval_pep=pep_q_layer,
         metadata={
             "source": "diann",
             "file": report_file,
@@ -432,6 +451,10 @@ def _create_pAnnData_from_parts(
     obs_columns=None,
     X_mbr_prot=None,
     X_mbr_pep=None,
+    X_qval_prot=None,
+    X_qval_pep=None,
+    found_threshold=0,
+    fdr_threshold=0.01,
     metadata=None,
     history_msg=""
 ):
@@ -482,6 +505,8 @@ def _create_pAnnData_from_parts(
         pdata.prot.layers['X_raw'] = prot_X # type: ignore[attr-defined]
         if X_mbr_prot is not None:
             pdata.prot.layers['X_mbr'] = X_mbr_prot # type: ignore[attr-defined]
+        if X_qval_prot is not None:
+            pdata.prot.layers['X_qval'] = X_qval_prot # type: ignore[attr-defined]
 
     if "Genes" in pdata.prot.var.columns and pdata.prot.var["Genes"].isna().any(): # type: ignore[attr-defined]
         pdata.update_missing_genes(gene_col="Genes", verbose=True)
@@ -496,6 +521,8 @@ def _create_pAnnData_from_parts(
         pdata.pep.layers['X_raw'] = pep_X # type: ignore[attr-defined]
         if X_mbr_pep is not None:
             pdata.pep.layers['X_mbr'] = X_mbr_pep # type: ignore[attr-defined]
+        if X_qval_pep is not None:
+            pdata.pep.layers['X_qval'] = X_qval_pep # type: ignore[attr-defined]
 
     # --- Metadata ---
     metadata = metadata or {}
@@ -508,7 +535,8 @@ def _create_pAnnData_from_parts(
 
     # --- Summary + Validation ---
     pdata.update_summary(recompute=True)
-    pdata._annotate_found_samples(threshold=0.0)
+    pdata._annotate_found_samples(threshold=found_threshold)
+    pdata._annotate_significant_samples(fdr_threshold=fdr_threshold)
 
     print("")
     if not pdata.validate():
@@ -903,3 +931,207 @@ def analyze_filename_formats(filenames, delimiter: str = "_", group_labels=None)
         "n_tokens": token_lengths,
         "group_map": group_map
     }
+
+class IOMixin:
+    """Mixin for data import/export methods."""
+
+    @classmethod
+    def import_data(cls, *args, **kwargs):
+        """
+        Unified wrapper for importing data into a `pAnnData` object.
+
+        This function routes to a specific import handler based on the `source_type`,
+        such as Proteome Discoverer or DIA-NN. It parses protein/peptide expression data
+        and associated sample metadata, returning a fully initialized `pAnnData` object.
+
+        Args:
+            source_type (str): The input tool or data source. Supported values:
+
+                - `'pd'`, `'proteomeDiscoverer'`, `'pd13'`, `'pd24'`:  
+                → Uses `import_proteomeDiscoverer()`.  
+                Required kwargs:
+                    - `prot_file` (str): Path to protein-level report file
+                    - `obs_columns` (list of str): Columns to extract for `.obs`
+                Optional kwargs:
+                    - `pep_file` (str): Path to peptide-level report file
+
+                - `'diann'`, `'dia-nn'`:  
+                → Uses `import_diann()`.  
+                Required kwargs:
+                    - `report_file` (str): Path to DIA-NN report file
+                    - `obs_columns` (list of str): Columns to extract for `.obs`
+
+                - `'fragpipe'`, `'fp'`: Not yet implemented  
+                - `'spectronaut'`, `'sn'`: Not yet implemented
+
+            **kwargs: Additional keyword arguments forwarded to the relevant import function.
+
+        Returns:
+            pAnnData: A populated pAnnData object with `.prot`, `.pep`, `.summary`, and identifier mappings.
+
+        Example:
+            Importing Proteome Discoverer output for single-cell data:
+
+                >>> obs_columns = ['Sample', 'method', 'duration', 'cell_line']
+                >>> pdata_untreated_sc = import_data(
+                ...     source_type='pd',
+                ...     prot_file='data/202312_untreated/Marion_20231218_OTE_Aur60min_CBR_prot_Proteins.txt',
+                ...     pep_file='data/202312_untreated/Marion_20231218_OTE_Aur60min_CBR_pep_PeptideGroups.txt',
+                ...     obs_columns=obs_columns
+                ... )
+
+            Importing PD output for bulk data from an Excel file:
+
+                >>> obs_columns = ['Sample', 'cell_line']
+                >>> pdata_bulk = import_data(
+                ...     source_type='pd',
+                ...     prot_file='HCT116 resistance_20230601_pdoutput.xlsx',
+                ...     obs_columns=obs_columns
+                ... )
+
+        Note:
+            If `obs_columns` is not provided and filename formats are inconsistent,
+            fallback parsing is applied with generic columns (`"File"`, `"parsingType"`).
+        """
+        return import_data(*args, **kwargs)
+
+    @classmethod
+    def import_diann(cls, *args, **kwargs):
+        """
+        Import DIA-NN output into a `pAnnData` object.
+
+        This function parses a DIA-NN report file and separates protein- and peptide-level expression matrices
+        using the specified abundance and metadata columns.
+
+        Args:
+            report_file (str): Path to the DIA-NN report file (required).
+            obs_columns (list of str): List of metadata columns to extract from the filename for `.obs`.
+            prot_value (str): Column name in DIA-NN output to use for protein quantification.
+                Default: `'PG.MaxLFQ'`.
+            pep_value (str): Column name in DIA-NN output to use for peptide quantification.
+                Default: `'Precursor.Normalised'`.
+            prot_var_columns (list of str): Columns from the protein group table to store in `.prot.var`.
+                Default includes gene and master protein annotations.
+            pep_var_columns (list of str): Columns from the precursor table to store in `.pep.var`.
+                Default includes peptide sequence, precursor ID, and mapping annotations.
+            **kwargs: Additional keyword arguments passed to `import_data()`.
+
+        Returns:
+            pAnnData: A populated object with `.prot`, `.pep`, `.summary`, and identifier mappings.
+
+        Example:
+            To import data from a DIA-NN report file:
+
+                >>> obs_columns = ['Sample', 'treatment', 'replicate']
+                >>> pdata = import_diann(
+                ...     report_file='data/project_diaNN_output.tsv',
+                ...     obs_columns=obs_columns,
+                ...     prot_value='PG.MaxLFQ',
+                ...     pep_value='Precursor.Normalised'
+                ... )
+
+        Note:
+            - DIA-NN report should contain both protein group and precursor-level information.
+            - Metadata columns in filenames must be consistently formatted to extract `.obs`.
+        """
+        return import_diann(*args, **kwargs)
+
+    @classmethod
+    def import_proteomeDiscoverer(cls, *args, **kwargs):
+        """
+        Import Proteome Discoverer (PD) output into a `pAnnData` object.
+
+        This is a convenience wrapper for `import_data(source_type='pd')`. It loads protein- and optionally peptide-level
+        expression data from PD report files and parses sample metadata columns.
+
+        Args:
+            prot_file (str): Path to the protein-level report file (required).
+            pep_file (str, optional): Path to the peptide-level report file (optional but recommended).
+            obs_columns (list of str): List of columns to extract for `.obs`. These should match metadata tokens
+                embedded in the filenames (e.g. sample, condition, replicate).
+            **kwargs: Additional keyword arguments passed to `import_data()`.
+
+        Returns:
+            pAnnData: A populated object with `.prot`, `.pep` (if provided), `.summary`, and identifier mappings.
+
+        Example:
+            To import data from Proteome Discoverer:
+
+                >>> obs_columns = ['Sample', 'condition', 'cell_line']
+                >>> pdata = import_proteomeDiscoverer(
+                ...     prot_file='my_project/proteins.txt',
+                ...     pep_file='my_project/peptides.txt',
+                ...     obs_columns=obs_columns
+                ... )
+
+        Note:
+            - If `pep_file` is omitted, the resulting `pAnnData` will not include `.pep` or an RS matrix.
+            - If filename structure is inconsistent and `obs_columns` cannot be inferred, fallback columns are used.
+        """
+        return import_proteomeDiscoverer(*args, **kwargs)
+    
+    @classmethod
+    def get_filenames(cls, *args, **kwargs):
+        """
+        Extract sample filenames from a DIA-NN or Proteome Discoverer report.
+
+        For DIA-NN reports, this extracts the 'Run' column from the table.
+        For Proteome Discoverer (PD) output, it collects unique sample identifiers 
+        based on column headers (e.g. abundance columns like "Abundances (SampleX)").
+
+        Args:
+            source (str or Path): Path to the input report file.
+            source_type (str): Tool used to generate the report. Must be one of {'diann', 'pd'}.
+
+        Returns:
+            list of str: Extracted list of sample names or run filenames.
+
+        Example:
+            Extract DIA-NN run names:
+
+                >>> get_filenames("diann_output.tsv", source_type="diann")
+                ['Sample1.raw', 'Sample2.raw', 'Sample3.raw']
+
+            Extract PD sample names from abundance columns:
+
+                >>> get_filenames("pd_output.xlsx", source_type="pd")
+                ['SampleA', 'SampleB', 'SampleC']
+        """
+        return get_filenames(*args, **kwargs)
+    
+    @classmethod
+    def suggest_obs_columns(cls, *args, **kwargs):
+        """
+        Suggest `.obs` column names based on parsed sample names.
+
+        This function analyzes filenames or run names extracted from Proteome Discoverer
+        or DIA-NN reports and attempts to identify consistent metadata fields. These fields
+        may include `gradient`, `amount`, `cell_line`, or `well_position`, depending on
+        naming conventions and regular expression matches.
+
+        Args:
+            source (str or Path, optional): Path to a DIA-NN or PD output file.
+            source_type (str, optional): Type of the input file. Supports `'diann'` or `'pd'`.
+                If not provided, inferred from filename or fallback heuristics.
+            filenames (list of str, optional): List of sample file names or run labels to parse.
+                If provided, bypasses file loading.
+            delimiter (str, optional): Delimiter to use for tokenizing filenames (e.g., `','`, `'_'`).
+                If not specified, will be inferred automatically.
+
+        Returns:
+            list of str: Suggested list of metadata column names to assign to `.obs`.
+
+        Example:
+            To suggest observation columns from a file:
+
+                >>> suggest_obs_columns("my_experiment_PD.txt", source_type="pd")
+
+            Suggested columns: ['Sample', 'gradient', 'cell_line', 'duration']
+
+                >>> ['Sample', 'gradient', 'cell_line', 'duration']
+
+        Note:
+            This function is typically used as part of the `.import_data()` flow
+            when filenames embed experimental metadata.
+        """
+        return suggest_obs_columns(*args, **kwargs)
