@@ -35,7 +35,8 @@ dependencies = [
   "IPython",
   "igraph",
   "harmonypy",
-  "leidenalg"
+  "leidenalg",
+  "scikit-misc"
 ]
 
 [project.urls]
