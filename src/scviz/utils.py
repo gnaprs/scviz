@@ -368,7 +368,7 @@ def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True, debug=F
 
 def get_upset_query(upset_content, present, absent):
     prot_query = upsetplot.query(upset_content, present=present, absent=absent).data['id'].tolist()
-    prot_query_df = get_uniprot_fields(prot_query,verbose=True)
+    prot_query_df = get_uniprot_fields(prot_query,verbose=False)
 
     return prot_query_df
 

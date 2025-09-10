@@ -170,7 +170,7 @@ class FilterMixin:
         pdata.update_summary(recompute=True) # type: ignore[attr-defined]
         return pdata if return_copy else None
 
-    def filter_prot_found(self, group, min_ratio=None, min_count=None, on='protein', return_copy=True, verbose=True):
+    def filter_prot_found(self, group, min_ratio=None, min_count=None, on='protein', return_copy=True, verbose=True, match_any=False):
         """
         Filter proteins or peptides based on 'Found In' detection across samples or groups.
 
@@ -187,6 +187,7 @@ class FilterMixin:
             on (str): Feature level to filter: either "protein" or "peptide".
             return_copy (bool): If True, returns a filtered copy. If False, modifies in place.
             verbose (bool): If True, prints verbose summary information.
+            match_any (bool): Defaults to False, for a AND search condition. If True, matches features found in any of the specified groups/files (i.e. union).
 
         Returns:
             pAnnData: A filtered pAnnData object if `return_copy=True`; otherwise, modifies in place and returns None.
@@ -262,29 +263,53 @@ class FilterMixin:
         mask = np.ones(len(var), dtype=bool)
 
         if mode == "file":
-            for g in group:
-                col = f"Found In: {g}"
-                mask &= var[col]
-            if verbose:
-                print(f"{format_log_prefix('user')} Filtering proteins [Found|File-mode]: keeping {mask.sum()} / {len(mask)} features found in ALL files: {group}")
+            if match_any: # OR logic
+                mask = np.zeros(len(var), dtype=bool)
+                for g in group:
+                    col = f"Found In: {g}"
+                    mask |= var[col]  
+                if verbose:
+                    print(f"{format_log_prefix('user')} Filtering proteins [Found|File-mode|ANY]: keeping {mask.sum()} / {len(mask)} features found in ANY of files: {group}")
+            else: # AND logic (default)
+                for g in group:
+                    col = f"Found In: {g}"
+                    mask &= var[col]
+                if verbose:
+                    print(f"{format_log_prefix('user')} Filtering proteins [Found|File-mode|ALL]: keeping {mask.sum()} / {len(mask)} features found in ALL files: {group}")
 
         elif mode == "group":
             if min_ratio is None and min_count is None:
                 raise ValueError("You must specify either `min_ratio` or `min_count` when filtering by group.")
+            
+            if match_any: # ANY logic
+                mask = np.zeros(len(var), dtype=bool)
+                for g in group:
+                    count_series = group_metrics[(g, "count")]
+                    ratio_series = group_metrics[(g, "ratio")]
 
-            for g in group:
-                count_series = group_metrics[(g, "count")]
-                ratio_series = group_metrics[(g, "ratio")]
+                    if min_ratio is not None:
+                        this_mask = ratio_series >= min_ratio
+                    else:
+                        this_mask = count_series >= min_count
 
-                if min_ratio is not None:
-                    this_mask = ratio_series >= min_ratio
-                else:
-                    this_mask = count_series >= min_count
+                    mask |= this_mask  # [ADDED]
+                if verbose:
+                    print(f"{format_log_prefix('user')} Filtering proteins [Found|Group-mode|ANY]: keeping {mask.sum()} / {len(mask)} features passing threshold in ANY of groups: {group}")
 
-                mask &= this_mask
+            else:
+                for g in group:
+                    count_series = group_metrics[(g, "count")]
+                    ratio_series = group_metrics[(g, "ratio")]
 
-            if verbose:
-                print(f"{format_log_prefix('user')} Filtering proteins [Found|Group-mode]: keeping {mask.sum()} / {len(mask)} features passing threshold {min_ratio if min_ratio is not None else min_count} across groups: {group}")
+                    if min_ratio is not None:
+                        this_mask = ratio_series >= min_ratio
+                    else:
+                        this_mask = count_series >= min_count
+
+                    mask &= this_mask
+
+                if verbose:
+                    print(f"{format_log_prefix('user')} Filtering proteins [Found|Group-mode|ALL]: keeping {mask.sum()} / {len(mask)} features passing threshold {min_ratio if min_ratio is not None else min_count} across groups: {group}")
 
         # Apply filtering
         filtered = self.copy() if return_copy else self # type: ignore[attr-defined], EditingMixin
@@ -314,12 +339,109 @@ class FilterMixin:
             # Optionally, we could also remove proteins no longer linked to any peptides,
             # but that's less common and we can leave it out unless requested.
 
-        filtered._append_history( # type: ignore[attr-defined], HistoryMixin
-            f"{on}: Filtered by detection in {mode} group(s) {group} using " +
-            (f"min_ratio={min_ratio}" if mode == "group" and min_ratio is not None else f"min_count={min_count}" if mode == "group" else "ALL files")
-            + "."
+        criteria_str = (
+            f"min_ratio={min_ratio}" if mode == "group" and min_ratio is not None else
+            f"min_count={min_count}" if mode == "group" else
+            ("ANY files" if match_any else "ALL files")
+        )
+
+        logic_str = "ANY" if match_any else "ALL"
+
+        filtered._append_history(  # type: ignore[attr-defined], HistoryMixin
+            f"{on}: Filtered by detection in {mode} group(s) {group} using {criteria_str} (match_{logic_str})."
         )
         filtered.update_summary(recompute=True) # type: ignore[attr-defined], SummaryMixin
+
+        return filtered if return_copy else None
+
+    def filter_prot_significant(self, group, min_ratio=None, min_count=None, fdr_threshold=0.01, return_copy=True, verbose=True):
+        """
+        Filter proteins based on significance across samples or groups using FDR thresholds.
+
+        This method filters proteins by checking whether they are significant (e.g. PG.Q.Value < 0.01)
+        in a minimum number or proportion of samples, either per file or grouped.
+
+        Args:
+            group (str or list of str): Run names (e.g., filenames) or class values to evaluate.
+            min_ratio (float, optional): Minimum proportion of samples to be significant.
+            min_count (int, optional): Minimum number of samples to be significant.
+            fdr_threshold (float): Significance threshold (default = 0.01).
+            return_copy (bool): Whether to return a filtered copy or modify in-place.
+            verbose (bool): Whether to print summary.
+
+        Returns:
+            pAnnData or None: Filtered object (if `return_copy=True`) or modifies in-place.
+        
+        Todo:
+            Implement peptide then protein filter
+        """
+        if not self._check_data("protein"): # type: ignore[attr-defined]
+            return
+
+        adata = self.prot 
+        var = adata.var
+
+        group_list = [group] if isinstance(group, str) else group
+
+        # Auto-run annotation if missing
+        missing_cols = [f"Significant In: {g}" for g in group_list]
+        if not all(col in var.columns for col in missing_cols):
+            self.annotate_significant(classes=group_list, fdr_threshold=fdr_threshold, on="protein")
+
+        # Mode detection: group vs file
+        metrics_key = "significance_metrics_protein"
+        metrics_df = adata.uns.get(metrics_key, pd.DataFrame())
+
+        is_group_mode = all((g, "count") in metrics_df.columns for g in group_list)
+
+        mask = np.ones(len(var), dtype=bool)
+
+        if is_group_mode:
+            if min_ratio is None and min_count is None:
+                raise ValueError("Specify `min_ratio` or `min_count` for group-based filtering.")
+
+            for g in group_list:
+                count = metrics_df[(g, "count")]
+                ratio = metrics_df[(g, "ratio")]
+                if min_ratio is not None:
+                    this_mask = ratio >= min_ratio
+                else:
+                    this_mask = count >= min_count
+                mask &= this_mask
+
+            if verbose:
+                print(f"{format_log_prefix('user')} Filtering [Significant|Group-mode]: {mask.sum()} / {len(mask)} proteins passed significance in groups {group}")
+
+        else:
+            for g in group_list:
+                col = f"Significant In: {g}"
+                mask &= var[col]
+
+            if verbose:
+                print(f"{format_log_prefix('user')} Filtering [Significant|File-mode]: {mask.sum()} / {len(mask)} proteins passed significance in all files {group}")
+
+        # Apply filtering
+        filtered = self.copy() if return_copy else self
+        filtered.prot = adata[:, mask]
+
+        # Sync peptides and RS
+        if filtered.pep is not None and filtered.rs is not None:
+            proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names = filtered._filter_sync_peptides_to_proteins(
+                original=self, updated_prot=filtered.prot, debug=verbose
+            )
+            filtered._apply_rs_filter(
+                keep_proteins=proteins_to_keep,
+                keep_peptides=peptides_to_keep,
+                orig_prot_names=orig_prot_names,
+                orig_pep_names=orig_pep_names,
+                debug=verbose
+            )
+
+        filtered.update_summary(recompute=True)
+        filtered._append_history(
+            f"Filtered by significance (FDR < {fdr_threshold}) in group(s): {group}, "
+            f"using min_ratio={min_ratio} / min_count={min_count}"
+        )
 
         return filtered if return_copy else None
 
@@ -1151,3 +1273,110 @@ class FilterMixin:
             f"{format_log_prefix('user')} Annotated features: 'found in' class combinations {classes} using threshold {threshold}."
         )
 
+    def annotate_significant(self, classes=None, on='protein', fdr_threshold=0.01):
+        """
+        Add group-level 'Significant In' annotations for proteins or peptides.
+
+        This method computes significance flags (e.g., X_qval < threshold) across groups 
+        of samples and stores them in `.prot.var` or `.pep.var` as new boolean columns.
+
+        DIA-NN: protein X_qval originates from PG.Q.Value, peptide X_qval originates from Q.Value.
+
+        Args:
+            classes (str or list of str, optional): Sample-level grouping column(s) for group-based annotations.
+            fdr_threshold (float): Significance threshold (default 0.01).
+            on (str): Level to annotate ('protein' or 'peptide').
+
+        Returns:
+            None
+
+        Example:
+            Annotate proteins by group using sample-level metadata:
+
+                >>> pdata.annotate_significant(classes="celltype", on="protein", fdr_threshold=0.01)
+        """
+        if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
+            return
+
+        adata = self.prot if on == 'protein' else self.pep
+        var = adata.var
+
+        # Check if significance layer exists
+        sig_layer = 'X_qval'
+        if sig_layer not in adata.layers:
+            raise ValueError(f"Layer '{sig_layer}' not found in {on}.layers. Unable to annotate significant features.")
+
+        data = pd.DataFrame(
+            adata.layers[sig_layer].toarray() if hasattr(adata.layers[sig_layer], 'toarray') else adata.layers[sig_layer],
+            index=adata.obs_names,
+            columns=adata.var_names).T  # shape: features × samples
+        
+        # Group-level summary
+        metrics_key = f"significance_metrics_{on}"
+        metrics_df = adata.uns.get(metrics_key, pd.DataFrame(index=adata.var_names))
+
+        if classes is not None:
+            classes_list = utils.get_classlist(adata, classes=classes)
+
+            for class_value in classes_list:
+                class_data = utils.resolve_class_filter(adata, classes, class_value)
+                class_samples = class_data.obs_names
+
+                if len(class_samples) == 0:
+                    continue
+
+                sub_df = data[class_samples]
+                count = (sub_df < fdr_threshold).sum(axis=1)
+                ratio = count / len(class_samples)
+
+                var[f"Significant In: {class_value}"] = (sub_df < fdr_threshold).any(axis=1)
+                var[f"Significant In: {class_value} ratio"] = count.astype(str) + "/" + str(len(class_samples))
+
+                metrics_df[(class_value, "count")] = count
+                metrics_df[(class_value, "ratio")] = ratio
+
+            metrics_df.columns = pd.MultiIndex.from_tuples(metrics_df.columns)
+            metrics_df = metrics_df.sort_index(axis=1)
+            adata.uns[metrics_key] = metrics_df
+
+        self._history.append(  # type: ignore[attr-defined]
+            f"{on}: Annotated significance across classes {classes} using FDR threshold {fdr_threshold}."
+        )
+        print(
+            f"{format_log_prefix('user')} Annotated significant features by group: {classes} using FDR threshold {fdr_threshold}."
+        )
+
+    def _annotate_significant_samples(self, fdr_threshold=0.01):
+        """
+        Annotate proteins and peptides with per-sample 'Significant In' flags.
+
+        For each sample, this method adds boolean indicators to `.prot.var` and `.pep.var`
+        indicating whether the feature is significantly detected (i.e. FDR < threshold).
+
+        Args:
+            fdr_threshold (float): FDR threshold for significance (default: 0.01).
+
+        Returns:
+            None
+
+        Note:
+            This is an internal helper used to support downstream grouping-based annotation.
+            Adds new columns to `.var` of the form: `'Significant In: <sample>' → bool`.
+        """
+        for level in ['prot', 'pep']:
+            adata = getattr(self, level)
+            if adata is None:
+                continue
+
+            sig_layer = 'X_qval'
+            if sig_layer not in adata.layers:
+                continue  # Skip if significance data not available
+
+            data = pd.DataFrame(
+                adata.layers[sig_layer].toarray() if hasattr(adata.layers[sig_layer], 'toarray') else adata.layers[sig_layer],
+                index=adata.obs_names,
+                columns=adata.var_names).T  # features × samples
+
+            significant = data < fdr_threshold
+            for sample in data.columns:
+                adata.var[f"Significant In: {sample}"] = significant[sample]
