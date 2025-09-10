@@ -15,6 +15,7 @@ theme:
     - content.footnote.tooltips
     - content.code.copy
     - content.code.select
+    - search.highlight
   palette:
     # Dark Mode
     - scheme: slate
@@ -80,11 +81,18 @@ nav:
       - Changelog: changelog.md
       # - Credits: credits.md
       # - License: license.md
-  # - Getting started:
-      # - Installation: installation.md
-      # - Quickstart: quickstart.md
+  - Getting started:
+      - Installation: installation.md
+      - Quickstart: quickstart.md
   - Usage:
-      - Tutorial: code-examples.md
+      - Tutorials:
+          - Overview: tutorials/index.md
+          - Importing Data: tutorials/importing.md
+          - Filtering + Normalization: tutorials/filtering.md
+          - Imputation: tutorials/imputation.md
+          - Plotting: tutorials/plotting.md
+          - Differential Expression: tutorials/de.md
+          - Enrichment + Networks: tutorials/enrichment.md
       - Admonitions: admonitions.md
       - Content-Tabs: content-tabs.md
       - Diagram: diagram.md
@@ -96,6 +104,7 @@ nav:
           - Metadata + Summary: reference/metadata_mixins.md
           - Editing + Filtering: reference/editing_mixins.md
           - Analysis + Enrichment: reference/analysis_mixins.md
+          - Identifiers and String: reference/identifier_mixins.md
           - Hidden Functions: reference/hidden_functions.md
 
   - Author's website: https://gnaprs.github.io/
