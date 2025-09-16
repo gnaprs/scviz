@@ -7,17 +7,17 @@ tags:
   - bioinformatics
 authors:
   - name: Marion Pang
-    orcid: 0000-0000-0000-0000
+    orcid: 0000-0002-0158-2976
     corresponding: true
     affiliation: 1 # (Multiple affiliations must be quoted)
   - name: Baiyi Quan
-    orcid: 0000-0000-0000-0000
+    orcid: 0000-0001-6313-4274
     affiliation: 2
   - name: Ting-Yu Wang
-    orcid: 0000-0000-0000-0000
+    orcid: 0000-0002-9014-6825
     affiliation: 2
   - name: Tsui-Fen Chou
-    orcid: 0000-0000-0000-0000
+    orcid: 0000-0003-2410-2186
     corresponding: true
     affiliation: "1, 2"
 affiliations:
@@ -37,7 +37,7 @@ Single-cell proteomics extends these approaches to resolve protein expression at
 
 
 # Statement of need
-Although general-purpose data analysis frameworks such as `scanpy` [@SCANPY:2018] and the broader `scverse` ecosystem have become indispensable for single-cell transcriptomics, comparable tools for proteomics remain limited. Existing proteomics software often focuses on specialized tasks (e.g., peptide identification or spectrum assignment) and does not provide a unified framework for downstream analysis of peptide- and protein-level data within single-cell and spatial contexts. `scviz` is designed to address these gaps by offering an integrated system for the complete proteomics workflow, from raw peptide-level evidence to protein-level summaries and biological interpretation. The package is intended for computational biologists and proteomics researchers working with low-input or single-cell datasets. The package is designed to support the complete analysis pipeline, extending from raw peptide-level data → protein-level summaries → biological interpretation (e.g., differential expression, enrichment analysis, network analysis). 
+Although general-purpose data analysis frameworks such as `scanpy` [@SCANPY:2018] and the broader `scverse` ecosystem have become indispensable for single-cell transcriptomics, comparable tools for proteomics remain limited. Existing proteomics software often focuses on specialized tasks (e.g., peptide identification or spectrum assignment) and does not provide a unified framework for downstream analysis of peptide- and protein-level data within single-cell and spatial contexts. `scviz` is designed to address these gaps by offering an integrated system for the complete proteomics workflow, from raw peptide-level evidence to protein-level summaries and biological interpretation. The package is intended for computational biologists and proteomics researchers working with low-input or single-cell datasets. The package is designed to support the complete analysis pipeline, extending from raw peptide-level data to protein-level summaries, and biological interpretation (e.g., differential expression, enrichment analysis, network analysis). 
 
 At the core of scviz is the `pAnnData` class, an `AnnData`-affiliated data structure specialized for proteomics. It organizes peptide (`.pep`) and protein (`.prot`) `AnnData` objects together with supporting attributes such as `.summary`, `.metadata`, `.rs` matrices (protein–peptide relationships), and `.stats`. This design allows users to move flexibly between peptide- and protein-level perspectives, while preserving compatibility with established Python libraries for data science and visualization.
 
@@ -47,20 +47,12 @@ The design philosophy of `scviz` emphasizes both usability and extensibility. Ge
 
 The applications of `scviz` span diverse areas of life sciences research, from studying protein dynamics and signaling pathways in disease models to integrating proteomics with transcriptomics for multi-omics analysis. By bridging the gap between raw mass spectrometry data and systems-level interpretation, scviz provides a versatile and reproducible platform for advancing single-cell and spatial proteomics.
 
-# Citations
+# Acknowledgements
 
-Citations to entries in paper.bib should be in
-[rMarkdown](http://rmarkdown.rstudio.com/authoring_bibliographies_and_citations.html)
-format.
+We acknowledge contributions from Pierre Walker, and support from the A*STAR Scholarship (BS-PhD) during the genesis of this project.
 
 If you want to cite a software repository URL (e.g. something on GitHub without a preferred
 citation) then you can do it with the example BibTeX entry below for @fidgit.
-For a quick reference, the following citation commands can be used:
-- `@author:2001`  ->  "Author et al. (2001)"
-- `[@author:2001]` -> "(Author et al., 2001)"
-- `[@author1:2001; @author2:2001]` -> "(Author1 et al., 2001; Author2 et al., 2002)"
-
-# Figures
 
 Figures can be included like this:
 ![Caption for example figure.\label{fig:example}](figure.png)
@@ -69,8 +61,5 @@ and referenced from text using \autoref{fig:example}.
 Figure sizes can be customized by adding an optional second parameter:
 ![Caption for example figure.](figure.png){ width=20% }
 
-# Acknowledgements
-
-We acknowledge contributions from Pierre Walker, and support from the A*STAR Scholarship (BS-PhD) during the genesis of this project.
 
 # References
