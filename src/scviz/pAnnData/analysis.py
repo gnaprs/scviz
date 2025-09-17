@@ -832,23 +832,25 @@ class AnalysisMixin:
         """ 
         Normalize the data across samples (globally or within groups).
 
-        Parameters:
-        - classes (str or list): Sample-level class/grouping column(s) in .obs.
-        - layer (str): Data layer to normalize from (default='X').
-        - method (str): Normalization method. Options: 'sum', 'median', 'mean', 'max', 'reference_feature', 'robust_scale', 'quantile_transform'.
-        - on (str): 'protein' or 'peptide'.
-        - set_X (bool): Whether to set .X to the normalized result.
-        - force (bool): Whether to force normalization even with bad rows.
-        - use_nonmissing (bool): If True, only use columns with no missing values across all samples when computing scaling factors.
-        - **kwargs: Additional arguments for normalization methods.
-            (e.g., reference_columns for 'reference_feature', n_neighbors for 'knn').
-            max_missing_fraction: Maximum fraction of missing values allowed in a row. Default is 0.5.
-
+        Args:
+            classes (str or list): Sample-level class/grouping column(s) in .obs.
+            layer (str): Data layer to normalize from (default='X').
+            method (str): Normalization method. Options: 
+                'sum', 'median', 'mean', 'max', 'reference_feature', 
+                'robust_scale', 'quantile_transform', 'directlfq'
+            on (str): 'protein' or 'peptide'.
+            set_X (bool): Whether to set .X to the normalized result.
+            force (bool): Whether to force normalization even with bad rows.
+            use_nonmissing (bool): If True, only use columns with no missing values across all samples when computing scaling factors.
+            **kwargs: Additional arguments for normalization methods.
+                (e.g., reference_columns for 'reference_feature', n_neighbors for 'knn').
+                * max_missing_fraction: Maximum fraction of missing values allowed in a row. Default is 0.5.
+                * input_type_to_use: For 'directlfq', specify whether pAnnData or diann input. If diann input, use either 'diann_precursor_ms1_and_ms2' or 'diann_precursor_ms1'.
+                * path: For 'directlfq', if using diann input, specify path to report.tsv or report.parquet file.
         """
         
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             return
-
 
         adata = self.prot if on == 'protein' else self.pep
         if layer != "X" and layer not in adata.layers:
@@ -860,11 +862,34 @@ class AnalysisMixin:
         original_data = normalize_data.copy()
 
         layer_name = 'X_norm_' + method
-        normalize_funcs = ['sum', 'median', 'mean', 'max', 'reference_feature', 'robust_scale', 'quantile_transform']
+        normalize_funcs = ['sum', 'median', 'mean', 'max', 'reference_feature', 'robust_scale', 'quantile_transform','directlfq']
 
         if method not in normalize_funcs:
             raise ValueError(f"Unsupported normalization method: {method}")
 
+        # Special handling for directlfq
+        if method == "directlfq":
+            if classes is not None:
+                print(f"{format_log_prefix('warn')} 'directlfq' does not support group-wise normalization. Proceeding with global normalization.")
+                classes = None
+
+            print(f"{format_log_prefix('user')} Running directlfq normalization on peptide-level data.")
+            print(f"{format_log_prefix('info_only', indent=2)} Note: please be patient, directlfq can take a minute to run depending on data size. Output files will be produced.")
+            normalize_data = self._normalize_helper_directlfq(**kwargs)
+
+            adata = self.prot  # directlfq always outputs protein-level intensities
+            adata.layers[layer_name] = sparse.csr_matrix(normalize_data) if was_sparse else normalize_data
+
+            if set_X:
+                self.set_X(layer=layer_name, on="protein")  # type: ignore[attr-defined]
+
+            self._history.append(  # type: ignore[attr-defined]
+                f"protein: Normalized layer using directlfq (input_type={kwargs.get('input_type_to_use', 'default')}). Stored in `{layer_name}`."
+            )
+            print(f"{format_log_prefix('result_only', indent=2)} directlfq normalization complete. Results are stored in layer '{layer_name}'.")
+            return
+    
+        # --- standard normalization ---
         # Build the header message early
         if classes is None:
             msg = f"{format_log_prefix('user')} Global normalization using '{method}'"
@@ -1037,7 +1062,67 @@ class AnalysisMixin:
             raise ValueError(f"Unknown method: {method}")
 
         return data_norm
-    
+
+    def _normalize_helper_directlfq(self, input_type_to_use="pAnnData", path=None, **kwargs):
+        """
+        Run directlfq normalization and return normalized protein-level intensities.
+
+        Args:
+            input_type_to_use (str): Either 'pAnnData' (default) or 
+                'diann_precursor_ms1_and_ms2'.
+            path (str, optional): Path to DIA-NN report file (required if 
+                input_type_to_use='diann_precursor_ms1_and_ms2').
+            **kwargs: Passed to directlfq.lfq_manager.run_lfq().
+
+        Returns:
+            np.ndarray: Normalized data (samples × proteins).
+        """
+        import directlfq.lfq_manager as lfq_manager
+        import os
+
+        if input_type_to_use == "diann_precursor_ms1_and_ms2":
+            if path is None:
+                raise ValueError("For input_type_to_use='diann_precursor_ms1_and_ms2', please provide the DIA-NN report path via `path`.")
+            lfq_manager.run_lfq(path, input_type_to_use=input_type_to_use, **kwargs)
+
+        else:
+            # check if pep exists
+            if self.pep is None:
+                raise ValueError("Peptide-level data not found. Please load peptide data before running directlfq normalization.")
+            
+            # Build peptide-level input table from .pep
+            X = self.pep.layers.get("X_precursor", self.pep.X)
+            if not isinstance(X, pd.DataFrame):
+                X = X.toarray() if hasattr(X, "toarray") else X
+            X_df = pd.DataFrame(
+                X.T,
+                index=self.pep.var_names,
+                columns=self.pep.obs_names
+            )
+            prot_col = "Protein.Group" if "Protein.Group" in self.pep.var.columns else "Master Protein Accessions"
+            X_df.insert(0, "protein", self.pep.var[prot_col].to_list())
+            X_df.insert(1, "ion", X_df.index.to_list())
+            X_df.reset_index(drop=True, inplace=True)
+            tmp_file = "peptide_matrix.aq_reformat.tsv"
+            X_df.to_csv(tmp_file, sep="\t", index=False)
+            lfq_manager.run_lfq(tmp_file, **kwargs)
+
+        # Load directlfq output (look for protein_intensities file)
+        out_file = None
+        for f in os.listdir("."):
+            if f.endswith("protein_intensities.tsv"):
+                out_file = f
+        if out_file is None:
+            raise FileNotFoundError("directlfq did not produce a '*protein_intensities.tsv' file in current directory.")
+
+        norm_prot = pd.read_csv(out_file, sep="\t").set_index("protein")
+        aligned = norm_prot.reindex(
+            index=self.prot.var_names,
+            columns=self.prot.obs_names
+        ).fillna(0)
+
+        return aligned.T.to_numpy()
+
     def clean_X(self, on='prot', inplace=True, set_to=0, layer=None, to_sparse=False, backup_layer="X_preclean", verbose=True):
         """
         Replace NaNs in `.X` or a specified layer with a given value (default: 0).
