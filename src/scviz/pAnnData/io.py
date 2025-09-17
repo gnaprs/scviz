@@ -329,7 +329,7 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
             if 'PG.Quantity' not in report_all.columns:
                 raise ValueError("Reports generated with DIA-NN version >2.0 do not contain PG.Quantity values, please use PG.MaxLFQ .")
         else:
-            print(f"{format_log_prefix('info')} Protein value specified is not PG.MaxLFQ, please check if correct.")
+            print(f"{format_log_prefix('info')} Protein value specified is not PG.MaxLFQ nor PG.Quantity, please check if correct.")
     prot_X_pivot = report_all.pivot_table(index='Master.Protein', columns='Run', values=prot_value, aggfunc='first', sort=False)
     prot_X = sparse.csr_matrix(prot_X_pivot.values).T
     # prot_var_names: protein names
@@ -383,8 +383,15 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
     existing_pep_var_columns = [col for col in pep_var_columns if col in report_all.columns]
     missing_columns = set(pep_var_columns) - set(existing_pep_var_columns)
 
+    # Precursor.Quantity layer (if using directLFQ for nomalization)
+    if 'Precursor.Quantity' in report_all.columns:
+        precursor_q_pivot = report_all.pivot_table(index='Precursor.Id', columns='Run', values='Precursor.Quantity', aggfunc='first', sort=False)
+        precursor_q_layer = sparse.csr_matrix(precursor_q_pivot.values).T
+    else:
+        precursor_q_layer = None
+
     if missing_columns:
-        warnings.warn(
+        print(
             f"{format_log_prefix('warn')} The following columns are missing: {', '.join(missing_columns)}. "
             "Consider running analysis in the newer version of DIA-NN (1.8.1). "
             "Peptide-protein mapping may differ."
@@ -433,6 +440,7 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
         obs_columns=obs_columns,
         X_qval_prot=prot_pgq_layer,
         X_qval_pep=pep_q_layer,
+        X_precursor_pep=precursor_q_layer,
         metadata={
             "source": "diann",
             "file": report_file,
@@ -453,6 +461,7 @@ def _create_pAnnData_from_parts(
     X_mbr_pep=None,
     X_qval_prot=None,
     X_qval_pep=None,
+    X_precursor_pep=None,
     found_threshold=0,
     fdr_threshold=0.01,
     metadata=None,
@@ -481,6 +490,9 @@ def _create_pAnnData_from_parts(
         obs_columns (list of str, optional): Columns from filenames to include in `.summary` and `.obs`.
         X_mbr_prot (np.ndarray or DataFrame, optional): Optional protein-level MBR identification info.
         X_mbr_pep (np.ndarray or DataFrame, optional): Optional peptide-level MBR identification info.
+        X_qval_prot (np.ndarray or DataFrame, optional): Optional protein-level Q-value info.
+        X_qval_pep (np.ndarray or DataFrame, optional): Optional peptide-level Q-value info.
+        X_precursor_pep (np.ndarray or DataFrame, optional): Optional peptide-level precursor quantity info. (for directLFQ normalization)
         metadata (dict, optional): Optional dictionary of import metadata (e.g. `{'source': 'diann'}`).
         history_msg (str): Operation description to append to the history log.
 
@@ -523,6 +535,8 @@ def _create_pAnnData_from_parts(
             pdata.pep.layers['X_mbr'] = X_mbr_pep # type: ignore[attr-defined]
         if X_qval_pep is not None:
             pdata.pep.layers['X_qval'] = X_qval_pep # type: ignore[attr-defined]
+        if X_precursor_pep is not None:
+            pdata.pep.layers['X_precursor'] = X_precursor_pep # type: ignore[attr-defined]
 
     # --- Metadata ---
     metadata = metadata or {}
