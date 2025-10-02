@@ -480,7 +480,7 @@ class EnrichmentMixin:
         else:
             raise ValueError("Must provide 'genes' or set from_de=True to use DE results.") 
 
-    def enrichment_ppi(self, genes, species=None, store_key=None):
+    def enrichment_ppi(self, genes, species=None, store_key=None, debug=False):
         """
         Run STRING PPI (protein–protein interaction) enrichment on a user-supplied gene or accession list.
 
@@ -859,3 +859,10 @@ def _resolve_de_key(stats_dict, user_key, debug=False):
             f"'{full_user_key}' not found in stats.\n"
             f"Available DE keys:\n{pretty_keys}"
         )
+
+# --- re-export methods to top level for testing convenience ---
+def enrichment_functional(pdata, *args, **kwargs):
+    return EnrichmentMixin.enrichment_functional(pdata, *args, **kwargs)
+
+def enrichment_ppi(pdata, *args, **kwargs):
+    return EnrichmentMixin.enrichment_ppi(pdata, *args, **kwargs)
