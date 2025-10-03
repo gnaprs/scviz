@@ -41,12 +41,14 @@ class EditingMixin:
 
         Example:
             Set the protein matrix `.X` to the "normalized" layer:
-
-                >>> pdata.set_X(layer="normalized", on="protein")
+                ```python
+                pdata.set_X(layer="normalized", on="protein")
+                ```
 
             Set the peptide matrix `.X` to the "imputed" layer:
-
-                >>> pdata.set_X(layer="imputed", on="peptide")
+                ```python
+                pdata.set_X(layer="imputed", on="peptide")
+                ```
         """
         # defines which layer to set X to
         if not self._check_data(on): # type: ignore[attr-defined]
@@ -86,18 +88,20 @@ class EditingMixin:
 
         Example:
             Extract abundance values for selected proteins, grouped by sample-level metadata:
-
-                >>> df_abund = pdata.get_abundance(
-                ...     namelist=["UBE4B", "GAPDH"],
-                ...     on="protein",
-                ...     classes=["treatment", "cellline"]
-                ... )
+                ```python
+                df_abund = pdata.get_abundance(
+                    namelist=["UBE4B", "GAPDH"],
+                    on="protein",
+                    classes=["treatment", "cellline"]
+                )
+                ```
 
         Note:
-            This method is also available as a utility function:
-
-                >>> from scutils import get_abundance
-                >>> df_abund = get_abundance(pdata, namelist=["UBE4B", "GAPDH"], on="protein", classes=["treatment", "cellline"])
+            This method is also available as a utility function in utils, for `AnnData` or `pAnnData` objects:
+                ```python
+                from scutils import get_abundance
+                df_abund = get_abundance(pdata, namelist=["UBE4B", "GAPDH"], on="protein", classes=["treatment", "cellline"])
+                ```
         """
 
         gene_to_acc, _ = self.get_gene_maps(on='protein' if on == 'peptide' else on) # type: ignore[attr-defined]

@@ -2,8 +2,28 @@ import pandas as pd
 
 class TrackedDataFrame(pd.DataFrame):
     """
-    A subclass of DataFrame that marks its parent pAnnData object as 'stale'
-    when it's modified directly.
+    A subclass of :class:`pandas.DataFrame` that integrates with a parent 
+    :class:`pAnnData` object to track when derived tables (e.g., `.summary`) 
+    have been modified outside the canonical workflow.
+
+    Any in-place modifications automatically mark the parent object as "stale"
+    using the provided callback (`mark_stale_fn`). This ensures downstream
+    code can detect unsynchronized changes and prompt recomputation if needed.
+
+    Attributes:
+        _parent (pAnnData): The parent object associated with this DataFrame.
+        _mark_stale_fn (callable): Function called when the DataFrame is modified.
+        _raw_loc, _raw_iloc: Direct accessors for untracked indexing (safe use).
+
+    !!! warning "Internal Utility"
+        `TrackedDataFrame` is primarily intended for internal use within `pAnnData`.  
+        Direct use in analysis code is not recommended, as stale-tracking may
+        interfere with expected pandas behaviors.
+
+    !!! tip
+        Use `.raw_loc` and `.raw_iloc` to bypass stale-marking when read-only
+        access is explicitly desired.
+
     """
     _metadata = ["_parent", "_mark_stale_fn"]
 
@@ -30,6 +50,12 @@ class TrackedDataFrame(pd.DataFrame):
         return base + stale_msg
 
     def _mark_stale(self):
+        """
+        Mark the parent pAnnData object as stale.
+
+        Called internally before any modifying operations (e.g. `__setitem__`,
+        `drop`, `assign`). Triggers the parent’s `_mark_stale_fn` if provided.
+        """
         if self._mark_stale_fn is not None:
             self._mark_stale_fn()
 

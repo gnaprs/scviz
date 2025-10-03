@@ -46,9 +46,11 @@ class ValidationMixin:
 
         Example:
             To validate the pAnnData object and check for consistency issues:
-                >>> is_valid = pdata.validate()
-                >>> if not is_valid:
-                ...     print("Fix issues before proceeding.")
+                ```python
+                is_valid = pdata.validate()
+                if not is_valid:
+                    print("Fix issues before proceeding.")
+                ```
         """
         issues = []
 

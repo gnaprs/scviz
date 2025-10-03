@@ -146,29 +146,32 @@ class IdentifierMixin:
 
         Example:
             Add new gene-to-accession mappings (protein):
-
-                >>> pdata.update_identifier_maps(
-                ...     {'MYGENE1': 'P00001', 'MYGENE2': 'P00002'},
-                ...     on='protein',
-                ...     direction='forward'
-                ... )
+                ```python
+                pdata.update_identifier_maps(
+                    {'MYGENE1': 'P00001', 'MYGENE2': 'P00002'},
+                    on='protein',
+                    direction='forward'
+                )
+                ```
 
             Add peptide → protein mappings:
-
-                >>> pdata.update_identifier_maps(
-                ...     {'PEPTIDE_ABC': 'P12345'},
-                ...     on='peptide',
-                ...     direction='reverse'
-                ... )
+                ```python
+                pdata.update_identifier_maps(
+                    {'PEPTIDE_ABC': 'P12345'},
+                    on='peptide',
+                    direction='reverse'
+                )
+                ```
 
             Overwrite a protein → gene mapping:
-
-                >>> pdata.update_identifier_maps(
-                ...     {'P12345': 'NEWGENE'},
-                ...     on='protein',
-                ...     direction='reverse',
-                ...     overwrite=True
-                ... )
+                ```python
+                pdata.update_identifier_maps(
+                    {'P12345': 'NEWGENE'},
+                    on='protein',
+                    direction='reverse',
+                    overwrite=True
+                )
+                ```
 
         """
         if on == 'protein':
@@ -275,8 +278,9 @@ class IdentifierMixin:
 
         Example:
             Automatically fill missing gene names using UniProt:
-
-                >>> pdata.update_missing_genes()
+                ```python
+                pdata.update_missing_genes()
+                ```
         """
         var = self.prot.var
 
@@ -346,8 +350,10 @@ class IdentifierMixin:
             pd.DataFrame: Filtered dataframe with a `Matched` column (True/False) and optionally match columns per term.
 
         Example:
-            >>> pdata.search_annotations("keratin")
-            >>> pdata.search_annotations(["keratin", "cytoskeleton"], on="peptide", case=False)
+            ```python
+            pdata.search_annotations("keratin")
+            pdata.search_annotations(["keratin", "cytoskeleton"], on="peptide", case=False)
+            ```
         """
         import pandas as pd
 

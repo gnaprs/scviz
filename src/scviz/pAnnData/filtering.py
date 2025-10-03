@@ -1,3 +1,4 @@
+from tkinter import N
 import numpy as np
 import pandas as pd
 from scviz import utils
@@ -54,26 +55,30 @@ class FilterMixin:
             pAnnData (pAnnData): Returns a filtered pAnnData object if `return_copy=True`. 
             None (None): Otherwise, modifies in-place and returns None.
 
-        Example:
+        Examples:
             Filter by metadata condition:
-
-                >>> condition = "Protein FDR Confidence: Combined == 'High'"
-                >>> pdata.filter_prot(condition=condition)
+                ```python
+                condition = "Protein FDR Confidence: Combined == 'High'"
+                pdata.filter_prot(condition=condition)
+                ```
 
             Substring match on protein description:
-
-                >>> condition = "Description includes 'p97'"
-                >>> pdata.filter_prot(condition=condition)
+                ```python
+                condition = "Description includes 'p97'"
+                pdata.filter_prot(condition=condition)
+                ```
 
             Numerical condition on metadata:
-
-                >>> condition = "Score > 0.75"
-                >>> pdata.filter_prot(condition=condition)
+                ```python
+                condition = "Score > 0.75"
+                pdata.filter_prot(condition=condition)
+                ```
 
             Filter by specific protein accessions:
-
-                >>> accessions = ['GAPDH', 'P53']
-                >>> pdata.filter_prot(accessions=accessions)
+                ```python
+                accessions = ['GAPDH', 'P53']
+                pdata.filter_prot(accessions=accessions)
+                ```
         """
 
         if not self._check_data('protein'): # type: ignore[attr-defined]
@@ -192,14 +197,22 @@ class FilterMixin:
         Returns:
             pAnnData: A filtered pAnnData object if `return_copy=True`; otherwise, modifies in place and returns None.
 
-        Example:
+        Examples:
             Filter proteins found in both "groupA" and "groupB" groups, in at least 2 samples each:
-
-                >>> pdata.filter_prot_found(group=["groupA", "groupB"], min_count=2)
+                ```python
+                pdata.filter_prot_found(group=["groupA", "groupB"], min_count=2)
+                ```
 
             Filter proteins found in all three input files:
+                ```python
+                pdata.filter_prot_found(group=["F1", "F2", "F3"])
+                ```
 
-                >>> pdata.filter_prot_found(group=["F1", "F2", "F3"])
+            Filter proteins found in files of a specific sub-group:
+                ```python
+                pdata.annotate_found(classes=['group','treatment'])
+                pdata.filter_prot_found(group=["groupA_control", "groupB_treated"])
+                ```
         """
         if not self._check_data(on): # type: ignore[attr-defined]
             return
@@ -354,7 +367,7 @@ class FilterMixin:
 
         return filtered if return_copy else None
 
-    def filter_prot_significant(self, group, min_ratio=None, min_count=None, fdr_threshold=0.01, return_copy=True, verbose=True):
+    def filter_prot_significant(self, group=None, min_ratio=None, min_count=None, fdr_threshold=0.01, return_copy=True, verbose=True, match_any=True):
         """
         Filter proteins based on significance across samples or groups using FDR thresholds.
 
@@ -362,16 +375,34 @@ class FilterMixin:
         in a minimum number or proportion of samples, either per file or grouped.
 
         Args:
-            group (str or list of str): Run names (e.g., filenames) or class values to evaluate.
+            group (str, list, or None): Group name(s) (e.g., sample classes or filenames). If None, uses all files.
             min_ratio (float, optional): Minimum proportion of samples to be significant.
             min_count (int, optional): Minimum number of samples to be significant.
             fdr_threshold (float): Significance threshold (default = 0.01).
             return_copy (bool): Whether to return a filtered copy or modify in-place.
             verbose (bool): Whether to print summary.
-
+            match_any (bool): If True, retain proteins significant in *any* group/file (OR logic). If False, require *all* groups/files to be significant (AND logic).
+            
         Returns:
             pAnnData or None: Filtered object (if `return_copy=True`) or modifies in-place.
-        
+
+        Examples:
+            Filter proteins significant in both "groupA" and "groupB" groups, FDR of 0.01 (default):
+                ```python
+                pdata.filter_prot_significant(group=["groupA", "groupB"], min_count=2)
+                ```
+
+            Filter proteins significant in all three input files:
+                ```
+                pdata.filter_prot_significant(group=["F1", "F2", "F3"])
+                ```
+
+            Filter proteins significant in files of a specific sub-group:
+                ```python
+                pdata.annotate_significant(classes=['group','treatment'])
+                pdata.filter_prot_significant(group=["groupA_control", "groupB_treated"])            
+                ```
+                    
         Todo:
             Implement peptide then protein filter
         """
@@ -381,20 +412,72 @@ class FilterMixin:
         adata = self.prot 
         var = adata.var
 
-        group_list = [group] if isinstance(group, str) else group
+        no_group_msg = None
+        auto_group_msg = None
+        auto_value_msg = None
 
-        # Auto-run annotation if missing
+        # Default to using sample names if no group provided
+        if group is None:
+            group_list = list(adata.obs_names)
+            if verbose:
+                no_group_msg = f"{format_log_prefix('info', 2)} No group provided. Defaulting to sample-level significance filtering."
+        else:
+            group_list = [group] if isinstance(group, str) else group
+            
+
+        # Ensure annotations exist or auto-generate
         missing_cols = [f"Significant In: {g}" for g in group_list]
-        if not all(col in var.columns for col in missing_cols):
-            self.annotate_significant(classes=group_list, fdr_threshold=fdr_threshold, on="protein")
+        if all(col in var.columns for col in missing_cols):
+            # Case A: user passed actual group values, already annotated
+            pass
+        else:
+            # Case B: need to resolve automatically
+            if all(g in adata.obs.columns for g in group_list):
+                # User passed obs column(s)
+                if len(group_list) == 1:
+                    obs_col = group_list[0]
+                    expanded_groups = adata.obs[obs_col].unique().tolist()
+                else:
+                    expanded_groups = (
+                        adata.obs[group_list].astype(str)
+                            .agg("_".join, axis=1)
+                            .unique()
+                            .tolist()
+                    )
+                self.annotate_significant(classes=group_list,
+                                        fdr_threshold=fdr_threshold,
+                                        on="protein", verbose=False)
+                group_list = expanded_groups
+                auto_group_msg = f"{format_log_prefix('info', 2)} Found matching obs column '{group_list}'. Automatically annotating significance by group: {group_list} using FDR threshold {fdr_threshold}."
+
+            else:
+                # User passed group values, but not annotated yet
+                found_obs_col = None
+                for obs_col in adata.obs.columns:
+                    if set(group_list).issubset(set(adata.obs[obs_col].unique())):
+                        found_obs_col = obs_col
+                        break
+
+                if found_obs_col is not None:
+                    # annotation_msg = f"{format_log_prefix('user')} Annotated significant features by group: {group_list} using FDR threshold {fdr_threshold}."
+                    self.annotate_significant(classes=[found_obs_col],
+                                            fdr_threshold=fdr_threshold,
+                                            on="protein", indent=2, verbose=False)
+                    auto_value_msg = (f"{format_log_prefix('info', 2)} Found matching obs column '{found_obs_col}'"
+                    f"for groups {group_list}. Automatically annotating significant features by group {found_obs_col} "
+                    f"using FDR threshold {fdr_threshold}.")    
+                else:
+                    raise ValueError(
+                        f"Could not find existing significance annotations for groups {group_list}. "
+                        "Please either pass valid obs column(s), provide values from a valid `.obs` column or run `annotate_significant()` first."
+                    )
 
         # Mode detection: group vs file
         metrics_key = "significance_metrics_protein"
         metrics_df = adata.uns.get(metrics_key, pd.DataFrame())
 
         is_group_mode = all((g, "count") in metrics_df.columns for g in group_list)
-
-        mask = np.ones(len(var), dtype=bool)
+        mask = np.zeros(len(var), dtype=bool) if match_any else np.ones(len(var), dtype=bool)
 
         if is_group_mode:
             if min_ratio is None and min_count is None:
@@ -407,18 +490,19 @@ class FilterMixin:
                     this_mask = ratio >= min_ratio
                 else:
                     this_mask = count >= min_count
-                mask &= this_mask
-
-            if verbose:
-                print(f"{format_log_prefix('user')} Filtering [Significant|Group-mode]: {mask.sum()} / {len(mask)} proteins passed significance in groups {group}")
-
+                
+                if match_any:
+                    mask |= this_mask
+                else:
+                    mask &= this_mask
         else:
             for g in group_list:
                 col = f"Significant In: {g}"
-                mask &= var[col]
-
-            if verbose:
-                print(f"{format_log_prefix('user')} Filtering [Significant|File-mode]: {mask.sum()} / {len(mask)} proteins passed significance in all files {group}")
+                this_mask = var[col].values
+                if match_any:
+                    mask |= this_mask
+                else:
+                    mask &= this_mask
 
         # Apply filtering
         filtered = self.copy() if return_copy else self
@@ -439,9 +523,50 @@ class FilterMixin:
 
         filtered.update_summary(recompute=True)
         filtered._append_history(
-            f"Filtered by significance (FDR < {fdr_threshold}) in group(s): {group}, "
-            f"using min_ratio={min_ratio} / min_count={min_count}"
+            f"Filtered by significance (FDR < {fdr_threshold}) in group(s): {group_list}, "
+            f"using min_ratio={min_ratio} / min_count={min_count}, match_any={match_any}"
         )
+
+        if verbose:
+            logic = "any" if match_any else "all"
+            mode_str = "Group-mode" if is_group_mode else "File-mode"
+
+            print(f"{format_log_prefix('user')} Filtering proteins by significance [{mode_str}]:")
+
+            if no_group_msg:
+                print(no_group_msg)
+            if auto_group_msg:
+                print(auto_group_msg)
+            if auto_value_msg:
+                print(auto_value_msg)
+
+            return_copy_str = "Returning a copy of" if return_copy else "Filtered and modified"
+            print(f"    {return_copy_str} protein data based on significance thresholds:")
+            print(f"    → Groups requested: {group_list}")
+            print(f"    → FDR threshold: {fdr_threshold}")
+
+            if is_group_mode:
+                # Case A: obs column(s) expanded → show expanded_groups and add note
+                if auto_group_msg:
+                    group_note = f" (all values of obs column(s))"
+                    print(f"    → Groups requested: {group_list}{group_note}")
+                else:
+                    print(f"    → Groups requested: {group_list}")
+                print(f"    → FDR threshold: {fdr_threshold}")
+                if min_ratio is not None:
+                    print(f"    → Minimum ratio: {min_ratio} (match_{logic} = {match_any})")
+                if min_count is not None:
+                    print(f"    → Minimum count: {min_count} (match_{logic} = {match_any})")
+            else:
+                print(f"    → Groups requested: {group_list}")
+                print(f"    → FDR threshold: {fdr_threshold}")
+                print(f"    → Logic: {logic} "
+                    f"(protein must be significant in {'≥1' if match_any else 'all'} file(s))")
+
+            n_kept = int(mask.sum())
+            n_total = len(mask)
+            n_dropped = n_total - n_kept
+            print(f"    → Proteins kept: {n_kept}, Proteins dropped: {n_dropped}")
 
         return filtered if return_copy else None
 
@@ -490,10 +615,10 @@ class FilterMixin:
 
         Args:
             values (dict or list of dict, optional): Categorical metadata filter. Matches rows in `.summary` or `.obs` with those field values.
-                Example: `{'treatment': 'kd', 'cellline': 'A'}`.
+                Examples: `{'treatment': 'kd', 'cellline': 'A'}`.
             exact_cases (bool): If True, uses exact match across all class values when `values` is a list of dicts.
             condition (str, optional): Logical condition string referencing summary columns. This should reference columns in `pdata.summary`.
-                Example: `"protein_count > 1000"`.
+                Examples: `"protein_count > 1000"`.
             file_list (list of str, optional): List of sample names or file identifiers to keep. Filters to only those samples (must match obs_names).
             min_prot (int, optional): Minimum number of proteins required in a sample to retain it.
             return_copy (bool): If True, returns a filtered pAnnData object; otherwise modifies in place.
@@ -506,45 +631,52 @@ class FilterMixin:
         Raises:
             ValueError: If more than one or none of `values`, `condition`, or `file_list` is specified.
 
-        Example:
+        Examples:
             Filter by metadata values:
-
-                >>> pdata.filter_sample(values={'treatment': 'kd', 'cellline': 'A'})
+                ```python
+                pdata.filter_sample(values={'treatment': 'kd', 'cellline': 'A'})
+                ```
 
             Filter with multiple exact matching cases:
-
-                >>> pdata.filter_sample(
-                ...     values=[
-                ...         {'treatment': 'kd', 'cellline': 'A'},
-                ...         {'treatment': 'sc', 'cellline': 'B'}
-                ...     ],
-                ...     exact_cases=True
-                ... )
+                ```python
+                pdata.filter_sample(
+                    values=[
+                        {'treatment': 'kd', 'cellline': 'A'},
+                        {'treatment': 'sc', 'cellline': 'B'}
+                    ],
+                    exact_cases=True
+                )
+                ```
 
             Filter by numeric condition on summary:
-
-                >>> pdata.filter_sample(condition="protein_count > 1000")
+                ```python
+                pdata.filter_sample(condition="protein_count > 1000")
+                ```
 
             Filter samples with fewer than 1000 proteins:
-
-                >>> pdata.filter_sample(min_prot=1000)
+                ```python
+                pdata.filter_sample(min_prot=1000)
+                ```
 
             Keep specific samples by name:
-
-                >>> pdata.filter_sample(file_list=['Sample_001', 'Sample_007'])
+                ```python
+                pdata.filter_sample(file_list=['Sample_001', 'Sample_007'])
+                ```
 
             For advanced usage using query mode, see the note below.
-
+            
             !!! note "Advanced Usage"
                 To enable **advanced filtering**, set `query_mode=True` to evaluate raw pandas-style queries:
 
                 - Query `.obs` metadata:
-
-                    >>> pdata.filter_sample(values="cellline == 'AS' and treatment == 'kd'", query_mode=True)
+                    ```python
+                    pdata.filter_sample(values="cellline == 'AS' and treatment == 'kd'", query_mode=True)
+                    ```
 
                 - Query `.summary` metadata:
-
-                    >>> pdata.filter_sample(condition="protein_count > 1000 and missing_pct < 0.2", query_mode=True)            
+                    ```python
+                    pdata.filter_sample(condition="protein_count > 1000 and missing_pct < 0.2", query_mode=True)
+                    ```            
         """
         # Ensure exactly one of the filter modes is specified
         provided = [values, condition, file_list, min_prot]
@@ -555,7 +687,7 @@ class FilterMixin:
                 "- `condition=...` for summary-level condition filtering, or\n"
                 "- `min_prot=...` to filter by minimum protein count.\n"
                 "- `file_list=...` to filter by sample IDs.\n\n"
-                "Example:\n"
+                "Examples:\n"
                 "  pdata.filter_sample(condition='protein_quant > 0.2')"
             )
 
@@ -606,14 +738,16 @@ class FilterMixin:
             This method is intended for internal use by `filter_sample()`. For general-purpose filtering, 
             use `filter_sample()` with `condition=...` or `file_list=...`.
 
-        Example:
+        Examples:
             Filter samples with more than 1000 proteins:
-
-                >>> pdata.filter_sample_metadata(condition="protein_count > 1000")
+                ```python
+                pdata.filter_sample_metadata(condition="protein_count > 1000")
+                ```
 
             Keep only specific sample files:
-
-                >>> pdata.filter_sample_metadata(file_list=['fileA', 'fileB'])
+                ```python
+                pdata.filter_sample_metadata(file_list=['fileA', 'fileB'])
+                ```
         """
         if not self._has_data(): # type: ignore[attr-defined], ValidationMixin
             pass
@@ -712,20 +846,22 @@ class FilterMixin:
         Note:
             This method is used internally by `filter_sample()`. For general use, call `filter_sample()` directly.
 
-        Example:
+        Examples:
             Loose field-wise match (OR within fields, AND across fields):
-
-                >>> pdata.filter_sample_values(values={'treatment': ['kd', 'sc'], 'cellline': 'A'})
+                ```python
+                pdata.filter_sample_values(values={'treatment': ['kd', 'sc'], 'cellline': 'A'})
+                ```
 
             Exact combination matching:
-
-                >>> pdata.filter_sample_values(
-                ...     values=[
-                ...         {'treatment': 'kd', 'cellline': 'A'},
-                ...         {'treatment': 'sc', 'cellline': 'B'}
-                ...     ],
-                ...     exact_cases=True
-                ... )
+                ```python
+                pdata.filter_sample_values(
+                    values=[
+                        {'treatment': 'kd', 'cellline': 'A'},
+                        {'treatment': 'sc', 'cellline': 'B'}
+                    ],
+                    exact_cases=True
+                )
+                ```
         """
 
         pdata = self.copy() if return_copy else self # type: ignore[attr-defined], EditingMixin
@@ -817,7 +953,7 @@ class FilterMixin:
 
         Args:
             query_string (str): A pandas-style query string. 
-                Example: `"cellline == 'AS' and treatment in ['kd', 'sc']"`.
+                Examples: `"cellline == 'AS' and treatment in ['kd', 'sc']"`.
             source (str): The metadata source to query — either `"obs"` or `"summary"`.
             return_copy (bool): If True, returns a filtered pAnnData object; otherwise modifies in place.
             debug (bool): If True, prints the parsed query and debug messages.
@@ -1203,15 +1339,17 @@ class FilterMixin:
         Returns:
             None
 
-        Example:
+        Examples:
             Annotate proteins by group using sample-level metadata:
-
-                >>> pdata.annotate_found(classes=["group", "condition"], on="protein")
+                ```python
+                pdata.annotate_found(classes=["group", "condition"], on="protein")
+                ```
 
             Filter for proteins found in at least 20% of samples from a given group:
-
-                >>> pdata_filtered = pdata.filter_prot_found(group="Group_A", min_ratio=0.2)
-                >>> pdata_filtered.prot.var
+                ```python
+                pdata_filtered = pdata.filter_prot_found(group="Group_A", min_ratio=0.2)
+                pdata_filtered.prot.var
+                ```
         """
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             return
@@ -1273,7 +1411,7 @@ class FilterMixin:
             f"{format_log_prefix('user')} Annotated features: 'found in' class combinations {classes} using threshold {threshold}."
         )
 
-    def annotate_significant(self, classes=None, on='protein', fdr_threshold=0.01):
+    def annotate_significant(self, classes=None, on='protein', fdr_threshold=0.01, indent=1, verbose=True):
         """
         Add group-level 'Significant In' annotations for proteins or peptides.
 
@@ -1286,14 +1424,17 @@ class FilterMixin:
             classes (str or list of str, optional): Sample-level grouping column(s) for group-based annotations.
             fdr_threshold (float): Significance threshold (default 0.01).
             on (str): Level to annotate ('protein' or 'peptide').
+            indent (int): Indentation level for printed messages.
+            verbose (bool): If True, prints a summary message after annotation.
 
         Returns:
             None
 
-        Example:
+        Examples:
             Annotate proteins by group using sample-level metadata:
-
-                >>> pdata.annotate_significant(classes="celltype", on="protein", fdr_threshold=0.01)
+                ```python
+                pdata.annotate_significant(classes="celltype", on="protein", fdr_threshold=0.01)
+                ```
         """
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             return
@@ -1342,9 +1483,10 @@ class FilterMixin:
         self._history.append(  # type: ignore[attr-defined]
             f"{on}: Annotated significance across classes {classes} using FDR threshold {fdr_threshold}."
         )
-        print(
-            f"{format_log_prefix('user')} Annotated significant features by group: {classes} using FDR threshold {fdr_threshold}."
-        )
+        if verbose:
+            print(
+                f"{format_log_prefix('user', indent=indent)} Annotated significant features by group: {classes} using FDR threshold {fdr_threshold}."
+            )
 
     def _annotate_significant_samples(self, fdr_threshold=0.01):
         """
@@ -1378,5 +1520,5 @@ class FilterMixin:
                 columns=adata.var_names).T  # features × samples
 
             significant = data < fdr_threshold
-            for sample in data.columns:
-                adata.var[f"Significant In: {sample}"] = significant[sample]
+            sig_df = significant.add_prefix("Significant In: ")
+            adata.var = pd.concat([adata.var, sig_df], axis=1)

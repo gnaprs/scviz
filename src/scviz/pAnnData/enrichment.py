@@ -296,18 +296,20 @@ class EnrichmentMixin:
 
         Example:
             Run differential expression, then perform STRING enrichment on top-ranked genes:
-
-                >>> case1 = {'cellline': 'AS', 'treatment': 'sc'} # legacy style: class_type = ["group", "condition"]
-                >>> case2 = {'cellline': 'BE', 'treatment': 'sc'} # legacy style: values = [["GroupA", "Treatment1"], ["GroupA", "Control"]]
-                >>> pdata_nb.de(values = case_values) # or legacy style: pdata.de(classes=class_type, values=values)
-                >>> pdata.list_enrichments()  # list available DE result keys
-                >>> pdata.enrichment_functional(from_de=True, de_key="GroupA_Treatment1 vs GroupA_Control")
+                ```python
+                case1 = {'cellline': 'AS', 'treatment': 'sc'} # legacy style: class_type = ["group", "condition"]
+                case2 = {'cellline': 'BE', 'treatment': 'sc'} # legacy style: values = [["GroupA", "Treatment1"], ["GroupA", "Control"]]
+                pdata_nb.de(values = case_values) # or legacy style: pdata.de(classes=class_type, values=values)
+                pdata.list_enrichments()  # list available DE result keys
+                pdata.enrichment_functional(from_de=True, de_key="GroupA_Treatment1 vs GroupA_Control")
+                ```
 
             Perform enrichment on a custom list of genes:
-
-                >>> genelist = ["P55072", "NPLOC4", "UFD1", "STX5A", "NSFL1C", "UBXN2A",
-                ...             "UBXN4", "UBE4B", "YOD1", "WASHC5", "PLAA", "UBXN10"]
-                >>> pdata.enrichment_functional(genes=genelist, from_de=False)
+                ```python
+                genelist = ["P55072", "NPLOC4", "UFD1", "STX5A", "NSFL1C", "UBXN2A",
+                            "UBXN4", "UBE4B", "YOD1", "WASHC5", "PLAA", "UBXN10"]
+                pdata.enrichment_functional(genes=genelist, from_de=False)
+                ```
 
         Note:
             Internally uses `resolve_to_accessions()` and `get_string_mappings()`, and stores results 
@@ -499,16 +501,17 @@ class EnrichmentMixin:
 
         Example:
             Run differential expression, then perform STRING PPI enrichment on significant genes:
+                ```python
+                class_type = ["group", "condition"]
+                values = [["GroupA", "Treatment1"], ["GroupA", "Control"]]
 
-                >>> class_type = ["group", "condition"]
-                >>> values = [["GroupA", "Treatment1"], ["GroupA", "Control"]]
+                pdata.de(classes=class_type, values=values)
+                pdata.list_enrichments()
+                sig_genes = pdata.stats["de_results"]["GroupA_Treatment1 vs GroupA_Control"]
+                sig_genes = sig_genes[sig_genes["significance"] != "not significant"]["Genes"].dropna().tolist()
 
-                >>> pdata.de(classes=class_type, values=values)
-                >>> pdata.list_enrichments()
-                >>> sig_genes = pdata.stats["de_results"]["GroupA_Treatment1 vs GroupA_Control"]
-                >>> sig_genes = sig_genes[sig_genes["significance"] != "not significant"]["Genes"].dropna().tolist()
-
-                >>> pdata.enrichment_ppi(genes=sig_genes)
+                pdata.enrichment_ppi(genes=sig_genes)
+                ```
         """
         def query_ppi_enrichment(string_ids, species):
             # print(f"[INFO] Running PPI enrichment for {len(string_ids)} STRING IDs (species {species})...")
@@ -583,8 +586,9 @@ class EnrichmentMixin:
 
         Example:
             List enrichment results stored after running functional or PPI enrichment:
-
-                >>> pdata.list_enrichments()
+                ```python
+                pdata.list_enrichments()
+                ```
         """
 
         functional = self.stats.get("functional", {})
@@ -671,8 +675,9 @@ class EnrichmentMixin:
 
         Example:
             Display a STRING enrichment network for a user-supplied gene list:
-
-                >>> pdata.plot_enrichment_svg("UserSearch1")
+                ```python
+                pdata.plot_enrichment_svg("UserSearch1")
+                ```
 
         Note:
             The `key` must correspond to an existing entry in `.stats["functional"]`, created via 
@@ -746,9 +751,10 @@ class EnrichmentMixin:
 
         Example:
             Get a STRING network link for a stored enrichment result:
-
-                >>> url = pdata.get_string_network_link(key="UserSearch1")
-                >>> print(url)
+                ```python
+                url = pdata.get_string_network_link(key="UserSearch1")
+                print(url)
+                ```
         """
         if string_ids is None:
             if key is None:

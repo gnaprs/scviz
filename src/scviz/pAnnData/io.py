@@ -67,23 +67,25 @@ def import_data(source_type: str, **kwargs):
 
     Example:
         Importing Proteome Discoverer output for single-cell data:
-
-            >>> obs_columns = ['Sample', 'method', 'duration', 'cell_line']
-            >>> pdata_untreated_sc = import_data(
-            ...     source_type='pd',
-            ...     prot_file='data/202312_untreated/Marion_20231218_OTE_Aur60min_CBR_prot_Proteins.txt',
-            ...     pep_file='data/202312_untreated/Marion_20231218_OTE_Aur60min_CBR_pep_PeptideGroups.txt',
-            ...     obs_columns=obs_columns
-            ... )
+            ```python
+            obs_columns = ['Sample', 'method', 'duration', 'cell_line']
+            pdata_untreated_sc = import_data(
+                source_type='pd',
+                prot_file='data/202312_untreated/Marion_20231218_OTE_Aur60min_CBR_prot_Proteins.txt',
+                pep_file='data/202312_untreated/Marion_20231218_OTE_Aur60min_CBR_pep_PeptideGroups.txt',
+                obs_columns=obs_columns
+            )
+            ```
 
         Importing PD output for bulk data from an Excel file:
-
-            >>> obs_columns = ['Sample', 'cell_line']
-            >>> pdata_bulk = import_data(
-            ...     source_type='pd',
-            ...     prot_file='HCT116 resistance_20230601_pdoutput.xlsx',
-            ...     obs_columns=obs_columns
-            ... )
+            ```python
+            obs_columns = ['Sample', 'cell_line']
+            pdata_bulk = import_data(
+                source_type='pd',
+                prot_file='HCT116 resistance_20230601_pdoutput.xlsx',
+                obs_columns=obs_columns
+            )
+            ```
 
     Note:
         If `obs_columns` is not provided and filename formats are inconsistent,
@@ -141,13 +143,14 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
 
     Example:
         To import data from Proteome Discoverer:
-
-            >>> obs_columns = ['Sample', 'condition', 'cell_line']
-            >>> pdata = import_proteomeDiscoverer(
-            ...     prot_file='my_project/proteins.txt',
-            ...     pep_file='my_project/peptides.txt',
-            ...     obs_columns=obs_columns
-            ... )
+            ```python
+            obs_columns = ['Sample', 'condition', 'cell_line']
+            pdata = import_proteomeDiscoverer(
+                prot_file='my_project/proteins.txt',
+                pep_file='my_project/peptides.txt',
+                obs_columns=obs_columns
+            )
+            ```
 
     Note:
         - If `pep_file` is omitted, the resulting `pAnnData` will not include `.pep` or an RS matrix.
@@ -208,7 +211,7 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
         # pep_var_names: peptide sequence with modifications
         pep_var_names = (pep_all['Annotated Sequence'] + np.where(pep_all['Modifications'].isna(), '', ' MOD:' + pep_all['Modifications'])).values
         # pep_obs_names: file names
-        pep_obs_names = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract('Abundance: (F\d+):')[0].values
+        pep_obs_names = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract(r'Abundance: (F\d+):')[0].values
         # pep_var: peptide metadata
         pep_var = pep_all.loc[:, 'Modifications':'Theo. MH+ [Da]']
         # prot_obs: sample typing from the column name, drop column if all 'n/a'
@@ -292,14 +295,15 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
 
     Example:
         To import data from a DIA-NN report file:
-
-            >>> obs_columns = ['Sample', 'treatment', 'replicate']
-            >>> pdata = import_diann(
-            ...     report_file='data/project_diaNN_output.tsv',
-            ...     obs_columns=obs_columns,
-            ...     prot_value='PG.MaxLFQ',
-            ...     pep_value='Precursor.Normalised'
-            ... )
+            ```python
+            obs_columns = ['Sample', 'treatment', 'replicate']
+            pdata = import_diann(
+                report_file='data/project_diaNN_output.tsv',
+                obs_columns=obs_columns,
+                prot_value='PG.MaxLFQ',
+                pep_value='Precursor.Normalised'
+            )
+            ```
 
     Note:
         - DIA-NN report should contain both protein group and precursor-level information.
@@ -587,12 +591,14 @@ def suggest_obs_columns(source=None, source_type=None, filenames=None, delimiter
 
     Example:
         To suggest observation columns from a file:
-
-            >>> suggest_obs_columns("my_experiment_PD.txt", source_type="pd")
+            ```python
+            suggest_obs_columns("my_experiment_PD.txt", source_type="pd")
+            ```
 
         Suggested columns: ['Sample', 'gradient', 'cell_line', 'duration']
-
-            >>> ['Sample', 'gradient', 'cell_line', 'duration']
+            ```python
+            ['Sample', 'gradient', 'cell_line', 'duration']
+            ```
 
     Note:
         This function is typically used as part of the `.import_data()` flow
@@ -698,12 +704,14 @@ def resolve_obs_columns(source: str, source_type: str, delimiter: Optional[str] 
 
     Example:
         Inferring observation columns from a PD file:
-
-            >>> resolve_obs_columns('filepaths/pd_report.xlsx', source_type='pd')
+            ```python
+            resolve_obs_columns('filepaths/pd_report.xlsx', source_type='pd')
+            ```
 
         Inferring from a DIA-NN report with custom delimiter:
-
-            >>> resolve_obs_columns('filepaths/diann.tsv', source_type='diann', delimiter='_')
+            ```python
+            resolve_obs_columns('filepaths/diann.tsv', source_type='diann', delimiter='_')
+            ```
     """
     
     filenames = get_filenames(source, source_type=source_type)
@@ -757,14 +765,20 @@ def classify_subtokens(token, used_labels=None, keyword_map=None):
 
     Example:
         Classify a gradient+time token:
-
-            >>> classify_subtokens("Aur60minDIA")
+            ```python
+            classify_subtokens("Aur60minDIA")
+            ```
+            ```
             ['gradient', 'acquisition']
+            ```
 
         Classify a well position:
-
-            >>> classify_subtokens("B07")
+            ```python
+            classify_subtokens("B07")
+            ```
+            ```
             ['well_position']
+            ```
     """
 
     default_map = {
@@ -775,7 +789,8 @@ def classify_subtokens(token, used_labels=None, keyword_map=None):
         "sample_type": ["embryo", "brain", "liver", "cellline", "mix", "qc"],
         "instrument": ["tims", "tof", "fusion", "exploris","astral","stellar","eclipse","OA","OE480","OE","QE","qexecutive","OTE"],
         "acquisition": ["dia", "prm", "dda", "srm"],
-        "column": ['TS25','TS15','TS8','Aur']
+        "column": ['TS25','TS15','TS8','Aur'],
+        "organism": ["human", "mouse", "mus", "homo", "drosophila", "musculus", "sapiens"]
     }
 
     keyword_map = keyword_map or default_map
@@ -834,14 +849,20 @@ def get_filenames(source: Union[str, Path], source_type: str) -> List[str]:
 
     Example:
         Extract DIA-NN run names:
-
-            >>> get_filenames("diann_output.tsv", source_type="diann")
+            ```python
+            get_filenames("diann_output.tsv", source_type="diann")
+            ```
+            ```
             ['Sample1.raw', 'Sample2.raw', 'Sample3.raw']
+            ```
 
         Extract PD sample names from abundance columns:
-
-            >>> get_filenames("pd_output.xlsx", source_type="pd")
+            ```python
+            get_filenames("pd_output.xlsx", source_type="pd")
+            ```
+            ```
             ['SampleA', 'SampleB', 'SampleC']
+            ```
     """
     source = Path(source)
     ext = source.suffix.lower()
@@ -902,18 +923,23 @@ def analyze_filename_formats(filenames, delimiter: str = "_", group_labels=None)
 
     Example:
         Check if filenames have a uniform structure:
-
-            >>> filenames = ["A_60min_KD", "B_60min_SC", "C_120min_KD"]
-            >>> analyze_filename_formats(filenames)
+            ```python
+            filenames = ["A_60min_KD", "B_60min_SC", "C_120min_KD"]
+            analyze_filename_formats(filenames)
+            ```
+            ```
             {
                 'uniform': True,
                 'n_tokens': [3, 3, 3],
                 'group_map': {}
             }
+            ```
 
         With group labels:
-
-            >>> analyze_filename_formats(filenames, group_labels=["Group1"])
+            ```python
+            analyze_filename_formats(filenames, group_labels=["Group1"])
+            ```
+            ```
             {
                 'uniform': True,
                 'n_tokens': [3, 3, 3],
@@ -923,6 +949,7 @@ def analyze_filename_formats(filenames, delimiter: str = "_", group_labels=None)
                     'C_120min_KD': 'Group1'
                 }
             }
+            ```
     """
     group_counts = defaultdict(list)
     for fname in filenames:
@@ -947,7 +974,25 @@ def analyze_filename_formats(filenames, delimiter: str = "_", group_labels=None)
     }
 
 class IOMixin:
-    """Mixin for data import/export methods."""
+    """
+    Data import utilities for building `pAnnData` objects from supported proteomics tools.
+
+    This module provides functions to parse outputs from common tools such as Proteome Discoverer and DIA-NN,
+    automatically extracting protein and peptide quantification matrices, sample metadata, and relational mappings
+    between peptides and proteins.
+
+    Supported tools:
+        - Proteome Discoverer (PD 3.1, PD 2.4, etc.)
+        - DIA-NN (<1.8.1 and >2.0)
+
+    Functions:
+        import_data: Main entry point that dispatches to the appropriate import function based on source_type.
+        import_proteomeDiscoverer: Parses PD output files and initializes a pAnnData object.
+        import_diann: Parses DIA-NN report file and initializes a pAnnData object.
+        resolve_obs_columns: Extracts `.obs` column structure from filenames or metadata.
+        suggest_obs_from_file: Suggests sample-level metadata based on consistent filename tokens.
+        analyze_filename_formats: Analyzes filename structures to identify possible grouping patterns.
+    """
 
     @classmethod
     def import_data(cls, *args, **kwargs):
@@ -985,23 +1030,25 @@ class IOMixin:
 
         Example:
             Importing Proteome Discoverer output for single-cell data:
-
-                >>> obs_columns = ['Sample', 'method', 'duration', 'cell_line']
-                >>> pdata_untreated_sc = import_data(
-                ...     source_type='pd',
-                ...     prot_file='data/202312_untreated/Marion_20231218_OTE_Aur60min_CBR_prot_Proteins.txt',
-                ...     pep_file='data/202312_untreated/Marion_20231218_OTE_Aur60min_CBR_pep_PeptideGroups.txt',
-                ...     obs_columns=obs_columns
-                ... )
+                ```python
+                obs_columns = ['Sample', 'method', 'duration', 'cell_line']
+                pdata_untreated_sc = import_data(
+                    source_type='pd',
+                    prot_file='data/202312_untreated/Marion_20231218_OTE_Aur60min_CBR_prot_Proteins.txt',
+                    pep_file='data/202312_untreated/Marion_20231218_OTE_Aur60min_CBR_pep_PeptideGroups.txt',
+                    obs_columns=obs_columns
+                )
+                ```
 
             Importing PD output for bulk data from an Excel file:
-
-                >>> obs_columns = ['Sample', 'cell_line']
-                >>> pdata_bulk = import_data(
-                ...     source_type='pd',
-                ...     prot_file='HCT116 resistance_20230601_pdoutput.xlsx',
-                ...     obs_columns=obs_columns
-                ... )
+                ```python
+                obs_columns = ['Sample', 'cell_line']
+                pdata_bulk = import_data(
+                    source_type='pd',
+                    prot_file='HCT116 resistance_20230601_pdoutput.xlsx',
+                    obs_columns=obs_columns
+                )
+                ```
 
         Note:
             If `obs_columns` is not provided and filename formats are inconsistent,
@@ -1035,14 +1082,15 @@ class IOMixin:
 
         Example:
             To import data from a DIA-NN report file:
-
-                >>> obs_columns = ['Sample', 'treatment', 'replicate']
-                >>> pdata = import_diann(
-                ...     report_file='data/project_diaNN_output.tsv',
-                ...     obs_columns=obs_columns,
-                ...     prot_value='PG.MaxLFQ',
-                ...     pep_value='Precursor.Normalised'
-                ... )
+                ```python
+                obs_columns = ['Sample', 'treatment', 'replicate']
+                pdata = import_diann(
+                    report_file='data/project_diaNN_output.tsv',
+                    obs_columns=obs_columns,
+                    prot_value='PG.MaxLFQ',
+                    pep_value='Precursor.Normalised'
+                )
+                ```
 
         Note:
             - DIA-NN report should contain both protein group and precursor-level information.
@@ -1070,13 +1118,14 @@ class IOMixin:
 
         Example:
             To import data from Proteome Discoverer:
-
-                >>> obs_columns = ['Sample', 'condition', 'cell_line']
-                >>> pdata = import_proteomeDiscoverer(
-                ...     prot_file='my_project/proteins.txt',
-                ...     pep_file='my_project/peptides.txt',
-                ...     obs_columns=obs_columns
-                ... )
+                ```python
+                obs_columns = ['Sample', 'condition', 'cell_line']
+                pdata = import_proteomeDiscoverer(
+                    prot_file='my_project/proteins.txt',
+                    pep_file='my_project/peptides.txt',
+                    obs_columns=obs_columns
+                )
+                ```
 
         Note:
             - If `pep_file` is omitted, the resulting `pAnnData` will not include `.pep` or an RS matrix.
@@ -1102,14 +1151,20 @@ class IOMixin:
 
         Example:
             Extract DIA-NN run names:
-
-                >>> get_filenames("diann_output.tsv", source_type="diann")
+                ```python
+                get_filenames("diann_output.tsv", source_type="diann")
+                ```
+                ```
                 ['Sample1.raw', 'Sample2.raw', 'Sample3.raw']
+                ```
 
             Extract PD sample names from abundance columns:
-
-                >>> get_filenames("pd_output.xlsx", source_type="pd")
+                ```python
+                get_filenames("pd_output.xlsx", source_type="pd")
+                ```
+                ```
                 ['SampleA', 'SampleB', 'SampleC']
+                ```
         """
         return get_filenames(*args, **kwargs)
     
@@ -1137,12 +1192,14 @@ class IOMixin:
 
         Example:
             To suggest observation columns from a file:
+                ```python
+                suggest_obs_columns("my_experiment_PD.txt", source_type="pd")
+                ```
 
-                >>> suggest_obs_columns("my_experiment_PD.txt", source_type="pd")
-
-            Suggested columns: ['Sample', 'gradient', 'cell_line', 'duration']
-
-                >>> ['Sample', 'gradient', 'cell_line', 'duration']
+                ```
+                # Suggested columns: ['Sample', 'gradient', 'cell_line', 'duration']
+                ['Sample', 'gradient', 'cell_line', 'duration']
+                ```
 
         Note:
             This function is typically used as part of the `.import_data()` flow

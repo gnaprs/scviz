@@ -57,8 +57,9 @@ class AnalysisMixin:
 
         Example:
             Compute per-group CV for proteins using a custom normalization layer:
-
-                >>> pdata.cv(classes=["group", "condition"], on="protein", layer="X_norm")
+                ```python
+                pdata.cv(classes=["group", "condition"], on="protein", layer="X_norm")
+                ```
         """
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             pass
@@ -113,20 +114,22 @@ class AnalysisMixin:
 
         Example:
             Legacy-style DE comparison using class types and value combinations:
-
-                >>> pdata.de(
-                ...     class_type=["cellline", "treatment"],
-                ...     values=[["HCT116", "DMSO"], ["HCT116", "DrugX"]]
-                ... )
+                ```python
+                pdata.de(
+                    class_type=["cellline", "treatment"],
+                    values=[["HCT116", "DMSO"], ["HCT116", "DrugX"]]
+                )
+                ```
 
             Dictionary-style (recommended) DE comparison:
-
-                >>> pdata.de(
-                ...     values=[
-                ...         {"cellline": "HCT116", "treatment": "DMSO"},
-                ...         {"cellline": "HCT116", "treatment": "DrugX"}
-                ...     ]
-                ... )
+                ```python
+                pdata.de(
+                    values=[
+                        {"cellline": "HCT116", "treatment": "DMSO"},
+                        {"cellline": "HCT116", "treatment": "DrugX"}
+                    ]
+                )
+                ```
         """
 
         # --- Handle legacy input ---
@@ -299,8 +302,9 @@ class AnalysisMixin:
 
         Example:
             Rank proteins by average abundance across treatment groups:
-
-                >>> pdata.rank(classes="treatment", on="protein", layer="X_norm")
+                ```python
+                pdata.rank(classes="treatment", on="protein", layer="X_norm")
+                ```
         """
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             pass
@@ -353,12 +357,14 @@ class AnalysisMixin:
 
         Example:
             Globally impute missing values using the median strategy:
-
-                >>> pdata.impute(method="median", on="protein")
+                ```python
+                pdata.impute(method="median", on="protein")
+                ```
 
             Group-wise imputation based on treatment:
-
-                >>> pdata.impute(classes="treatment", method="mean", on="protein")
+                ```python
+                pdata.impute(classes="treatment", method="mean", on="protein")
+                ```
 
         Note:
             - KNN imputation is only supported for global (non-grouped) mode.
@@ -543,12 +549,14 @@ class AnalysisMixin:
 
         Example:
             Compute neighbors using default PCA representation:
-
-                >>> pdata.neighbor(on="protein", layer="X")
+                ```python
+                pdata.neighbor(on="protein", layer="X")
+                ```
 
             Use a custom representation stored in `.obsm["X_umap"]`:
-
-                >>> pdata.neighbor(on="protein", use_rep="X_umap", n_neighbors=15)
+                ```python
+                pdata.neighbor(on="protein", use_rep="X_umap", n_neighbors=15)
+                ```
 
         Note:
             - The neighbor graph is stored in `.obs["distances"]` and `.obs["connectivities"]`.
@@ -558,9 +566,10 @@ class AnalysisMixin:
 
         Todo:
             Allow users to supply a custom `KNeighborsTransformer` or precomputed neighbor graph.
-
-                >>> from sklearn.neighbors import KNeighborsTransformer
-                >>> transformer = KNeighborsTransformer(n_neighbors=10, metric='manhattan', algorithm='kd_tree')
+                ```python
+                from sklearn.neighbors import KNeighborsTransformer
+                transformer = KNeighborsTransformer(n_neighbors=10, metric='manhattan', algorithm='kd_tree')
+                ```
         """
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             pass
@@ -616,8 +625,9 @@ class AnalysisMixin:
 
         Example:
             Perform Leiden clustering using the default PCA-based neighbors:
-
-                >>> pdata.leiden(on="protein", layer="X", resolution=0.25)
+                ```python
+                pdata.leiden(on="protein", layer="X", resolution=0.25)
+                ```
 
         Note:
             - Cluster labels are stored in `.obs["leiden"]`.
@@ -669,8 +679,9 @@ class AnalysisMixin:
 
         Example:
             Run UMAP using default settings:
-
-                >>> pdata.umap(on="protein", layer="X")
+                ```python
+                pdata.umap(on="protein", layer="X")
+                ```
 
         Note:
             - UMAP coordinates are stored in `.obsm["X_umap"]`.
@@ -690,12 +701,20 @@ class AnalysisMixin:
         log_prefix = format_log_prefix("user")
         print(f"{log_prefix} Computing UMAP [{on}] using layer: {layer}")
 
-        # check if neighbor has been run before, look for distances and connectivities in obsp
-        if 'neighbors' not in adata.uns:
-            print(f"{format_log_prefix('info_only', indent=2)} Neighbors not found in AnnData object. Running neighbors with default settings.")
-            self.neighbor(on = on, layer = layer)
+        if "n_neighbors" in kwargs:
+                    n_neighbors = kwargs.pop("n_neighbors")
+                    print(f"{format_log_prefix('info_only', indent=2)} `n_neighbors={n_neighbors}` provided. "
+                        f"Re-running neighbors with this setting before UMAP.")
+                    self.neighbor(on=on, layer=layer, n_neighbors=n_neighbors)
+                    self._append_history(f"{on}: Neighbors re-computed with n_neighbors={n_neighbors} before UMAP")  # type: ignore[attr-defined], HistoryMixin
         else:
-            print(f"{format_log_prefix('info_only', indent=2)} Using existing neighbors found in AnnData object.")
+            # check if neighbor has been run before, look for distances and connectivities in obsp
+            if 'neighbors' not in adata.uns:
+                print(f"{format_log_prefix('info_only', indent=2)} Neighbors not found in AnnData object. Running neighbors with default settings.")
+                self.neighbor(on = on, layer = layer)
+                self._append_history(f"{on}: Neighbors computed with default settings before UMAP")  # type: ignore[attr-defined], HistoryMixin
+            else:
+                print(f"{format_log_prefix('info_only', indent=2)} Using existing neighbors found in AnnData object.")
 
         if layer == "X":
             # do nothing
@@ -757,6 +776,7 @@ class AnalysisMixin:
         Xnorm = Xnorm[:, ~nan_cols]
         print(f"   🔸 AFTER  (samples × proteins): {Xnorm.shape}")
 
+        # TODO: fix bug here (ValueError: n_components=59 must be between 1 and min(n_samples, n_features)=31 with svd_solver='arpack')
         pca_data = sc.tl.pca(Xnorm, return_info=True, **kwargs)
         adata.obsm['X_pca'] = pca_data[0]
         PCs = np.zeros((pca_data[1].shape[0], nan_cols.shape[0]))
