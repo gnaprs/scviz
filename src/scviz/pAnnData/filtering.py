@@ -542,8 +542,6 @@ class FilterMixin:
 
             return_copy_str = "Returning a copy of" if return_copy else "Filtered and modified"
             print(f"    {return_copy_str} protein data based on significance thresholds:")
-            print(f"    → Groups requested: {group_list}")
-            print(f"    → FDR threshold: {fdr_threshold}")
 
             if is_group_mode:
                 # Case A: obs column(s) expanded → show expanded_groups and add note
@@ -558,7 +556,7 @@ class FilterMixin:
                 if min_count is not None:
                     print(f"    → Minimum count: {min_count} (match_{logic} = {match_any})")
             else:
-                print(f"    → Groups requested: {group_list}")
+                print(f"    → Files requested: All")
                 print(f"    → FDR threshold: {fdr_threshold}")
                 print(f"    → Logic: {logic} "
                     f"(protein must be significant in {'≥1' if match_any else 'all'} file(s))")
