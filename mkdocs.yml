@@ -78,34 +78,40 @@ copyright: Copyright &copy; 2025 Marion Pang
 nav:
   - Home:
       - Overview: index.md
-      - Changelog: changelog.md
+      - Changelog: CHANGELOG.md
       # - Credits: credits.md
       # - License: license.md
   - Getting started:
-      - Installation: installation.md
-      - Quickstart: quickstart.md
-  - Usage:
-      - Tutorials:
+      - Installation: tutorials/installation.md
+      - Quickstart: tutorials/quickstart.md
+      - In-depth Tutorials:
           - Overview: tutorials/index.md
-          - Importing Data: tutorials/importing.md
-          - Filtering + Normalization: tutorials/filtering.md
-          - Imputation: tutorials/imputation.md
-          - Plotting: tutorials/plotting.md
-          - Differential Expression: tutorials/de.md
-          - Enrichment + Networks: tutorials/enrichment.md
+          - 1. Importing Data: tutorials/importing.md
+          - 2. Filtering: tutorials/filtering.md
+          - 3. Imputation + Normalization: tutorials/imputation.md
+          - 4. Plotting: tutorials/plotting.md
+          - 5. Differential Expression: tutorials/de.md
+          - 6. Enrichment + Networks: tutorials/enrichment.md
+  - API reference:
+      - Overview : reference/overview.md
+      - pAnnData:
+          - Base Class + Import: reference/pAnnData/pAnnData.md
+          - Core Utilities: reference/pAnnData/core_mixins.md
+          - Metadata + Summary: reference/pAnnData/metadata_mixins.md
+          - Editing + Filtering: reference/pAnnData/editing_mixins.md
+          - Analysis + Enrichment: reference/pAnnData/analysis_mixins.md
+          - Identifiers + STRING: reference/pAnnData/identifier_mixins.md
+      - Modules:
+        - scviz.utils: reference/utils.md
+        - scviz.plotting: reference/plotting.md
+      - Developer Utilities:
+          - TrackedDataFrame: reference/TrackedDataFrame.md
+          - Hidden Functions: reference/pAnnData/hidden_functions.md
+  - Others:
       - Admonitions: admonitions.md
       - Content-Tabs: content-tabs.md
       - Diagram: diagram.md
-  - API reference:
-      - scviz.plotting: reference/plotting.md
-      - pAnnData:
-          - Overview: reference/pAnnData.md
-          - Core Utilities: reference/core_mixins.md
-          - Metadata + Summary: reference/metadata_mixins.md
-          - Editing + Filtering: reference/editing_mixins.md
-          - Analysis + Enrichment: reference/analysis_mixins.md
-          - Identifiers and String: reference/identifier_mixins.md
-          - Hidden Functions: reference/hidden_functions.md
+
 
   - Author's website: https://gnaprs.github.io/
 # nav:

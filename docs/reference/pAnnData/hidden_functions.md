@@ -2,6 +2,12 @@
 
 Hidden functions for all MixIns.
 
+!!! warning "Advanced / Internal"
+    The functions in this section are internal utilities. They may change 
+    without notice and are not guaranteed to remain stable across releases. 
+    Use only if you understand the internal architecture of `pAnnData`.
+
+
 ### [← Back to pAnnData Overview](pAnnData.md)
 
 ---

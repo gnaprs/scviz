@@ -1,4 +1,4 @@
-# Tutorial: Enrichment and Networks
+# Tutorial 6: Enrichment and Networks
 
 Use STRING integration for enrichment and protein–protein interaction (PPI) analysis.
 

@@ -1,7 +1,7 @@
-# Tutorial: Differential Expression (DE)
+# Tutorial 5: Differential Expression (DE)
 
 Run DE analysis at the protein or peptide level.
-
+— test across groups (mean, pairwise, peptide-level).  
 ---
 
 ## Protein-Level DE

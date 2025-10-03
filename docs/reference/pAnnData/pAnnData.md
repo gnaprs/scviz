@@ -1,4 +1,4 @@
-# `pAnnData` Overview
+# `pAnnData` Class and Import
 
 ::: src.scviz.pAnnData.pAnnData.pAnnData
     options:
@@ -10,7 +10,7 @@
 ::: src.scviz.pAnnData.io
     options:
       show_root_heading: false
-      heading_level: 2
+      heading_level: 3
 
 
 ---

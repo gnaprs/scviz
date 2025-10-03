@@ -1,9 +1,21 @@
 # Tutorials
 
-Welcome to the **scviz tutorials** 👋  
+Welcome to the **scviz tutorials**.
 These guides walk you through the main steps of a single-cell or spatial proteomics workflow using `pAnnData`.  
 
+---
+
+## How to Use These Tutorials
+
 Each tutorial is designed to be self-contained, with code snippets you can run in a Python environment.
+
+Each tutorial includes:
+
+- Example code blocks you can copy into a Jupyter notebook.  
+- Visual outputs to illustrate the results.  
+- 💡 Tips and notes to explain recommended practices.  
+
+If you’re new to **scviz**, start with [**Importing Data**](importing.md) and work through the sequence.  
 
 ## Workflow at a Glance
 
@@ -33,29 +45,7 @@ G -. "ranked/unranked lists" .-> H
 D .-> I
 F .-> I
 G .-> I 
-```
-  <!-- %% Styling
-  classDef step fill:#1f77b4,stroke:#0e3a5a,color:#fff,rx:8,ry:8
-  class A,B,C,D,E,F,G,H,I step -->
-
-```mermaid
-graph TB
-  A[Import Data] --> B[Filter & Normalize]
-  B --> C[Impute Missing Values]
-  C --> D[Plot & Explore]
-  D --> E[Differential Expression]
-  E --> F[Enrichment & Networks]
-
-  %% Optional branches
-  A -.-> X[Metadata Parsing]
-  C -.-> G[Export Results]
-  D -.-> G[Export Results]
-  E -.-> G[Export Results]
-  F -.-> H[STRING Web Links]
-
-  %% Styling
-  classDef step fill:#1f77b4,stroke:#0e3a5a,color:#fff,rx:8,ry:8
-  class A,B,C,D,E,F,G,H,I step
+H .-> I
 ```
 
 ---
@@ -78,34 +68,16 @@ graph TB
 - Run PCA/UMAP embeddings with flexible coloring options.
 - Generate heatmaps and clustermaps with class annotations.
 
-### 5. Differential Expression (DE)
+### 5. [Differential Expression (DE)](de.md)
 - Perform DE testing at the protein or peptide level.
 - Compare fold-change strategies (mean-based vs. pairwise median).
 - Export DE results for downstream use.
 
-➡️ [Go to tutorial](de.md)
-
----
-
-### 6. Enrichment and Networks
+### 6. [Enrichment and Networks](enrichment.md)
 - Run GSEA and GO enrichment with [STRING](https://string-db.org/).
 - Explore protein–protein interaction networks.
 - Retrieve functional annotations for differentially expressed genes.
 
-➡️ [Go to tutorial](enrichment.md)
-
 ---
 
-## How to Use These Tutorials
-
-Each tutorial includes:
-
-- Example code blocks you can copy into a Jupyter notebook.  
-- Visual outputs to illustrate the results.  
-- 💡 Tips and notes to explain recommended practices.  
-
-If you’re new to **scviz**, start with **Importing Data** and work through the sequence.  
-
----
-
-:books: For deeper details, see the [API Reference](../reference/index.md).
+:books: For in-depth details, see the [API Reference](../reference/overview.md).

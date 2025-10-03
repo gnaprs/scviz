@@ -1,6 +1,6 @@
-# Tutorial: Filtering and Normalization
+# Tutorial 2: Filtering and Normalization
 
-Learn how to filter proteins/peptides and apply normalization strategies.
+Learn how to filter proteins/peptides.
 
 ---
 
