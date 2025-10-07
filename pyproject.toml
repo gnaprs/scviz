@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scviz"
-version = "0.2.1"
+version = "0.3.0"
 authors = [
   {name="Marion Pang", email="sr_pang@hotmail.com"},
 ]
@@ -53,4 +53,4 @@ filterwarnings = [
 ]
 
 [project.optional-dependencies]
-pytest = ["openpyxl"]
+dev = ["pytest","coverage","flake8","openpyxl","pytest-cov"]

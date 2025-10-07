@@ -34,6 +34,7 @@
 4. .summary updates number of proteins, but repr(pdata) doesn't
 5. clustermap bug when linkage
 6. plot_abundnace_housekeeping throws error when no housekeeping gene is found
+7. check that we're syncing rs and filtering rs matrix for every filter opration (currently, only for filter sample by condition?)
 7. When importing, the warn statement appears before the peptides (i.e.)
 ```
 --------------------------
@@ -53,3 +54,4 @@ Peptides: 39533
 ## DOCUMENTATION
 1. Tutorial to show how to integrate with scanpy features
 2. QC tutorial
+3. search_annotation tutorial
