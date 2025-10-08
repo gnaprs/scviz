@@ -1,24 +1,72 @@
 """
-This module contains functions for plotting protein data.
+This module provides a collection of plotting utilities for visualizing
+protein and peptide abundance data, quality control metrics, and results of
+statistical analyses. Functions are organized into categories based on their
+purpose, with paired "plot" and "mark" functions where applicable.
+
+Functions are written to work seamlessly with the `pAnnData` object structure and metadata conventions in scviz.
+
+## Distribution and Abundance Plots
 
 Functions:
-    plot_significance: Plot significance bars on a given axis.
-    plot_cv: Generate a violin plot for the coefficient of variation (CV) of different cases.
-    plot_abundance: Plot the abundance of proteins across different cases.
-    plot_pca: Plot a PCA of the protein data.
-    plot_umap: Plot a UMAP of the protein data.
-    plot_pca_scree: Plot a scree plot of the PCA.
-    plot_heatmap: Plot a heatmap of protein abundance data.
-    plot_volcano: Plot a volcano plot of protein data.
-    plot_rankquant: Plot a rank-quantile plot of protein data.
-    plot_abundance_2D: Plot the abundance of proteins across different cases in 2D.
-    mark_rankquant: Mark the rank-quantile plot with specific proteins.
-    plot_raincloud: Plot a raincloud plot of protein data.
-    mark_raincloud: Mark the raincloud plot with specific proteins.
-    ... more to come
+    plot_abundance: Violin/box/strip plots of protein or peptide abundance.
+    plot_abundance_housekeeping: Plot abundance of housekeeping proteins.
+    plot_rankquant: Rank abundance scatter distributions across groups.
+    mark_rankquant: Highlight specific features on a rank abundance plot.
+    plot_raincloud: Raincloud plot (violin + box + scatter) of distributions.
+    mark_raincloud: Highlight specific features on a raincloud plot.
 
-Todo:
-    * For future implementation.
+## Multivariate Dimension Reduction
+
+Functions:
+    plot_pca: Principal Component Analysis (PCA) scatter plot.
+    plot_pca_scree: Scree plot of PCA variance explained.
+    plot_umap: UMAP projection for nonlinear dimensionality reduction.
+    resolve_plot_colors: Helper function for resolving PCA/UMAP colors.
+
+## Clustering and Heatmaps
+
+Functions:
+    plot_clustermap: Clustered heatmap of proteins/peptides × samples.
+
+## Differential Expression and Volcano Plots
+
+Functions:
+        plot_volcano: Volcano plot of differential expression results.
+        mark_volcano: Highlight specific features on a volcano plot.
+        add_volcano_legend: Add standard legend handles for volcano plots.
+
+## Enrichment Plots
+
+Functions:
+    plot_enrichment_svg: Plot STRING enrichment results (forwarded from `enrichment.py`).
+
+## Set Operations
+
+Functions:
+    plot_venn: Venn diagrams for 2 to 3 sets.
+    plot_upset: UpSet diagrams for >3 sets.
+
+## Summaries and Quality Control
+
+Functions:
+    plot_summary: Bar plots summarizing sample-level metadata (e.g., protein counts).
+    plot_significance: Add significance bars to plots.
+    plot_cv: Boxplots of coefficient of variation (CV) across groups.
+
+## Notes and Tips
+!!! tip
+    * Most functions accept a `matplotlib.axes.Axes` as the first argument for flexible subplot integration. `ax` can be defined as such:
+
+    ```python
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(6,4)) # configure size as needed
+    ```
+    
+    * "Mark" functions are designed to be used immediately after their paired "plot" functions to highlight features of interest.
+
+---
+
 """
 
 import re
@@ -43,24 +91,77 @@ from scviz import utils
 
 sns.set_theme(context='paper', style='ticks')
 
-def get_color(resource_type, n=None):
+def get_color(resource_type: str, n=None):
     """
     Generate a list of colors, a colormap, or a palette from package defaults.
 
-    Parameters:
-    - resource_type (str): The type of resource to generate. Options are 'colors', 'cmap', and 'palette'. If 'show', displays all 7 colors.
-    - n (int, optional): The number of colors or colormaps to generate. Required for 'colors' and 'cmap'.
+    Args:
+        resource_type (str): The type of resource to generate. Options are:
+            - 'colors': Return a list of hex color codes.
+            - 'cmap': Return a matplotlib colormap.
+            - 'palette': Return a seaborn palette.
+            - 'show': Display all 7 base colors.
+
+        n (int, optional): The number of colors or colormaps to generate.
+            Required for 'colors' and 'cmap'. Colors will repeat if n > 7.
 
     Returns:
-    - list of str: If resource_type is 'colors', a list of hex color strings. Repeats colors if n > 7.
-    - list of matplotlib.colors.LinearSegmentedColormap: If resource_type is 'cmap'
-    - seaborn.color_palette: If resource_type is 'palette'
-    - None: If resource_type is 'show', displays the colors and colormaps.
+        colors (list of str): If ``resource_type='colors'``, a list of hex color strings. Repeats colors if n > 7.
+        cmap (matplotlib.colors.LinearSegmentedColormap): If ``resource_type='cmap'``.
+        palette (seaborn.color_palette): If ``resource_type='palette'``.
+        None: If ``resource_type='show'``, displays the available colors.
 
+    !!! info "Default Colors"
+
+        The following base colors are used (hex codes):
+
+            ['#FC9744', '#00AEE8', '#9D9D9D', '#6EDC00', '#F4D03F', '#FF0000', '#A454C7']        
+
+        <div style="display:flex;gap:0.5em;">
+            <div style="width:1.5em;height:1.5em;background:#FC9744;border:1px solid #000"></div>
+            <div style="width:1.5em;height:1.5em;background:#00AEE8;border:1px solid #000"></div>
+            <div style="width:1.5em;height:1.5em;background:#9D9D9D;border:1px solid #000"></div>
+            <div style="width:1.5em;height:1.5em;background:#6EDC00;border:1px solid #000"></div>
+            <div style="width:1.5em;height:1.5em;background:#F4D03F;border:1px solid #000"></div>
+            <div style="width:1.5em;height:1.5em;background:#FF0000;border:1px solid #000"></div>
+            <div style="width:1.5em;height:1.5em;background:#A454C7;border:1px solid #000"></div>
+        </div>
+            
     Example:
-    >>> colors = get_color('colors', 5)
-    >>> cmap = get_color('cmap')
-    >>> palette = get_color('palette')
+        Get list of 5 colors:
+            ```python
+            colors = get_color('colors', 5)
+            ```
+
+        <div style="display:flex;gap:0.5em;">
+            <div style="width:1.5em;height:1.5em;background:#FC9744;border:1px solid #000"></div>
+            <div style="width:1.5em;height:1.5em;background:#00AEE8;border:1px solid #000"></div>
+            <div style="width:1.5em;height:1.5em;background:#9D9D9D;border:1px solid #000"></div>
+            <div style="width:1.5em;height:1.5em;background:#6EDC00;border:1px solid #000"></div>
+            <div style="width:1.5em;height:1.5em;background:#F4D03F;border:1px solid #000"></div>
+        </div>
+
+        Get default cmap:
+            ```python
+            cmap = get_color('cmap', 2)
+            ```
+        <div style="width:150px;height:20px;background:linear-gradient(to right, white, #FC9744);border:1px solid #000"></div>
+        <div style="width:150px;height:20px;background:linear-gradient(to right, white, #00AEE8);border:1px solid #000"></div>
+                    
+        Get default palette:
+            ```python
+            palette = get_color('palette')
+            ```
+
+        <div style="display:flex;gap:0.3em;">
+            <div style="width:1.2em;height:1.2em;background:#FC9744;border:1px solid #000"></div>
+            <div style="width:1.2em;height:1.2em;background:#00AEE8;border:1px solid #000"></div>
+            <div style="width:1.2em;height:1.2em;background:#9D9D9D;border:1px solid #000"></div>
+            <div style="width:1.2em;height:1.2em;background:#6EDC00;border:1px solid #000"></div>
+            <div style="width:1.2em;height:1.2em;background:#F4D03F;border:1px solid #000"></div>
+            <div style="width:1.2em;height:1.2em;background:#FF0000;border:1px solid #000"></div>
+            <div style="width:1.2em;height:1.2em;background:#A454C7;border:1px solid #000"></div>
+        </div>
     """
 
     # --- 
@@ -133,22 +234,32 @@ def get_color(resource_type, n=None):
 
 def plot_significance(ax, y, h, x1=0, x2=1, col='k', pval='n.s.', fontsize=12):
     """
-    Plot significance bars on a given axis.
+    Plot significance bars on a matplotlib axis.
 
-    Parameters:
-    ax (matplotlib.axes.Axes): The axis on which to plot the significance bars.
-    y (float): The y-coordinate of the bars.
-    h (float): The height of the bars.
-    x1 (float): The x-coordinate of the first bar.
-    x2 (float): The x-coordinate of the second bar.
-    col (str): The color of the bars.
-    pval (float or str): The p-value used to determine the significance level of the bars.
-                         If a float, it is compared against predefined thresholds to determine the significance level.
-                         If a string, it is directly used as the significance level.
-    fontsize (int): The fontsize of the significance level text.
+    This function draws horizontal significance bars (e.g., for statistical annotations)
+    between two x-positions with a label indicating the p-value or significance level.
+
+    Args:
+        ax (matplotlib.axes.Axes): Axis on which to plot the significance bars.
+        y (float): Vertical coordinate of the top of the bars.
+        h (float): Height of the vertical ticks extending downward from `y`.
+        x1 (float): X-coordinate of the first bar endpoint.
+        x2 (float): X-coordinate of the second bar endpoint.
+        col (str): Color of the bars.
+        pval (float or str): P-value or significance label.
+            
+            - If a float, it is compared against thresholds (e.g., 0.05, 0.01) to assign
+              significance markers (`*`, `**`, `***`).
+            
+            - If a string, it is directly rendered as the label.
+        
+        fontsize (int): Font size of the significance text.
 
     Returns:
-    None
+        None
+
+    !!! todo "Examples Pending"
+        Add usage examples here.
     """
 
     # check variable type of pval
@@ -164,21 +275,33 @@ def plot_significance(ax, y, h, x1=0, x2=1, col='k', pval='n.s.', fontsize=12):
     ax.plot([x1, x1, x2, x2], [y, y+h, y+h, y], lw=1, c=col)
     ax.text((x1+x2)*.5, y+h, sig, ha='center', va='bottom', color=col, fontsize=fontsize)
 
-def plot_cv(ax, pdata, classes=None, layer = 'X', on = 'protein', order = None, return_df = False, **kwargs):
+def plot_cv(ax, pdata, classes=None, layer='X', on='protein', order=None, return_df=False, **kwargs):
     """
-    Generate a box and whisker plot for the coefficient of variation (CV) of different cases.
+    Generate a box-and-whisker plot for the coefficient of variation (CV).
 
-    Parameters:
-    ax (matplotlib.axes.Axes): The axis on which to plot.
-    data (pandas.DataFrame): The data to plot. It should contain columns for each case, with each column containing the CV values for that case.
-    cases (list of list of str): A list of cases to plot. Each case is a list of strings that are used to select the columns from the data.
-    color (list of str, optional): A list of colors for the box plots of each case. If not provided, all boxes will be blue.
+    This function computes CV values across proteins or peptides, grouped by
+    sample-level classes, and visualizes their distribution as a box plot.
+
+    Args:
+        ax (matplotlib.axes.Axes): Axis on which to plot.
+        pdata (pAnnData): Input pAnnData object containing protein or peptide data.
+        classes (str or list of str, optional): One or more `.obs` columns to use
+            for grouping samples in the plot. If None, no grouping is applied.
+        layer (str): Data layer to use for CV calculation. Default is `'X'`.
+        on (str): Data level to compute CV on, either `'protein'` or `'peptide'`.
+        order (list, optional): Custom order of classes for plotting.
+            If None, defaults to alphabetical order.
+        return_df (bool): If True, returns the underlying DataFrame used for plotting.
+        **kwargs: Additional keyword arguments passed to seaborn plotting functions.
 
     Returns:
-    matplotlib.axes.Axes: The axis with the plotted data.
+        ax (matplotlib.axes.Axes): The axis with the plotted CV distribution.
+        cv_df (pandas.DataFrame): Optional, returned if `return_df=True`.
 
-    Example:
+    !!! todo "Examples Pending"
+        Add usage examples here.
     """
+
     pdata.cv(classes = classes, on = on, layer = layer)
     adata = utils.get_adata(pdata, on)    
     classes_list = utils.get_classlist(adata, classes = classes, order = order)
@@ -203,7 +326,42 @@ def plot_cv(ax, pdata, classes=None, layer = 'X', on = 'protein', order = None, 
     
     return ax
 
-def plot_summary(ax, pdata, value='protein_count', classes=None, plot_mean = True, **kwargs):
+def plot_summary(ax, pdata, value='protein_count', classes=None, plot_mean=True, **kwargs):
+    """
+    Plot summary statistics of sample metadata.
+
+    This function visualizes values from `pdata.summary` (e.g., protein count,
+    peptide count, abundance) as bar plots, optionally grouped by sample-level classes.
+    It supports both per-sample visualization and mean values across groups.
+
+    Args:
+        ax (matplotlib.axes.Axes): Axis on which to plot.
+        pdata (pAnnData): Input pAnnData object with `.summary` metadata table.
+        value (str): Column in `pdata.summary` to plot. Default is `'protein_count'`.
+        classes (str or list of str, optional): Sample-level classes to group by.
+            - If None: plot per-sample values directly.
+            
+            - If str: group by the specified column, aggregating with mean if `plot_mean=True`.
+            
+            - If list: when multiple classes are provided, combinations of class values
+              are used for grouping and subplots are created per unique value of `classes[0]`.
+
+        plot_mean (bool): Whether to plot mean ± standard deviation by class.
+            If True, `classes` must be provided. Default is True.
+        **kwargs: Additional keyword arguments passed to seaborn plotting functions.
+
+    Returns:
+        ax (matplotlib.axes.Axes or list of matplotlib.axes.Axes): The axis (or 
+        list of axes if subplots are created) with the plotted summary.
+
+    Raises:
+        ValueError: If `plot_mean=True` but `classes` is not specified.
+        ValueError: If `classes` is invalid (not None, str, or non-empty list).
+
+    !!! todo "Examples Pending"
+        Add usage examples here.
+    """
+
     if pdata.summary is None:
         pdata._update_summary()
 
@@ -271,45 +429,160 @@ def plot_summary(ax, pdata, value='protein_count', classes=None, plot_mean = Tru
 
     return ax
 
+def plot_abundance_housekeeping(ax, pdata, classes=None, loading_control='all', **kwargs):
+    """
+    Plot abundance of housekeeping proteins.
+
+    This function visualizes the abundance of canonical housekeeping proteins
+    as loading controls, grouped by sample-level metadata if specified.
+    Different sets of proteins are supported depending on the chosen loading
+    control type.
+
+    Args:
+        ax (matplotlib.axes.Axes or list of matplotlib.axes.Axes): Axis or list of axes to plot on.
+            If `loading_control='all'`, must provide a list of 3 axes.
+        pdata (pAnnData): Input pAnnData object.
+        classes (str or list of str, optional): One or more `.obs` columns to use for grouping samples.
+        loading_control (str): Type of housekeeping controls to plot. Options:
+
+            - `'whole cell'`: GAPDH, TBCD (β-tubulin), ACTB (β-actin), VCL (vinculin), TBP (TATA-binding protein)
+            
+            - `'nuclear'`: COX (cytochrome c oxidase), LMNB1 (lamin B1), PCNA (proliferating cell nuclear antigen), HDAC1 (histone deacetylase 1)
+            
+            - `'mitochondrial'`: VDAC1 (voltage-dependent anion channel 1)
+            
+            - `'all'`: plots all three categories across separate subplots.
+
+        **kwargs: Additional keyword arguments passed to seaborn plotting functions.
+
+    Returns:
+        ax (matplotlib.axes.Axes or list of matplotlib.axes.Axes):
+            Axis or list of axes with the plotted protein abundances.
+    Note:
+        This function assumes that the specified housekeeping proteins are annotated in `.prot.var['Genes']`. Missing proteins will be skipped during plotting and may result in empty or partially filled plots.
+            
+    !!! example
+        Plot housekeeping protein abundance for whole cell controls:
+            ```python
+            from scviz import plotting as scplt
+            fig, ax = plt.subplots(figsize=(6,4))
+            scplt.plot_abundance_housekeeping(ax, pdata, loading_control='whole cell', classes='condition')
+            ```
+    """
+
+
+    loading_controls = {
+        'whole cell': ['GAPDH', 'TBCD', 'ACTB', 'VCL', 'TBP'],
+        'nuclear': ['COX', 'LMNB1', 'PCNA', 'HDAC1'],
+        'mitochondrial': ['VDAC1'],
+        'all': ['GAPDH', 'TBCD', 'ACTB', 'VCL', 'TBP', 'COX', 'LMNB1', 'PCNA', 'HDAC1', 'VDAC1']
+    }
+
+    # Check validity
+    if loading_control not in loading_controls:
+        raise ValueError(f"❌ Invalid loading control type: {loading_control}")
+
+    # Plot all categories as subplots
+    if loading_control == 'all':
+        # Create 1x3 subplots
+        fig, axes = plt.subplots(1, 3, figsize=(16, 4), constrained_layout=True)
+        groups = ['whole cell', 'nuclear', 'mitochondrial']
+        for ax_sub, group in zip(axes, groups):
+            palette = get_color('colors', n=len(loading_controls[group]))
+            plot_abundance(ax_sub, pdata, namelist=loading_controls[group], classes=classes, layer='X', palette=palette, **kwargs)
+            ax_sub.set_title(group.title())
+        fig.suptitle("Housekeeping Protein Abundance", fontsize=14)
+        return fig, axes
+    else:
+        palette = get_color('colors', n=len(loading_controls[loading_control]))
+        plot_abundance(ax, pdata, namelist=loading_controls[loading_control], classes=classes, layer='X', palette=palette, **kwargs)
+        ax.set_title(loading_control.title())
+
+
 def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
                    classes=None, return_df=False, order=None, palette=None,
                    log=True, facet=None, height=4, aspect=0.5,
                    plot_points=True, x_label='gene', kind='auto', **kwargs):
     """
-    Plot abundance of proteins/peptides using violin + box (inner="box") + strip.
+    Plot abundance of proteins or peptides across samples.
 
-    Parameters:
-    ax (matplotlib.axes.Axes): Axis to plot on (ignored if facet is used).
-    pdata (pAnnData): Your pAnnData object.
-    namelist (list of str): Accessions or gene names to plot.
-    layer (str): Data layer name.
-    on (str): 'protein' or 'peptide'.
-    classes (str or list): obs column(s) to group by (used for color).
-    return_df (bool): If True, return DataFrame with replicate + summary values.
-    order (list): Custom order of classes.
-    palette (list or dict): Color palette.
-    log (bool): Plot log2(abundance).
-    facet (str or None): obs column to facet by.
-    height, aspect (float): For facet layout.
-    plot_points (bool): Show stripplot of individual samples.
-    x_label (str): Label x-axis as 'gene' or 'accession'.
-    kind (str): 'auto' (default), 'violin', or 'bar'. If 'auto', switches to barplot if all groups ≤ 3 samples.
-    **kwargs: Extra args passed to violinplot or barplot depending on kind.
+    This function visualizes expression values for selected proteins or peptides
+    using violin + box + strip plots, or bar plots when the number of replicates
+    per group is small. Supports grouping, faceting, and custom ordering.
+
+    Args:
+        ax (matplotlib.axes.Axes): Axis to plot on. Ignored if `facet` is used.
+        pdata (pAnnData): Input pAnnData object.
+        namelist (list of str, optional): List of accessions or gene names to plot.
+            If None, all available features are considered.
+        layer (str): Data layer to use for abundance values. Default is `'X'`.
+        on (str): Data level to plot, either `'protein'` or `'peptide'`.
+        classes (str or list of str, optional): `.obs` column(s) to use for grouping
+            samples. Determines coloring and grouping structure.
+        return_df (bool): If True, returns the DataFrame of replicate and summary values.
+        order (dict or list, optional): Custom order of classes. For dictionary input,
+            keys are class names and values are the ordered categories.  
+            Example: `order = {"condition": ["sc", "kd"]}`.
+        palette (list or dict, optional): Color palette mapping groups to colors.
+        log (bool): If True, apply log2 transformation to abundance values. Default is True.
+        facet (str, optional): `.obs` column to facet by, creating multiple subplots.
+        height (float): Height of each facet plot. Default is 4.
+        aspect (float): Aspect ratio of each facet plot. Default is 0.5.
+        plot_points (bool): Whether to overlay stripplot of individual samples.
+        x_label (str): Label for the x-axis, either `'gene'` or `'accession'`.
+        kind (str): Type of plot. Options:
+
+            - `'auto'`: Default; uses barplot if groups have ≤ 3 samples, otherwise violin.
+            - `'violin'`: Always use violin + box + strip.
+            - `'bar'`: Always use barplot.
+
+        **kwargs: Additional keyword arguments passed to seaborn plotting functions.
 
     Returns:
-    matplotlib.Axes or sns.FacetGrid or pd.DataFrame
+        ax (matplotlib.axes.Axes or seaborn.FacetGrid):
+            The axis or facet grid containing the plot.
+        df (pandas.DataFrame, optional): Returned if `return_df=True`.
+
+    !!! example
+        Plot abundance of two selected proteins:
+            ```python
+            from scviz import plotting as scplt
+            scplt.plot_abundance(ax, pdata, namelist=['Slc12a2','Septin6'])
+            ```
+
     """
-    import numpy as np
-    import pandas as pd
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-    import warnings
 
     # Get abundance DataFrame
     df = utils.get_abundance(
         pdata, namelist=namelist, layer=layer, on=on,
         classes=classes, log=log, x_label=x_label
     )
+
+    # --- Handle custom class ordering ---
+    if classes is not None and order is not None:
+        unused = set(order) - (set([classes]) if isinstance(classes, str) else set(classes))
+        if unused:
+            print(f"⚠️ Unused keys in `order`: {unused} (not in `classes`)")
+            
+        if isinstance(classes, str):
+            if classes in order:
+                cat_type = pd.api.types.CategoricalDtype(order[classes], ordered=True)
+                df['class'] = df['class'].astype(cat_type)
+        else:
+            for cls in classes:
+                if cls in order and cls in df.columns:
+                    cat_type = pd.api.types.CategoricalDtype(order[cls], ordered=True)
+                    df[cls] = df[cls].astype(cat_type)
+
+    # --- Sort the dataframe so group order is preserved in plotting ---
+    if classes is not None:
+        sort_cols = ['x_label_name']
+        if isinstance(classes, str):
+            sort_cols.append('class')
+        else:
+            sort_cols.extend(classes)
+        df = df.sort_values(by=sort_cols)
+
 
     # Add facet column (plotting only)
     df['facet'] = df[facet] if facet else 'all'
@@ -359,7 +632,7 @@ def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
             return _ax
 
     def _plot_violin(df):
-        violin_kwargs = dict(inner="box", linewidth=1, cut=0, alpha=0.5, scale="width")
+        violin_kwargs = dict(inner="box", linewidth=1, cut=0, alpha=0.5, density_norm="width")
         violin_kwargs.update(kwargs)
         if facet and df['facet'].nunique() > 1:
             g = sns.FacetGrid(df, col='facet', height=height, aspect=aspect, sharey=True)
@@ -397,59 +670,106 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
              show_labels=False, label_column=None,
              add_ellipses=False, ellipse_kwargs=None):
     """
-    Plot PCA scatter plot for classes, protein or peptide abundance.
+    Plot principal component analysis (PCA) of protein or peptide abundance.
 
-    Parameters:
-    - ax (matplotlib.axes.Axes): The axis to plot on (must be 3D if plotting 3 PCs).
-    - pdata (scviz.pAnnData): The pAnnData object with .prot, .pep, and .summary.
-    - classes (str or list of str or None): 
-        - None: plot in grey
-        - str: an obs column (e.g. 'treatment') or a protein/gene (e.g. 'UBE4B')
-        - list of str: combine multiple obs columns (e.g. ['cellline', 'treatment'])
-    - layer (str): The layer to extract from adata (default: "X").
-    - on (str): 'protein' or 'peptide' (default: 'protein').
-    - cmap (str, list, or colormap):
-        - 'default': use get_color() scheme
-        - list of colors: used for obs classes
-        - colormap name or object: used for continuous abundance coloring
-    - s (float): Scatter dot size (default: 20).
-    - alpha (float): Dot opacity (default: 0.8).
-    - plot_pc (list): PCs to plot (e.g. [1,2] or [1,2,3]).
-    - pca_params (dict): Params for PCA, passed to sklearn PCA.
-    - force (bool): If True, re-calculate PCA even if it already exists.
-    - show_labels (bool or list): 
-        - False: no labels
-        - True: show all sample names
-        - list: only label specified sample names (e.g. ['sample1.raw', 'sample2.raw'])
-    - label_column (str or None): Optional column in pdata.summary to use as label source.
-    - add_ellipses (bool): If True, overlay confidence ellipses per class (2D only).
-        Note: Confidence ellipses are calculated from the group covariance matrix and represent
-        a 95% confidence region under a bivariate Gaussian assumption.
-    - ellipse_kwargs (dict): Optional kwargs to pass to ellipse patch.
+    This function computes or reuses PCA of abundance values and visualizes
+    samples in a scatter plot colored by metadata or feature expression.
+    Supports both 2D and 3D plotting, with optional labels and confidence ellipses.
+
+    Args:
+        ax (matplotlib.axes.Axes): Axis to plot on. Must be 3D if plotting 3 PCs.
+        pdata (pAnnData): Input pAnnData object with `.prot`, `.pep`, and `.summary`.
+        classes (str, list of str, or None): Coloring scheme.
+            
+            - None: plot all samples in grey.
+            
+            - str: an `.obs` column (e.g. `"treatment"`) or a gene/protein (e.g. `"UBE4B"`).
+            
+            - list of str: combine multiple `.obs` columns (e.g. `["cellline", "treatment"]`).
+
+        layer (str): Data layer to use. Default is `"X"`.
+        on (str): Data level to plot, either `"protein"` or `"peptide"`. Default is `"protein"`.
+        cmap (str, list, or matplotlib colormap): Colormap for point coloring.
+            
+            - `"default"`: uses `get_color()` scheme.
+            
+            - list of colors: categorical mapping for `classes`.
+            
+            - colormap name or object: continuous coloring for expression values.
+
+        s (float): Scatter dot size. Default is 20.
+        alpha (float): Point opacity. Default is 0.8.
+        plot_pc (list of int): Principal components to plot, e.g. `[1, 2]` or `[1, 2, 3]`.
+        pca_params (dict, optional): Additional parameters for `sklearn.decomposition.PCA`.
+        force (bool): If True, recompute PCA even if it is already cached.
+        show_labels (bool or list): Whether to label points.
+            
+            - False: no labels.
+            
+            - True: label all samples.
+            
+            - list: label only specified samples.
+
+        label_column (str, optional): Column in `.summary` to use as label source.
+            Overrides sample names if provided.
+        add_ellipses (bool): If True, overlay confidence ellipses per class (2D only).
+            Ellipses represent a 95% confidence region under a bivariate Gaussian assumption.
+        ellipse_kwargs (dict, optional): Additional keyword arguments for the ellipse patch.
 
     Returns:
-    - ax (matplotlib.axes.Axes): The plot axes.
-    - pca (sklearn.decomposition.PCA): The fitted PCA object.
+        ax (matplotlib.axes.Axes): Axis containing the PCA scatter plot.
 
-    Examples:
-    ---------
-    >>> plot_pca(ax, pdata)  # plot in grey
-    >>> plot_pca(ax, pdata, classes='treatment')  # color by categorical obs
-    >>> plot_pca(ax, pdata, classes=['cellline', 'treatment'])  # combined label
-    >>> plot_pca(ax, pdata, classes='UBE4B')  # color by protein expression
-    >>> plot_pca(ax, pdata, show_labels=True)  # label each sample
-    >>> plot_pca(ax, pdata, show_labels=True, label_column='short_name')  # use custom label
-    >>> plot_pca(ax, pdata, classes='treatment', add_ellipses=True)  # add default ellipses
-    >>> plot_pca(ax, pdata, classes='treatment', add_ellipses=True, ellipse_kwargs={'alpha': 0.1, 'lw': 2})
+        pca (sklearn.decomposition.PCA): The fitted PCA object.
+
+    Note:
+        PCA results are cached in `pdata.uns["pca"]` and reused across plotting calls.
+        To force recalculation (e.g., after filtering or normalization), set `force=True`.
+
+    Example:
+        Basic usage in grey:
+            ```python
+            plot_pca(ax, pdata)
+            ```
+
+        Color by categorical class:
+            ```python
+            plot_pca(ax, pdata, classes="treatment")
+            ```
+
+        Combine multiple classes:
+            ```python
+            plot_pca(ax, pdata, classes=["cellline", "treatment"])
+            ```
+
+        Color by protein expression:
+            ```python
+            plot_pca(ax, pdata, classes="UBE4B")
+            ```
+
+        Label all samples:
+            ```python
+            plot_pca(ax, pdata, show_labels=True)
+            ```
+
+        Label with custom column:
+            ```python
+            plot_pca(ax, pdata, show_labels=True, label_column="short_name")
+            ```
+
+        Add confidence ellipses:
+            ```python
+            plot_pca(ax, pdata, classes="treatment", add_ellipses=True)
+            ```
+
+        Customize ellipse appearance:
+            ```python
+            plot_pca(
+                ax, pdata, classes="treatment", add_ellipses=True,
+                ellipse_kwargs={"alpha": 0.1, "lw": 2}
+            )
+            ```
     """
-    import numpy as np
-    import pandas as pd
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as mpatches
     from matplotlib.patches import Ellipse
-    import matplotlib.colors as mcolors
-    import matplotlib.cm as cm
-    from sklearn.decomposition import PCA
 
     def plot_confidence_ellipse(x, y, ax, n_std=2.4477, facecolor='none', edgecolor='black', alpha=0.2, **kwargs):
         if x.size <= 2:
@@ -481,16 +801,15 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
     pca_param = {**default_pca_params, **(pca_params or {})}
 
     if 'X_pca' in adata.obsm and not force:
-        print(f'PCA already exists in {on} data — using existing.')
+        print(f'{utils.format_log_prefix("warn")} PCA already exists in {on} data — using existing. Run with `force=True` to recompute.')
     else:
-        print(f'Running PCA on {on} using layer {layer}')
         pdata.pca(on=on, layer=layer, **pca_param)
 
     X_pca = adata.obsm['X_pca']
     pca = adata.uns['pca']
 
     # Get colors
-    color_mapped, cmap_resolved, legend_elements = resolve_pca_colors(adata, classes, cmap, layer=layer)
+    color_mapped, cmap_resolved, legend_elements = resolve_plot_colors(adata, classes, cmap, layer=layer)
 
     # Plot
     if len(plot_pc) == 2:
@@ -552,19 +871,55 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
             print("[plot_pca] Warning: Labels are long. Consider using label_column='your_column'.")
 
     if legend_elements:
-        legend_title = "/".join(c.capitalize() for c in classes) if isinstance(classes, list) else classes.capitalize()
-        ax.legend(handles=legend_elements, title=legend_title, loc='best', frameon=False)
+        if classes is None:
+            legend_title = None  # no title if no classes
+        elif isinstance(classes, list):
+            legend_title = "/".join(c.capitalize() for c in classes)
+        else:
+            legend_title = str(classes).capitalize()
+
+        ax.legend(handles=legend_elements,
+                title=legend_title,
+                loc='best',
+                frameon=False)
 
     return ax, pca
 
-def resolve_pca_colors(adata, classes, cmap, layer="X"):
+def resolve_plot_colors(adata, classes, cmap, layer="X"):
     """
-    Resolve colors for PCA plot based on classes. Helper function for plot_pca.
-    Returns:
-        - color_mapped: array-like values to use for coloring
-        - cmap_resolved: colormap (only for continuous coloring)
-        - legend_elements: legend handles (only for categorical coloring)
+    Resolve colors for PCA or abundance plots.
+
+    This helper function determines how samples should be colored in plotting
+    functions based on categorical or continuous class values. It returns mapped
+    color values, a colormap (if applicable), and legend handles.
+
+    Args:
+        adata (anndata.AnnData): AnnData object (protein or peptide level).
+        classes (str): Class used for coloring. Can be:
+            
+            - An `.obs` column name (categorical or continuous).
+            
+            - A gene or protein identifier, in which case coloring is based
+              on abundance values from the specified `layer`.
+
+        cmap (str, list, or matplotlib colormap): Colormap to use.
+            
+            - `"default"`: uses `get_color()` scheme.
+            
+            - list of colors: categorical mapping.
+            
+            - colormap name or object: continuous mapping.
+
+        layer (str): Data layer to extract abundance values from when `classes`
+            is a gene/protein. Default is `"X"`.
+
+    Returns:      
+        color_mapped (array-like): Values mapped to colors for plotting.
+        cmap_resolved (matplotlib colormap or None): Colormap object for continuous coloring; None if categorical.
+        legend_elements (list or None): Legend handles for categorical coloring; None if continuous.
+
     """
+
     import matplotlib.cm as cm
     import matplotlib.colors as mcolors
     import matplotlib.patches as mpatches
@@ -584,12 +939,15 @@ def resolve_pca_colors(adata, classes, cmap, layer="X"):
         class_labels = sorted(set(y))
         if cmap == 'default':
             palette = get_color('colors', n=len(class_labels))
+            color_dict = {c: palette[i] for i, c in enumerate(class_labels)}
         elif isinstance(cmap, list):
-            palette = cmap
+            color_dict = {c: cmap[i] for i, c in enumerate(class_labels)}
+        elif isinstance(cmap, dict):
+            color_dict = cmap
         else:
             cmap_obj = cm.get_cmap(cmap)
             palette = [mcolors.to_hex(cmap_obj(i / max(len(class_labels) - 1, 1))) for i in range(len(class_labels))]
-        color_dict = {c: palette[i] for i, c in enumerate(class_labels)}
+            color_dict = {c: palette[i] for i, c in enumerate(class_labels)}
         color_mapped = [color_dict[val] for val in y]
         legend_elements = [mpatches.Patch(color=color_dict[c], label=c) for c in class_labels]
         return color_mapped, None, legend_elements
@@ -600,12 +958,15 @@ def resolve_pca_colors(adata, classes, cmap, layer="X"):
         class_labels = sorted(set(y))
         if cmap == 'default':
             palette = get_color('colors', n=len(class_labels))
+            color_dict = {c: palette[i] for i, c in enumerate(class_labels)}
         elif isinstance(cmap, list):
-            palette = cmap
+            color_dict = {c: cmap[i] for i, c in enumerate(class_labels)}
+        elif isinstance(cmap, dict):
+            color_dict = cmap
         else:
             cmap_obj = cm.get_cmap(cmap)
             palette = [mcolors.to_hex(cmap_obj(i / max(len(class_labels) - 1, 1))) for i in range(len(class_labels))]
-        color_dict = {c: palette[i] for i, c in enumerate(class_labels)}
+            color_dict = {c: palette[i] for i, c in enumerate(class_labels)}
         color_mapped = [color_dict[val] for val in y]
         legend_elements = [mpatches.Patch(color=color_dict[c], label=c) for c in class_labels]
         return color_mapped, None, legend_elements
@@ -634,7 +995,7 @@ def resolve_pca_colors(adata, classes, cmap, layer="X"):
             gene_map = adata.var["Genes"].to_dict()
             match = [acc for acc, gene in gene_map.items() if gene == classes]
             if match:
-                return resolve_pca_colors(adata, match[0], cmap, layer)
+                return resolve_plot_colors(adata, match[0], cmap, layer)
         raise ValueError("Invalid classes input. Must be None, a protein in var_names, or an obs column/list.")
 
     else:
@@ -646,8 +1007,15 @@ def plot_enrichment_svg(*args, **kwargs):
     """
     Plot STRING enrichment results as an SVG figure.
 
-    NOTE:
-        This function is implemented in `enrichment.py`, not `plotting.py`.
+    This is a wrapper that redirects to the implementation in `enrichment.py`
+    for convenience and discoverability.
+
+    Args:
+        *args: Positional arguments passed to `scviz.enrichment.plot_enrichment_svg`.
+        **kwargs: Keyword arguments passed to `scviz.enrichment.plot_enrichment_svg`.
+
+    Returns:
+        svg (SVG): SVG figure object.
 
     See Also:
         scviz.enrichment.plot_enrichment_svg
@@ -655,28 +1023,57 @@ def plot_enrichment_svg(*args, **kwargs):
     from .enrichment import plot_enrichment_svg as actual_plot
     return actual_plot(*args, **kwargs)
 
-# TODO
-def plot_umap(ax, pdata, color = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False):
+def plot_umap(ax, pdata, classes = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False):
     """
-    This function plots the Uniform Manifold Approximation and Projection (UMAP) of the protein data.
+    Plot UMAP projection of protein or peptide abundance data.
 
-    Parameters:
-        ax (matplotlib.axes.Axes): The axes to plot on.
-        data (pandas.DataFrame): The protein data to plot.
-        color (str): The column in the data to color by.
-        cmap (matplotlib.colors.Colormap, optional): The colormap to use for the plot. Defaults to 'viridis'.
-        s (int, optional): The size of the points in the plot. Defaults to 20.
-        alpha (float, optional): The transparency of the points in the plot. Defaults to 0.8.
-        umap_params (dict, optional): A dictionary of parameters to pass to the UMAP function. 
-            Possible keys are 'min_dist', 'n_components', 'metric', and 'random_state'. 
-            Defaults to an empty dictionary, in which case the default UMAP parameters are used.
+    This function projects the data using UMAP and colors samples based on
+    metadata or abundance of a specific feature. Supports categorical or
+    continuous coloring, with automatic handling of legends and colormaps.
+
+    Args:
+        ax (matplotlib.axes.Axes): The axis to plot on (must be 3D if n_components=3).
+        pdata (scviz.pAnnData): The pAnnData object containing .prot, .pep, and .summary.
+        classes (str or list of str or None): 
+            - None: all samples plotted in grey
+            - str: column in `.obs` or a gene/protein to color by
+            - list of str: combine multiple `.obs` columns (e.g., ['cellline', 'day'])
+        layer (str): Data layer to use for UMAP input (default: "X").
+        on (str): Whether to use 'protein' or 'peptide' data (default: 'protein').
+        cmap (str, list, or dict): 
+            - 'default': use internal color scheme
+            - list: list of colors, assigned to class labels in sorted order
+            - dict: {label: color} mapping
+            - str: continuous colormap name (e.g., 'viridis') for abundance coloring
+        s (float): Marker size (default: 20).
+        alpha (float): Marker opacity (default: 0.8).
+        umap_params (dict): Parameters to pass to UMAP (e.g., 'min_dist', 'metric').
+        text_size (int): Font size for axis labels and legend (default: 10).
+        force (bool): If True, re-compute UMAP even if results already exist.
 
     Returns:
-        ax (matplotlib.axes.Axes): The axes with the plot.
+        ax (matplotlib.axes.Axes): The axis with the UMAP plot.
         fit_umap (umap.UMAP): The fitted UMAP object.
 
     Raises:
-        AssertionError: If 'n_components' is 3 but the axes is not a 3D projection.
+        AssertionError: If 'n_components' is 3 and the axis is not 3D.
+
+    Example:
+        Plot by treatment group with default palette:
+            ```python
+            plot_umap(ax, pdata, classes='treatment')
+            ```
+
+        Plot by protein abundance (continuous coloring):
+            ```python
+            plot_umap(ax, pdata, classes='P12345', cmap='plasma')
+            ```
+
+        Plot with custom palette:
+            ```python
+            custom_palette = {'ctrl': '#CCCCCC', 'treated': '#E41A1C'}
+            plot_umap(ax, pdata, classes='group', cmap=custom_palette)
+            ```
     """
     default_umap_params = {'n_components': 2, 'random_state': 42}
     umap_param = {**default_umap_params, **(umap_params if umap_params else {})}
@@ -693,7 +1090,7 @@ def plot_umap(ax, pdata, color = None, layer = "X", on = 'protein', cmap='defaul
  
     if force == False:
         if 'X_umap' in adata.obsm.keys():
-            print(f'UMAP already exists in {on} data, using existing UMAP')
+            print(f'{utils.format_log_prefix("warn")} UMAP already exists in {on} data, using existing UMAP. Run with `force=True` to recompute.')
         else:
             pdata.umap(on=on, layer=layer, **umap_param)
     else:
@@ -703,57 +1100,58 @@ def plot_umap(ax, pdata, color = None, layer = "X", on = 'protein', cmap='defaul
     Xt = adata.obsm['X_umap']
     umap = adata.uns['umap']
 
-    y = utils.get_samplenames(adata, color)
-    color_dict = {class_type: i for i, class_type in enumerate(sorted(set(y)))}
-    color_mapped = [color_dict[val] for val in y]
-    n_classes = len(color_dict)
-    if cmap == 'default':  
-        cmap = mcolors.ListedColormap(get_color('colors', n=n_classes))
-    else:
-        cmap = cm.get_cmap(cmap)
-    norm = mcolors.Normalize(vmin=min(color_mapped), vmax=max(color_mapped))
+    color_mapped, cmap_resolved, legend_elements = resolve_plot_colors(adata, classes, cmap, layer=layer)
 
     if umap_param['n_components'] == 1:
-        ax.scatter(Xt[:,0], range(len(Xt)), c=color_mapped, cmap=cmap, s=s, alpha=alpha)
+        ax.scatter(Xt[:,0], range(len(Xt)), c=color_mapped, cmap=cmap_resolved, s=s, alpha=alpha)
         ax.set_xlabel('UMAP 1', fontsize=text_size)
-    if umap_param['n_components'] == 2:
-        ax.scatter(Xt[:,0], Xt[:,1], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
+    elif umap_param['n_components'] == 2:
+        ax.scatter(Xt[:,0], Xt[:,1], c=color_mapped, cmap=cmap_resolved, s=s, alpha=alpha)
         ax.set_xlabel('UMAP 1', fontsize=text_size)
         ax.set_ylabel('UMAP 2', fontsize=text_size)
-    if umap_param['n_components'] == 3:
-        ax.scatter(Xt[:,0], Xt[:,1], Xt[:,2], c=color_mapped, cmap=cmap, s=s, alpha=alpha)
+    elif umap_param['n_components'] == 3:
+        ax.scatter(Xt[:,0], Xt[:,1], Xt[:,2], c=color_mapped, cmap=cmap_resolved, s=s, alpha=alpha)
         ax.set_xlabel('UMAP 1', fontsize=text_size)
         ax.set_ylabel('UMAP 2', fontsize=text_size)
         ax.set_zlabel('UMAP 3', fontsize=text_size)
 
-    # legend
-    legend_elements = [mpatches.Patch(color=cmap(norm(color_dict[key])), label=key) for key in color_dict]
-    ax.legend(handles=legend_elements, title = color, loc='upper right', bbox_to_anchor=(1.3, 1), fontsize=text_size)
+    if legend_elements:
+        legend_title = "/".join(c.capitalize() for c in classes) if isinstance(classes, list) else classes.capitalize()
+        ax.legend(handles=legend_elements, title=legend_title, loc='upper right', bbox_to_anchor=(1.3, 1), fontsize=text_size)
 
     return ax, umap
 
 def plot_pca_scree(ax, pca):
     """
-    Plot a scree plot of the PCA.
+    Plot a scree plot of explained variance from PCA.
 
-    Parameters:
-    ax (matplotlib.axes.Axes): The axes on which to plot the scree plot.
-    pca (sklearn.decomposition.PCA or dict): The fitted PCA model, or a dict from .uns with keys: 'variance_ratio'.
+    This function visualizes the proportion of variance explained by each
+    principal component as a bar chart, helping to assess how many PCs are
+    meaningful.
+
+    Args:
+        ax (matplotlib.axes.Axes): Axis on which to plot the scree plot.
+
+        pca (sklearn.decomposition.PCA or dict): The fitted PCA object, or a
+            dictionary from `.uns` with key `"variance_ratio"`.
 
     Returns:
-    ax (matplotlib.axes.Axes): The axes with the plotted scree plot.
+        ax (matplotlib.axes.Axes): Axis containing the scree plot.
 
     Example:
-    >>> import matplotlib.pyplot as plt
-    >>> import pandas as pd
-    >>> import numpy as np
-    >>> from scviz import plotting as scplt
-    >>> data = pd.read_excel('tests/data.xlsx', sheet_name='Proteins')
-    >>> cases = [['head'],['heart'],['tail']]
-    >>> fig, ax = plt.subplots(1,1)
-    >>> ax, pca = scplt.plot_pca(ax, data, cases, cmap='viridis', s=20, alpha=.8, plot_pc=[1,2])
-    >>> ax = scplt.plot_pca_scree(ax, pca)
-    >>> scplt.plot_pca_scree(ax, data.prot.uns['pca'])
+        Basic usage with fitted PCA, first run PCA:
+            ```python
+            import matplotlib.pyplot as plt
+            from scviz import plotting as scplt
+            fig, ax = plt.subplots()
+            ax, pca = scplt.plot_pca(ax, pdata, classes=["cellline", "treatment"], plot_pc=[1, 2])  # run PCA and plot
+            ax = scplt.plot_pca_scree(ax, pca)  # scree plot
+            ```
+
+        If PCA has already been run, use cached PCA results from `.uns`:
+            ```python
+            scplt.plot_pca_scree(ax, pdata.prot.uns["pca"])
+            ```
     """
     if isinstance(pca, dict):
         variance_ratio = np.array(pca["variance_ratio"])
@@ -773,72 +1171,359 @@ def plot_pca_scree(ax, pca):
     
     return ax
 
-# double check
-def plot_heatmap(ax, heatmap_data, cmap=cm.get_cmap('seismic'), norm_values=[4,5.5,7], linewidth=.5, annotate=True, square=False, cbar_kws = {'label': 'Abundance (AU)'}):
+def plot_clustermap(ax, pdata, on='prot', classes=None, layer="X", x_label='accession', namelist=None, lut=None, log2=True,
+                    cmap="coolwarm", figsize=(6, 10), force=False, impute=None, order=None, **kwargs):
     """
-    Plot annotated heatmap of protein abundance data.
+    Plot a clustered heatmap of proteins or peptides by samples.
 
-    Parameters:
-    ax (matplotlib.axes.Axes): The axes on which to plot the heatmap.
-    heatmap_data (pandas.DataFrame): The data to plot.
-    cmap (matplotlib.colors.Colormap): The colormap to use for the heatmap.
-    norm_values (list): The low, mid, and high values used to set colorbar scale. Can be assymetric.
-    linewidth (float): Plot linewidth.
-    annotate (bool): Annotate each heatmap entry with numerical value. True by default.
-    square (bool): Make heatmap square. False by default.
-    cbar_kws (dict): Pass-through keyword arguments for the colorbar. See `matplotlib.figure.Figure.colorbar()` for more information.
+    This function creates a hierarchical clustered heatmap (features × samples)
+    with optional column annotations from sample-level metadata. Supports
+    custom annotation colors, log2 transformation, and missing value imputation.
+
+    Args:
+        ax (matplotlib.axes.Axes): Unused; included for API compatibility.
+        pdata (pAnnData): Input pAnnData object.
+        on (str): Data level to plot, either `"prot"` or `"pep"`. Default is `"prot"`.
+        classes (str or list of str, optional): One or more `.obs` columns to
+            annotate samples in the heatmap.
+        layer (str): Data layer to use. Defaults to `"X"`.
+        x_label (str): Row label mode, either `"accession"` or `"gene"`. Used
+            for mapping `namelist`.
+        namelist (list of str, optional): Subset of accessions or gene names to plot.
+            If None, all rows are included.
+        lut (dict, optional): Nested dictionary of `{class_name: {label: color}}`
+            controlling annotation bar colors. Missing entries fall back to
+            default palettes. See the note 'lut example' below.
+        log2 (bool): Whether to log2-transform the abundance matrix. Default is True.
+        cmap (str): Colormap for heatmap. Default is `"coolwarm"`.
+        figsize (tuple): Figure size in inches. Default is `(6, 10)`.
+        force (bool): If True, imputes missing values instead of dropping rows
+            with NaNs.
+        impute (str, optional): Imputation strategy used when `force=True`.
+            
+            - `"row_min"`: fill NaNs with minimum value of that protein row.
+            - `"global_min"`: fill NaNs with global minimum value of the matrix.
+
+        order (dict, optional): Custom order for categorical annotations.
+            Example: `{"condition": ["kd", "sc"], "cellline": ["AS", "BE"]}`.
+        **kwargs: Additional keyword arguments passed to `seaborn.clustermap`.
+
+            Common options include:
+            
+            - `z_score (int)`: Normalize rows (0, features) or columns (1, samples).
+            - `standard_scale (int)`: Scale rows or columns to unit variance.
+            - `center (float)`: Value to center colormap on (e.g. 0 with `z_score`).
+            - `col_cluster (bool)`: Cluster columns (samples). Default is False.
+            - `row_cluster (bool)`: Cluster rows (features). Default is True.
+            - `linewidth (float)`: Grid line width between cells.
+            - `xticklabels` / `yticklabels` (bool): Show axis tick labels.
+            - `colors_ratio (tuple)`: Proportion of space allocated to annotation bars.
 
     Returns:
-    ax (matplotlib.axes.Axes): The axes with the plotted heatmap.
-    """
-    # if there are any columns that start with 'Matched in', remove them
-    heatmap_data = heatmap_data.loc[:,~heatmap_data.columns.str.contains('Matched in')]
-    
-    abundance_data_log10 = np.log10(heatmap_data)
-    mid_norm = mcolors.TwoSlopeNorm(vmin=norm_values[0], vcenter=norm_values[1], vmax=norm_values[2])
-    ax = sns.heatmap(abundance_data_log10, yticklabels=True, square=square, annot=annotate, linewidth=linewidth, cmap=cmap, norm=mid_norm, cbar_kws=cbar_kws)
+        g (seaborn.matrix.ClusterGrid): The seaborn clustermap object.
 
-    return ax
+    !!! note "lut example"
+        Example of a custom lookup table for annotation colors:
+            ```python
+            lut = {
+                "cellline": {
+                    "AS": "#e41a1c",
+                    "BE": "#377eb8"
+                },
+                "condition": {
+                    "kd": "#4daf4a",
+                    "sc": "#984ea3"
+               }
+            }
+            ```
+
+    !!! todo "Examples Pending"
+        Add usage examples here.
+    """
+    # --- Step 1: Extract data ---
+    if on not in ("prot", "pep"):
+        raise ValueError(f"`on` must be 'prot' or 'pep', got '{on}'")
+    
+    if namelist is not None:
+        df_abund = utils.get_abundance(
+        pdata, namelist=namelist, layer=layer, on=on,
+        classes=classes, log=log2, x_label=x_label)
+        
+        pivot_col = "log2_abundance" if log2 else "abundance"
+        row_index = "gene" if x_label == "gene" else "accession"
+        df = df_abund.pivot(index=row_index, columns="cell", values=pivot_col)
+    
+    else:
+        adata = pdata.prot if on == 'prot' else pdata.pep
+        X = adata.layers[layer] if layer in adata.layers else adata.X
+        data = X.toarray() if hasattr(X, "toarray") else np.asarray(X)
+        df = pd.DataFrame(data.T, index=adata.var_names, columns=adata.obs_names)
+        if log2:
+            with np.errstate(divide='ignore', invalid='ignore'):
+                df = np.log2(df)
+                df[df == -np.inf] = np.nan
+
+    # --- Handle missing values ---
+    nan_rows = df.index[df.isna().any(axis=1)].tolist()
+    if nan_rows:
+        if not force:
+            print(f"Warning: {len(nan_rows)} proteins contain missing values and will be excluded: {nan_rows}")
+            print("To include them, rerun with force=True and impute='row_min' or 'global_min'.")
+            df = df.drop(index=nan_rows)
+        else:
+            print(f"{len(nan_rows)} proteins contain missing values: {nan_rows}.\nImputing using strategy: '{impute}'")
+            if impute == "row_min":
+                global_min = df.min().min()
+                df = df.apply(lambda row: row.fillna(row.min() if not np.isnan(row.min()) else global_min), axis=1)
+            elif impute == "global_min":
+                df = df.fillna(df.min().min())
+            else:
+                raise ValueError("`impute` must be either 'row_min' or 'global_min' when force=True.")
+
+    # --- Step 2: Column annotations ---
+    col_colors = None
+    legend_handles, legend_labels = [], []
+
+    if classes is not None:
+        if isinstance(classes, str):
+            sample_labels = utils.get_samplenames(adata, classes)
+            annotations = pd.DataFrame({classes: sample_labels}, index=adata.obs_names)
+        else:
+            sample_labels = utils.get_samplenames(adata, classes)
+            split_labels = [[part.strip() for part in s.split(",")] for s in sample_labels]
+            annotations = pd.DataFrame(split_labels, index=adata.obs_names, columns=classes)
+
+        # Optional: apply custom category order from `order` dict
+        if order is not None and isinstance(order, dict):
+            for col in classes:
+                if col in annotations.columns and col in order:
+                    cat_type = pd.api.types.CategoricalDtype(order[col], ordered=True)
+                    annotations[col] = annotations[col].astype(cat_type)
+            unused_keys = set(order) - set(classes)
+            if unused_keys:
+                print(f"⚠️ Unused keys in `order`: {unused_keys} (not present in `classes`)")
+
+        # Sort columns (samples) by class hierarchy
+        sort_order = annotations.sort_values(by=classes).index
+        df = df[sort_order]
+        annotations = annotations.loc[sort_order]
+
+        if lut is None:
+            lut = {}
+
+        full_lut = {}
+        for col in annotations.columns:
+            unique_vals = sorted(annotations[col].dropna().unique())
+            user_colors = lut.get(col, {})
+            missing_vals = [v for v in unique_vals if v not in user_colors]
+            fallback_palette = sns.color_palette(n_colors=len(missing_vals))
+            fallback_colors = dict(zip(missing_vals, fallback_palette))
+            full_lut[col] = {**user_colors, **fallback_colors}
+
+            unmatched = set(user_colors) - set(unique_vals)
+            if unmatched:
+                print(f"Warning: The following labels in `lut['{col}']` are not found in the data: {sorted(unmatched)}")
+
+        col_colors = annotations.apply(lambda col: col.map(full_lut[col.name]))
+
+        # Legend handles
+        for col in annotations.columns:
+            legend_handles.append(mpatches.Patch(facecolor="none", edgecolor="none", label=col))  # header
+            for label, color in full_lut[col].items():
+                legend_handles.append(mpatches.Patch(facecolor=color, edgecolor="black", label=label))
+            legend_labels.extend([col] + list(full_lut[col].keys()))
+
+    # --- Step 3: Clustermap defaults (user-overridable) ---
+    col_cluster = kwargs.pop("col_cluster", False)
+    row_cluster = kwargs.pop("row_cluster", True)
+    linewidth = kwargs.pop("linewidth", 0)
+    yticklabels = kwargs.pop("yticklabels", False)
+    xticklabels = kwargs.pop("xticklabels", False)
+    colors_ratio = kwargs.pop("colors_ratio", (0.03, 0.02))
+    if kwargs.get("z_score", None) == 0:
+        zero_var_rows = df.var(axis=1) == 0
+        if zero_var_rows.any():
+            dropped = df.index[zero_var_rows].tolist()
+            print(f"⚠️ {len(dropped)} proteins have zero variance and will be dropped due to z_score=0: {dropped}")
+            df = df.drop(index=dropped)
+
+    # --- Step 4: Plot clustermap ---
+    try:
+        g = sns.clustermap(df,
+                        cmap=cmap,
+                        col_cluster=col_cluster,
+                        row_cluster=row_cluster,
+                        col_colors=col_colors,
+                        figsize=figsize,
+                        xticklabels=xticklabels,
+                        yticklabels=yticklabels,
+                        linewidth=linewidth,
+                        colors_ratio=colors_ratio,
+                        **kwargs)
+    except Exception as e:
+        print(f"Error occurred while creating clustermap: {e}")
+        return df
+
+    # --- Step 5: Column annotation legend ---
+    if classes is not None:
+        g.ax_col_dendrogram.legend(legend_handles, legend_labels,
+                                   title=None,
+                                   bbox_to_anchor=(0.5, 1.15),
+                                   loc="upper center",
+                                   ncol=len(classes),
+                                   handletextpad=0.5,
+                                   columnspacing=1.5,
+                                   frameon=False)
+        
+    # --- Step 6: Row label remapping ---
+    if x_label == "gene" and xticklabels:
+        _ , prot_map = pdata.get_gene_maps(on='protein' if on == 'prot' else 'peptide')
+        row_labels = [prot_map.get(row, row) for row in g.data2d.index]
+        g.ax_heatmap.set_yticklabels(row_labels, rotation=0)
+
+    # --- Step 8: Store clustering results ---
+    cluster_key  = f"{on}_{layer}_clustermap"
+    row_order = list(g.data2d.index)
+    row_indices = g.dendrogram_row.reordered_ind
+
+    pdata.stats[cluster_key]  = {
+        "row_order": row_order,
+        "row_indices": row_indices,
+        "row_labels": x_label,   # 'accession' or 'gene'
+        "namelist_used": namelist if namelist is not None else "all_proteins",
+        "col_order": list(g.data2d.columns),
+        "col_indices": g.dendrogram_col.reordered_ind if g.dendrogram_col else None,
+        "row_linkage": g.dendrogram_row.linkage,  # <--- NEW
+        "col_linkage": g.dendrogram_col.linkage if g.dendrogram_col else None,
+    }
+
+    return g
+
+# def plot_heatmap(ax, pdata, classes=None, layer="X", cmap=cm.get_cmap('seismic'), norm_values=[4,5.5,7], linewidth=.5, annotate=True, square=False, cbar_kws = {'label': 'Abundance (AU)'}):
+#     """
+#     Plot annotated heatmap of protein abundance data.
+
+#     Parameters:
+#     ax (matplotlib.axes.Axes): The axes on which to plot the heatmap.
+#     pdata (scviz.pdata): The input pdata object.
+#     classes (str or list of str, optional): Class column(s) to group samples. If None, all samples are included.
+#     cmap (matplotlib.colors.Colormap): The colormap to use for the heatmap.
+#     norm_values (list): The low, mid, and high values used to set colorbar scale. Can be assymetric.
+#     linewidth (float): Plot linewidth.
+#     annotate (bool): Annotate each heatmap entry with numerical value. True by default.
+#     square (bool): Make heatmap square. False by default.
+#     cbar_kws (dict): Pass-through keyword arguments for the colorbar. See `matplotlib.figure.Figure.colorbar()` for more information.
+
+#     Returns:
+#     ax (matplotlib.axes.Axes): The axes with the plotted heatmap.
+#     """
+#     # get the abundance data for the specified classes
+    
+#     if cmap is None:
+#         cmap = plt.get_cmap("seismic")
+#     if cbar_kws is None:
+#         cbar_kws = {'label': 'Abundance (log$_2$ AU)'}
+
+#     # get data
+#     adata = pdata.prot
+#     data = adata.layers[layer] if layer != "X" else adata.X
+#     data = data.toarray() if sparse.issparse(data) else data.copy()
+
+
+#     # log-transform the data
+#     abundance_data_log10 = np.log10(data + 1)
+
+#     mid_norm = mcolors.TwoSlopeNorm(vmin=norm_values[0], vcenter=norm_values[1], vmax=norm_values[2])
+#     ax = sns.heatmap(abundance_data_log10, yticklabels=True, square=square, annot=annotate, linewidth=linewidth, cmap=cmap, norm=mid_norm, cbar_kws=cbar_kws)
+
+#     return ax
 
 def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold_change_mode='mean', label=5,
                  label_type='Gene', color=None, alpha=0.5, pval=0.05, log2fc=1, linewidth=0.5,
                  fontsize=8, no_marks=False, de_data=None, return_df=False, **kwargs):
     """
-    Plot a volcano plot on the given axes. Calculates DE on pdata across the given class_type and values.
-    Alternatively, can use pre-calculated DE data (see pdata.de() dataframe for example input).
+    Plot a volcano plot of differential expression results.
 
-    Parameters:
-    ax (matplotlib.axes.Axes): The axes on which to plot.
-    pdata (scviz.pAnnData): The input pdata object.
-    classes (str): The class type to use for the comparison.
-    values (list or dict): The values to compare. Can be legacy list format or new dict format.
-    method (str, optional): The method to use for the comparison. Defaults to 'ttest'.
-    fold_change_mode : str
-        Method for computing fold change. Options:
-        - 'mean' : log2(mean(group1) / mean(group2))
-        - 'pairwise_median' : median of all pairwise log2 ratios
-    label (int or list): The genes to highlight. If an int, the top and bottom n genes are shown. If a list, only those genes are shown. Can also accept list with 2 numbers to show top and bottom n genes [top, bottom]. If none, no labels will be plotted.
-    label_type (str, optional): Label type. Currently only 'Gene' is recommended.
-    color (dict, optional): A dictionary mapping significance to colors. Defaults to grey/red/blue.
-    alpha (float, optional): Scatter dot transparency. Defaults to 0.5.
-    pval (float, optional): The p-value threshold for significance. Defaults to 0.05.
-    log2fc (float, optional): The log2 fold change threshold for significance. Defaults to 1.
-    linewidth (float, optional): The linewidth for the threshold lines. Defaults to 0.5.
-    fontsize (int, optional): Fontsize for gene labels. Defaults to 8.
-    no_marks (bool, optional): If True, suppress volcano point coloring. All points are grey.
-    de_data (pd.DataFrame): Optional pre-computed DE dataframe. Must contain 'log2fc', 'p_value', 'significance'.
-    return_df (bool, optional): If True, return the dataframe used for plotting.
-    **kwargs: Extra kwargs passed to matplotlib scatter plot.
+    This function calculates differential expression (DE) between two groups
+    and visualizes results as a volcano plot. Alternatively, it can use
+    pre-computed DE results (e.g. from `pdata.de()`).
+
+    Args:
+        ax (matplotlib.axes.Axes): Axis on which to plot.
+        pdata (pAnnData, optional): Input pAnnData object. Required if `de_data`
+            is not provided.
+        classes (str, optional): Sample class column to use for group comparison.
+        values (list or dict, optional): Values to compare between groups.
+            
+            - Legacy list format: `["group1", "group2"]`
+            
+            - Dictionary format: list of dicts specifying multiple conditions,
+              e.g. `[{"cellline": "HCT116", "treatment": "DMSO"},
+                     {"cellline": "HCT116", "treatment": "DrugX"}]`.
+
+        method (str): Statistical test method. Default is `"ttest"`. Options are `"ttest"`, `"mannwhitneyu"`, `"wilcoxon"`.
+        fold_change_mode (str): Method for computing fold change.
+            
+            - `"mean"`: log2(mean(group1) / mean(group2))
+            
+            - `"pairwise_median"`: median of all pairwise log2 ratios.
+
+        label (int, list, or None): Features to highlight.
+            
+            - If int: label top and bottom *n* features.
+            
+            - If list of str: label only the specified features.
+            
+            - If list of two ints: `[top, bottom]` to label asymmetric counts.
+            
+            - If None: no labels plotted.
+
+        label_type (str): Label content type. Currently `"Gene"` is recommended.
+        color (dict, optional): Dictionary mapping significance categories
+            to colors. Defaults to grey/red/blue.
+        alpha (float): Point transparency. Default is 0.5.
+        pval (float): P-value threshold for significance. Default is 0.05.
+        log2fc (float): Log2 fold change threshold for significance. Default is 1.
+        linewidth (float): Line width for threshold lines. Default is 0.5.
+        fontsize (int): Font size for feature labels. Default is 8.
+        no_marks (bool): If True, suppress coloring of significant points and
+            plot all points in grey. Default is False.
+        de_data (pandas.DataFrame, optional): Pre-computed DE results. Must contain
+            `"log2fc"`, `"p_value"`, and `"significance"` columns.
+        return_df (bool): If True, return both the axis and the DataFrame used
+            for plotting. Default is False.
+        **kwargs: Additional keyword arguments passed to `matplotlib.pyplot.scatter`.
 
     Returns:
-    matplotlib.axes.Axes or (ax, df)
+        ax (matplotlib.axes.Axes): Axis with the volcano plot if `return_df=False`.
+        tuple (matplotlib.axes.Axes, pandas.DataFrame): Returned if `return_df=True`.
 
-    Note:
-    Use the helper function `add_volcano_legend(ax)` to add standard volcano legend handles.
+    Usage Tips:
+        mark_volcano: Highlight specific features on an existing volcano plot.  
+        - For selective highlighting, set `no_marks=True` to render all points
+          in grey, then call `mark_volcano()` to add specific features of interest.
+
+        add_volcano_legend: Add standard legend handles for volcano plots.
+        - Use the helper function `add_volcano_legend(ax)` to add standard
+          significance legend handles.
 
     Example:
-    >>> ax, df = plot_volcano(ax, pdata, classes='cellline', values=['A', 'B'])
-    >>> add_volcano_legend(ax)
+        Dictionary-style input:
+            ```python
+            values = [
+                {"cellline": "HCT116", "treatment": "DMSO"},
+                {"cellline": "HCT116", "treatment": "DrugX"}
+            ]
+            colors = sns.color_palette("Paired")[4:6]
+            color_dict = dict(zip(['downregulated', 'upregulated'], colors))
+            ax, df = plot_volcano(ax, pdata, classes="cellline", values=values)
+            ```
+        Legacy input:
+            ```python
+            ax, df = plot_volcano(ax, pdata, classes="cellline", values=["A", "B"], color=color_dict)
+            add_volcano_legend(ax)
+            ```
+
     """
     import numpy as np
     import pandas as pd
@@ -869,9 +1554,10 @@ def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold
 
     scatter_kwargs = dict(s=20, edgecolors='none')
     scatter_kwargs.update(kwargs)
+    colors = volcano_df['significance'].astype(str).map(default_color)
 
     ax.scatter(volcano_df['log2fc'], volcano_df['-log10(p_value)'],
-               c=volcano_df['significance'].map(default_color), alpha=alpha, **scatter_kwargs)
+               c=colors, alpha=alpha, **scatter_kwargs)
 
     ax.axhline(-np.log10(pval), color='black', linestyle='--', linewidth=linewidth)
     ax.axvline(log2fc, color='black', linestyle='--', linewidth=linewidth)
@@ -880,8 +1566,13 @@ def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold
     ax.set_xlabel('$log_{2}$ fold change')
     ax.set_ylabel('-$log_{10}$ p value')
 
-    max_abs_log2fc = np.max(np.abs(volcano_df['log2fc'])) + 0.5
+    log2fc_clean = volcano_df['log2fc'].replace([np.inf, -np.inf], np.nan).dropna()
+    if log2fc_clean.empty:
+        max_abs_log2fc = 1  # default range if nothing valid
+    else:
+        max_abs_log2fc = log2fc_clean.abs().max() + 0.5
     ax.set_xlim(-max_abs_log2fc, max_abs_log2fc)
+
 
     if not no_marks and label not in [None, 0, [0, 0]]:
         if isinstance(label, int):
@@ -898,7 +1589,7 @@ def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold
                 label_df = volcano_df[
                 volcano_df.index.str.lower().isin(label_lower) |
                 volcano_df['Genes'].str.lower().isin(label_lower)
-]
+            ]
 
         else:
             raise ValueError("label must be int or list")
@@ -950,6 +1641,31 @@ def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold
         return ax
 
 def add_volcano_legend(ax, colors=None):
+    """
+    Add a standard legend for volcano plots.
+
+    This function appends a legend to a volcano plot axis, showing handles for
+    upregulated, downregulated, and non-significant features. Colors can be
+    customized, but default to grey, red, and blue.
+
+    Args:
+        ax (matplotlib.axes.Axes): Axis object to which the legend will be added.
+
+        colors (dict, optional): Custom colors for significance categories.
+            Keys must include `"upregulated"`, `"downregulated"`, and
+            `"not significant"`. Defaults to:
+            
+            ```python
+            {
+                "not significant": "grey",
+                "upregulated": "red",
+                "downregulated": "blue"
+            }
+            ```
+
+    Returns:
+        None
+    """
     from matplotlib.lines import Line2D
     import numpy as np
 
@@ -969,24 +1685,44 @@ def add_volcano_legend(ax, colors=None):
 
 def mark_volcano(ax, volcano_df, label, label_color="black", label_type='Gene', s=10, alpha=1, show_names=True, fontsize=8):
     """
-    Mark the volcano plot with specific proteins.
+    Mark a volcano plot with specific proteins or genes.
 
-    Parameters:
-    ax (matplotlib.axes.Axes): The axes on which to plot.
-    volcano_df (pandas.DataFrame): volcano_df data returned from get_protein_DE() or plot_volcano().
-    label (list): The genes to highlight. Can be list of list of genes to highlight for each case.
-    color (str, optional): The color of the markers. Defaults to 'black'. Can be list of colors for each case.
-    s (float, optional): The size of the markers. Defaults to 10.
-    alpha (float, optional): The transparency of the markers. Defaults to 1.
-    show_names (bool, optional): Whether to show the gene names. Defaults to True.
+    This function highlights selected features on an existing volcano plot,
+    optionally labeling them with names.
+
+    Args:
+        ax (matplotlib.axes.Axes): Axis on which to plot.
+        volcano_df (pandas.DataFrame): DataFrame returned by `plot_volcano()` or
+            `pdata.de()`, containing differential expression results.
+        label (list): Features to highlight. Can also be a nested list, with
+            separate lists of features for different cases.
+        label_color (str or list, optional): Marker color(s). Defaults to `"black"`.
+            If a list is provided, each case receives a different color.
+        label_type (str): Type of label to display. Default is `"Gene"`.
+        s (float): Marker size. Default is 10.
+        alpha (float): Marker transparency. Default is 1.
+        show_names (bool): Whether to show labels for the selected features.
+            Default is True.
+        fontsize (int): Font size for labels. Default is 8.
 
     Returns:
-    ax (matplotlib.axes.Axes): The axes with the plot.
+        ax (matplotlib.axes.Axes): Axis with the highlighted volcano plot.
 
     Example:
-    >>> fig, ax = plt.subplots(1,1)
-    >>> ax, volcano_df = scplt.plot_volcano(ax, data, cases, log2fc=0.5, pval=0.05, alpha=0.5, fontsize=6, label=[1,2,3]);
-    >>> ax = scplt.mark_volcano(ax, data, cases, label=['P11247','O35639','F6ZDS4'], color='red', s=10, alpha=1, show_names=True)
+        Highlight specific features on a volcano plot:
+            ```python
+            fig, ax = plt.subplots()
+            ax, df = scplt.plot_volcano(ax, pdata, classes="treatment", values=["ctrl", "drug"])
+            ax = scplt.mark_volcano(
+                ax, df, label=["P11247", "O35639", "F6ZDS4"],
+                label_color="red", s=10, alpha=1, show_names=True
+            )
+            ```
+
+    Note:
+        This function works especially well in combination with
+        `plot_volcano(..., no_marks=True)` to render all points in grey,
+        followed by `mark_volcano()` to selectively highlight features of interest.
     """
 
     if not isinstance(label[0], list):
@@ -1023,29 +1759,77 @@ def mark_volcano(ax, volcano_df, label, label_color="black", label_type='Gene', 
 
 def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=['Blues'], color=['blue'], order = None, s=20, alpha=0.2, calpha=1, exp_alpha = 70, debug = False):
     """
-    Plot rank abundance of proteins across different classes.
+    Plot rank abundance distributions across samples or groups.
 
-    Parameters:
-    ax (matplotlib.axes.Axes): The axis on which to plot.
-    pdata (scviz.pAnnData): The input pdata object.
-    classes (list of str): A list of classes to plot. If None, all .obs are combined into identifier classes. Default is None.
-    layer (str, optional): The layer to use for the plot. Default is 'X'.
-    on (str, optional): The data to use for the plot. Default is 'protein'.
-    cmap (str, optional): The colormap to use for the scatter plot. Default is 'Blues'.
-    color (list of str, optional): A list of colors for the scatter plots of each class. If not provided, all plots will be blue.
-    order (list of str, optional): The order of the classes to plot. If not provided, the classes will be plotted in the order they appear in the data.
-    s (float, optional): The marker size. Default is 20.
-    alpha (float, optional): The marker transparency. Default is 0.2.
-    calpha (float, optional): The marker transparency for distribution dots. Default is 1.
-    append_var (bool, optional): If True, append the average and stdev values to the pdata.[on].var. Default is True. Needs to be True for mark_rankquant to work.
-    exp_alpha (float, optional): The exponent for the pdf value based on average abundance. Default is 70.
+    This function visualizes rank abundance of proteins or peptides, optionally
+    grouped by sample-level classes. Distributions are drawn as scatter plots
+    with adjustable opacity and color schemes. Mean, standard deviation, and
+    rank statistics are written to `.var` for downstream annotation.
+
+    Args:
+        ax (matplotlib.axes.Axes): Axis on which to plot.
+        pdata (pAnnData): Input pAnnData object.
+        classes (str or list of str, optional): One or more `.obs` columns to
+            group samples. If None, samples are combined into identifier classes.
+        layer (str): Data layer to use. Default is `"X"`.
+        on (str): Data level to plot, either `"protein"` or `"peptide"`. Default is `"protein"`.
+        cmap (str or list of str): Colormap(s) used for scatter distributions.
+            Default is `["Blues"]`.
+        color (list of str): List of colors used for scatter distributions.
+            Defaults to `["blue"]`.
+        order (list of str, optional): Custom order of class categories. If None,
+            categories appear in data order.
+        s (float): Marker size. Default is 20.
+        alpha (float): Marker transparency for distributions. Default is 0.2.
+        calpha (float): Marker transparency for class means. Default is 1.
+        exp_alpha (float): Exponent for scaling probability density values by
+            average abundance. Default is 70.
+        debug (bool): If True, print debug information during computation.
+
+    Returns:
+        ax (matplotlib.axes.Axes): Axis containing the rank abundance plot.
     
     Example:
-    >>> colors = sns.color_palette("Blues", 4)
-    >>> cmaps = ['Blues', 'Reds', 'Greens', 'Oranges']
-    >>> fig, ax = plt.subplots(figsize=(4,3))
-    >>> ax = scplt.plot_rankquant(ax, pdata_filter, classes = 'size', order = ['sc', '5k','10k', '20k'], cmap = cmaps, color=colors, calpha = 1, alpha = 0.005)
-    
+        Plot rank abundance grouped by sample size:
+            ```python
+            import seaborn as sns
+            colors = sns.color_palette("Blues", 4)
+            cmaps = ["Blues", "Reds", "Greens", "Oranges"]
+            order = ["sc", "5k", "10k", "20k"]
+            fig, ax = plt.subplots(figsize=(4, 3))
+            ax = scplt.plot_rankquant(
+                ax, pdata_filter, classes="size",
+                order=order,
+                cmap=cmaps, color=colors, calpha=1, alpha=0.005
+            )
+            ```
+
+        Format the plot better:
+            ```python
+            plt.ylabel("Abundance")
+            ax.set_ylim(10**ylims[0], 10**ylims[1])
+            legend_patches = [
+                mpatches.Patch(color=color, label=label)
+                for color, label in zip(colors, order)
+            ]
+            plt.legend(
+                handles=legend_patches, bbox_to_anchor=(0.75, 1),
+                loc=2, borderaxespad=0., frameon=False
+            )
+            ```
+
+        Highlight specific points on the rank-quant plot:
+            ```python
+            scplt.mark_rankquant(
+                ax, pdata_filter, mark_df=prot_sc_df,
+                class_values=["sc"], show_label=True,
+                color="darkorange", label_type="gene"
+            )
+            ```
+
+    See Also:
+        mark_rankquant: Highlight specific proteins or genes on a rank abundance plot.            
+            
     """
     # all the plot_dfs should now be stored in pdata.var
     pdata.rank(classes, on, layer)
@@ -1129,6 +1913,75 @@ def plot_rankquant(ax, pdata, classes = None, layer = "X", on = 'protein', cmap=
     return ax
 
 def mark_rankquant(plot, pdata, mark_df, class_values, layer = "X", on = 'protein', color='red', s=10,alpha=1, show_label=True, label_type='accession'):
+    """
+    Highlight specific features on a rank abundance plot.
+
+    This function marks selected proteins or peptides on an existing rank
+    abundance plot, optionally adding labels. It uses statistics stored in
+    `.var` during `plot_rankquant()`.
+
+    Args:
+        plot (matplotlib.axes.Axes): Axis containing the rank abundance plot.
+        pdata (pAnnData): Input pAnnData object.
+        mark_df (pandas.DataFrame): Features to highlight.
+            
+            - DataFrame: Must include an `"Entry"` and `"accession"` column, and optionally
+              `"Gene Names"` if `label_type="gene"`.  
+              A typical way to generate this is using
+              `scutils.get_upset_query()`, e.g.:
+
+              ```python
+              size_upset = scutils.get_upset_contents(pdata_filter, classes="size")
+              prot_sc_df = scutils.get_upset_query(size_upset, present=["sc"], absent=["5k", "10k", "20k"])
+              ```
+            
+        class_values (list of str): Class values to highlight (must match those
+            used in `plot_rankquant`).
+        layer (str): Data layer to use. Default is `"X"`.
+        on (str): Data level, either `"protein"` or `"peptide"`. Default is `"protein"`.
+        color (str): Marker color. Default is `"red"`.
+        s (float): Marker size. Default is 10.
+        alpha (float): Marker transparency. Default is 1.
+        show_label (bool): Whether to display labels for highlighted features.
+            Default is True.
+        label_type (str): Label type. Options:
+            
+            - `"accession"`: show accession IDs.
+            - `"gene"`: map to gene names using `"Gene Names"` in `mark_df`.
+
+    Returns:
+        ax (matplotlib.axes.Axes): Axis with highlighted features.
+
+    !!! tip 
+    
+        Works best when paired with `plot_rankquant()`, which stores `Average`,
+        `Stdev`, and `Rank` statistics in `.var`. Call `plot_rankquant()` first
+        to generate these values, then use `mark_rankquant()` to overlay
+        highlights.
+
+    Example:
+        Plot rank abundance and highlight specific proteins:
+            ```python
+            fig, ax = plt.subplots()
+            ax = scplt.plot_rankquant(
+                ax, pdata_filter, classes="size", order=order,
+                cmap=cmaps, color=colors, s=10, calpha=1, alpha=0.005
+            )
+            size_upset = scutils.get_upset_contents(pdata_filter, classes="size")
+            prot_sc_df = scutils.get_upset_query(
+                size_upset, present=["sc"], absent=["5k", "10k", "20k"]
+            )
+            scplt.mark_rankquant(
+                ax, pdata_filter, mark_df=prot_sc_df,
+                class_values=["sc"], show_label=True,
+                color="darkorange", label_type="gene"
+            )
+            ```python
+
+    See Also:
+        plot_rankquant: Generate rank abundance plots with statistics stored in `.var`.
+        get_upset_query: Create a DataFrame of proteins based on set intersections (obs membership).
+    """
     adata = utils.get_adata(pdata, on)
     names = mark_df['Entry'].tolist()
     
@@ -1157,6 +2010,54 @@ def mark_rankquant(plot, pdata, mark_df, class_values, layer = "X", on = 'protei
     return plot
 
 def plot_venn(ax, pdata, classes, set_colors = 'default', return_contents = False, label_order=None, **kwargs):
+    """
+    Plot a Venn diagram of shared proteins or peptides across groups.
+
+    This function generates a 2- or 3-set Venn diagram based on presence/absence
+    data across specified sample-level classes. For more than 3 sets, use
+    `plot_upset()` instead.
+
+    Args:
+        ax (matplotlib.axes.Axes): Axis on which to plot.
+        pdata (pAnnData): Input pAnnData object.
+        classes (str or list of str): Sample-level classes to partition proteins
+            or peptides into sets.
+        set_colors (str or list of str): Colors for the sets.
+            
+            - `"default"`: use internal color palette.
+            - list of str: custom color list with length equal to the number of sets.
+
+        return_contents (bool): If True, return both the axis and the underlying
+            set contents used for plotting.
+        label_order (list of str, optional): Custom order of set labels. Must
+            contain the same elements as `classes`.
+        **kwargs: Additional keyword arguments passed to matplotlib-venn functions.
+
+    Returns:
+        ax (matplotlib.axes.Axes): Axis containing the Venn diagram. Returned if `return_contents=False`
+
+        tuple (matplotlib.axes.Axes, dict): Returned if `return_contents=True`.
+        The dictionary maps class labels to sets of feature identifiers.
+
+    Raises:
+        ValueError: If number of sets is not 2 or 3.
+        ValueError: If `label_order` does not contain the same elements as `classes`.
+        ValueError: If custom `set_colors` length does not match number of sets.
+
+    Example:
+        Plot a 2-set Venn diagram of shared proteins:
+            ```python
+            fig, ax = plt.subplots()
+            scplt.plot_venn(
+                ax, pdata_1mo_snpc, classes="sample",
+                set_colors=["#1f77b4", "#ff7f0e"]
+            )
+            ```
+
+    See Also:
+        plot_upset: Plot an UpSet diagram for >3 sets.  
+        plot_rankquant: Rank-based visualization of protein/peptide distributions.
+    """
     upset_contents = utils.get_upset_contents(pdata, classes, upsetForm=False)
 
     num_keys = len(upset_contents)
@@ -1192,13 +2093,65 @@ def plot_venn(ax, pdata, classes, set_colors = 'default', return_contents = Fals
         return ax
 
 def plot_upset(pdata, classes, return_contents = False, **kwargs):
-    # example of further styling
-    # upplot.style_subsets(present=["sc"], absent=['5k','10k','20k'],facecolor="black", label="sc only")
-    # upplot.style_subsets(absent=["sc"], present=['5k','10k','20k'],facecolor="red", label="in all but sc")
-    # uplot = upplot.plot(fig = fig)
+    """
+    Plot an UpSet diagram of shared proteins or peptides across groups.
 
-    # uplot["intersections"].set_ylabel("Subset size")
-    # uplot["totals"].set_xlabel("Protein count")
+    This function generates an UpSet plot for >2 sets based on presence/absence
+    data across specified sample-level classes. Uses the `upsetplot` package
+    for visualization.
+
+    Args:
+        pdata (pAnnData): Input pAnnData object.
+
+        classes (str or list of str): Sample-level classes to partition proteins
+            or peptides into sets.
+
+        return_contents (bool): If True, return both the UpSet object and the
+            underlying set contents used for plotting.
+
+        **kwargs: Additional keyword arguments passed to `upsetplot.UpSet`.  
+            See the [upsetplot documentation](https://upsetplot.readthedocs.io/en/stable/)  
+            for more details. Common arguments include:
+
+            - `sort_categories_by` (str): How to sort categories. Options are
+              `"cardinality"`, `"input"`, `"-cardinality"`, or `"-input"`.
+            - `min_subset_size` (int): Minimum subset size to display.
+
+    Returns:
+        upset (upsetplot.UpSet): The UpSet plot object.
+
+        tuple (upsetplot.UpSet, pandas.DataFrame): Returned if
+        `return_contents=True`. The DataFrame contains set membership as a
+        multi-index.
+
+    Example:
+        Basic usage with set size categories:
+            ```python
+            upplot, size_upset = scplt.plot_upset(
+                pdata_filter, classes="size", sort_categories_by="-input"
+            )
+            uplot = upplot.plot()
+            uplot["intersections"].set_ylabel("Subset size")
+            uplot["totals"].set_xlabel("Protein count")
+            plt.show()
+            ```
+
+        Optional styling of the plot can also be done:
+            ```python
+            upplot.style_subsets(
+                present=["sc"], absent=["2k", "5k", "10k", "20k"],
+                edgecolor="black", facecolor="darkorange", linewidth=2, label="sc only"
+            )
+            upplot.style_subsets(
+                absent=["sc"], present=["2k", "5k", "10k", "20k"],
+                edgecolor="white", facecolor="#7F7F7F", linewidth=2, label="in all but sc"
+            )
+            ```
+
+    See Also:
+        plot_venn: Plot a Venn diagram for 2 to 3 sets.  
+        plot_rankquant: Rank-based visualization of protein/peptide distributions.
+    """
 
     upset_contents = utils.get_upset_contents(pdata, classes = classes)
     upplot = upsetplot.UpSet(upset_contents, subset_size="count", show_counts=True, facecolor = 'black', **kwargs)
@@ -1280,6 +2233,54 @@ def plot_abundance_2D(ax,data,cases,genes='all', cmap='Blues',color=['blue'],s=2
     return ax
 
 def plot_raincloud(ax,pdata,classes = None, layer = 'X', on = 'protein', order = None, color=['blue'],boxcolor='black',linewidth=0.5, debug = False):
+    """
+    Plot raincloud distributions of protein or peptide abundances.
+
+    This function generates a raincloud plot (violin + boxplot + scatter)
+    to visualize abundance distributions across groups. Summary statistics
+    (average, standard deviation, rank) are written into `.var` for downstream
+    use with `mark_raincloud()`.
+
+    Args:
+        ax (matplotlib.axes.Axes): Axis on which to plot.
+        pdata (pAnnData): Input pAnnData object.
+        classes (str or list of str, optional): One or more `.obs` columns to
+            group samples. If None, all samples are combined.
+        layer (str): Data layer to use. Default is `"X"`.
+        on (str): Data level, either `"protein"` or `"peptide"`. Default is `"protein"`.
+        order (list of str, optional): Custom order of class categories. If None,
+            categories appear in data order.
+        color (list of str): Colors for each class distribution. Default is `["blue"]`.
+        boxcolor (str): Color for boxplot outlines. Default is `"black"`.
+        linewidth (float): Line width for box/whisker elements. Default is 0.5.
+        debug (bool): If True, return both axis and computed data arrays.
+
+    Returns:
+        ax (matplotlib.axes.Axes): If `debug=False`: axis with raincloud plot.
+
+        tuple (matplotlib.axes.Axes, list of np.ndarray): If `debug=True`: `(axis, data_X)` where `data_X` are the transformed abundance distributions per group.
+
+    Note:
+        Statistics (`Average`, `Stdev`, `Rank`) are stored in `.var` and can be
+        used with `mark_raincloud()` to highlight specific features.
+
+    Example:
+        Plot raincloud distributions grouped by sample size:
+            ```python
+            ax = scplt.plot_raincloud(
+                ax, pdata_filter, classes="size",
+                order=order, color=colors, linewidth=0.5, debug=False
+            )
+            scplt.mark_raincloud(
+                ax, pdata_filter, mark_df=prot_sc_df,
+                class_values=["sc"], color="black"
+            )
+            ```
+
+    See Also:
+        mark_raincloud: Highlight specific features on a raincloud plot.  
+        plot_rankquant: Alternative distribution visualization using rank abundance.
+    """
     adata = utils.get_adata(pdata, on)
 
     classes_list = utils.get_classlist(adata, classes = classes, order = order)
@@ -1357,6 +2358,52 @@ def plot_raincloud(ax,pdata,classes = None, layer = 'X', on = 'protein', order =
         return ax
 
 def mark_raincloud(plot,pdata,mark_df,class_values,layer = "X", on = 'protein',lowest_index=0,color='red',s=10,alpha=1):
+    """
+    Highlight specific features on a raincloud plot.
+
+    This function marks selected proteins or peptides on an existing
+    raincloud plot, using summary statistics written to `.var` during
+    `plot_raincloud()`.
+
+    Args:
+        plot (matplotlib.axes.Axes): Axis containing the raincloud plot.
+        pdata (pAnnData): Input pAnnData object.
+        mark_df (pandas.DataFrame): DataFrame containing entries to highlight.
+            Must include an `"Entry"` column.
+        class_values (list of str): Class values to highlight (must match those
+            used in `plot_raincloud`).
+        layer (str): Data layer to use. Default is `"X"`.
+        on (str): Data level, either `"protein"` or `"peptide"`. Default is `"protein"`.
+        lowest_index (int): Offset for horizontal positioning. Default is 0.
+        color (str): Marker color. Default is `"red"`.
+        s (float): Marker size. Default is 10.
+        alpha (float): Marker transparency. Default is 1.
+
+    Returns:
+        ax (matplotlib.axes.Axes): Axis with highlighted features.
+
+    !!! tip 
+    
+        Works best when paired with `plot_raincloud()`, which computes and
+        stores the required statistics in `.var`.
+
+    Example:
+        Highlight specific proteins on a raincloud plot:
+            ```python
+            ax = scplt.plot_raincloud(
+                ax, pdata_filter, classes="size", order=order,
+                color=colors, linewidth=0.5
+            )
+            scplt.mark_raincloud(
+                ax, pdata_filter, mark_df=prot_sc_df,
+                class_values=["sc"], color="black"
+            )
+            ```
+
+    See Also:
+        plot_raincloud: Generate raincloud plots with distributions per group.  
+        plot_rankquant: Alternative distribution visualization using rank abundance.
+    """
     adata = utils.get_adata(pdata, on)
     names = mark_df['Entry'].tolist()
     # TEST: check if names are in the data

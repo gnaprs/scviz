@@ -12,6 +12,10 @@ theme:
   favicon: assets/logo.png
   features:
     - navigation.footer
+    - content.footnote.tooltips
+    - content.code.copy
+    - content.code.select
+    - search.highlight
   palette:
     # Dark Mode
     - scheme: slate
@@ -38,6 +42,7 @@ markdown_extensions:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
+      default_lang: python
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences:
@@ -46,9 +51,10 @@ markdown_extensions:
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
-      alternate_style: true
+      alternate_style: true     
   - admonition
   - pymdownx.details
+  - footnotes
 extra:
   social:
     - icon: fontawesome/brands/github
@@ -58,28 +64,55 @@ extra:
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/scviz/
 plugins:
-  - mkdocstrings
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: false
+  - search
 
 copyright: Copyright &copy; 2025 Marion Pang
 
 nav:
   - Home:
       - Overview: index.md
-      - Changelog: changelog.md
+      - Changelog: CHANGELOG.md
       # - Credits: credits.md
       # - License: license.md
-  # - Getting started:
-      # - Installation: installation.md
-      # - Quickstart: quickstart.md
-  - Usage:
-      - Tutorial: code-examples.md
+  - Getting started:
+      - Installation: tutorials/installation.md
+      - Quickstart: tutorials/quickstart.md
+      - In-depth Tutorials:
+          - Overview: tutorials/index.md
+          - 1. Importing Data: tutorials/importing.md
+          - 2. Filtering: tutorials/filtering.md
+          - 3. Imputation + Normalization: tutorials/imputation.md
+          - 4. Plotting: tutorials/plotting.md
+          - 5. Differential Expression: tutorials/de.md
+          - 6. Enrichment + Networks: tutorials/enrichment.md
+  - API reference:
+      - Overview : reference/overview.md
+      - pAnnData:
+          - Base Class + Import: reference/pAnnData/pAnnData.md
+          - Core Utilities: reference/pAnnData/core_mixins.md
+          - Metadata + Summary: reference/pAnnData/metadata_mixins.md
+          - Editing + Filtering: reference/pAnnData/editing_mixins.md
+          - Analysis + Enrichment: reference/pAnnData/analysis_mixins.md
+          - Identifiers + STRING: reference/pAnnData/identifier_mixins.md
+      - Modules:
+        - scviz.utils: reference/utils.md
+        - scviz.plotting: reference/plotting.md
+      - Developer Utilities:
+          - TrackedDataFrame: reference/TrackedDataFrame.md
+          - Hidden Functions: reference/pAnnData/hidden_functions.md
+  - Others:
       - Admonitions: admonitions.md
       - Content-Tabs: content-tabs.md
       - Diagram: diagram.md
-  - API reference:
-      - scviz: reference/plotting.md
-      # - scviz.utils: reference/scviz.utils.md
-      # - scviz.renderers: reference/scviz.renderers.md
+
+
   - Author's website: https://gnaprs.github.io/
 # nav:
 # - Home:

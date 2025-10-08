@@ -16,5 +16,8 @@ from sklearn.decomposition import PCA
 from scipy.stats import ttest_ind
 from decimal import Decimal
 
+from .pAnnData import pAnnData  # imports the class
+__all__ = ["pAnnData"]
+
 import warnings
 warnings.filterwarnings('ignore')

@@ -1,30 +1,57 @@
 """
-This module contains functions for processing protein data and performing statistical tests.
+Utility functions for scviz.
+
+This module provides a collection of helper and processing functions used
+throughout the scviz package. They fall into four main categories:
+
+## Text Utility Functions
 
 Functions:
-    get_samples: Get the sample names for the given class(es) type.
-    protein_summary: Import protein data from an Excel file and summarize characteristics about each sample and sample groups.
-    append_norm: Append normalized protein data to the original protein data.
-    get_cv: Calculate the coefficient of variation (CV) for each case in the given data.
-    get_abundance: Calculate the abundance of proteins across different groups.
-    filter_group: Filter a DataFrame based on specified groups. Helper function for run_ttest.
-    run_ttest: Run t-tests on specified groups in a DataFrame.
-    get_abundance_query: Search and extract protein abundance data based on a specific list searching for accession, protein, description, pathway, or all.
-    get_upset_contents: Get the contents for an UpSet plot based on the specified case list.
-    ... more to come
+    format_log_prefix: Return standardized log prefixes for messages.
+    format_class_filter: Standardize class/value inputs for filtering.
+
+## Data Processing Functions
+
+Functions:
+    get_samplenames: Resolve sample names for given classes from `.obs`.
+    get_classlist: Return unique class values for specified `.obs` columns.
+    get_adata_layer: Safely extract data from `.X` or `.layers`.
+    get_adata: Retrieve `.prot` or `.pep` AnnData from pAnnData.
+    get_abundance: Wrapper to extract abundance data from pAnnData or AnnData.
+    resolve_accessions: Map gene names or accessions to `.var_names`.
+    get_upset_contents: Build contents for UpSet plots from pAnnData.
+    get_upset_query: Query features present/absent in UpSet contents.
+    filter: Legacy sample filtering (use `.filter_sample_values` instead).
+    resolve_class_filter: Resolve class/value pairs and apply filtering.
+    get_pep_prot_mapping: Determine peptide-to-protein mapping column.
+
+## API Functions
+
+Functions:
+    get_uniprot_fields_worker: Low-level UniProt REST API query function (batch up to 1024).
+    get_uniprot_fields: High-level UniProt API wrapper with batching.
+
+## Statistical Test Functions
+
+Functions:
+    pairwise_log2fc: Compute pairwise median log2 fold change between groups.
+    get_pca_importance: Identify most important features for PCA components.
+    get_protein_clusters: Retrieve hierarchical clusters from stored linkage.
+
+!!! warning
+    Many of the functions in this module are **internal helpers** and not
+    intended for direct end-user use. For filtering and abundance queries,
+    prefer the corresponding `pAnnData` methods.
 
 Example:
     To use this module, import it and call functions from your code as follows:
-
-    from scviz import utils
-    data = pd.read_csv('data.csv')
-    summarized_data = utils.protein_summary(data, variables=['region', 'amt'])
+        ```python
+        from scviz import utils as scutils
+        ```
     
-
 Todo:
     * Add corrections for differential expression.
     * Add more examples for each function.
-    * Add functions to get GO enrichment and GSEA analysis (see GOATOOLS or STAGES).
 """
 
 from typing import List, Optional, Dict, Any, Union
@@ -35,6 +62,7 @@ import re
 import io
 import requests
 import warnings
+import time
 
 import pandas as pd
 import numpy as np
@@ -53,19 +81,62 @@ from scviz import pAnnData
 
 def format_log_prefix(level: str, indent=None) -> str:
     """
-    Return a standardized log prefix for a given message level.
+    Return a standardized log prefix with emoji and label.
 
-    Parameters
-    ----------
-    level : str
-        One of: "user", "info", "result", "warn", "error", "search", "info_only".
-    indent : int or None, optional
-        Indentation level (1 = no indent, 2 = 6 spaces, 3 = 12 spaces). Default uses built-in indent.
+    This helper formats log message prefixes consistently across scviz,
+    with optional indentation for nested output. Used internally for
+    user-facing messages, warnings, errors, and updates.
 
-    Returns
-    -------
-    str
-        A formatted log prefix with emoji and label, optionally indented.
+    Args:
+        level (str): Logging level keyword. Must be one of:
+
+            - `"user"`: 🧭 [USER]  
+            - `"search"`: 🔍 [SEARCH]  
+            - `"info"`: ℹ️ [INFO]  
+            - `"result"`: ✅ [OK]  
+            - `"warn"`: ⚠️ [WARN]  
+            - `"error"`: ❌ [ERROR]  
+            - `"info_only"`: ℹ️  
+            - `"filter_conditions"`: 🔸 (indented)  
+            - `"result_only"`: ✅  
+            - `"blank"`: empty string  
+            - `"update"`: 🔄 [UPDATE]  
+            - `"update_only"`: 🔄  
+            - `"warn_only"`: ⚠️  
+
+        indent (int or None, optional): Indentation level override. Options:
+
+            - `1`: no indent  
+            - `2`: 5 spaces  
+            - `3`: 10 spaces  
+
+            If None, uses built-in default spacing (applied to most levels).
+
+    Returns:
+        str (str): A formatted log prefix with emoji and label.
+
+    Raises:
+        ValueError: If an unknown `level` string is provided.
+
+    Example:
+        Format an info prefix with default spacing:
+        ```python
+        from scviz.utils import format_log_prefix
+        format_log_prefix("info")
+        ```
+
+        ```
+            ℹ️ [INFO]
+        ```
+
+        Format a warning prefix with explicit indent:
+        ```python
+        format_log_prefix("warn", indent=3)
+        ```
+
+        ```
+                ⚠️ [WARN]
+        ```
     """
     level = level.lower()
     base_prefixes = {
@@ -80,7 +151,8 @@ def format_log_prefix(level: str, indent=None) -> str:
         "result_only": "✅",
         "blank": "",
         "update": "🔄 [UPDATE]",
-        "update_only": "🔄"
+        "update_only": "🔄",
+        "warn_only": "⚠️"
     }
 
     if level not in base_prefixes:
@@ -102,22 +174,40 @@ def format_log_prefix(level: str, indent=None) -> str:
 
 # ----------------
 # DATA PROCESSING FUNCTIONS
-# NOTE: get_samplenames and get_classlist are very similar, may want to consider combining at some point
+# NOTE: get_samplenames and get_classlist are very similar, may want to explain better the difference (classlist is basically samplenames.unique?)
 def get_samplenames(adata, classes):
     """
-    Gets the sample names for the given class(es) type. Helper function for plot functions. 
+    Retrieve sample names for specified class values.
 
-    Parameters:
-    - adata (anndata.AnnData): The AnnData object containing the sample names.
-    - classes (str or list of str): The classes to use for selecting samples. E.g. 'cell_type' or ['cell_type', 'treatment'].
+    This function resolves `.obs` metadata into sample-level identifiers
+    (one name per row). It is typically used for plotting functions where
+    sample names are required for labeling or grouping.
+
+    Args:
+        adata (anndata.AnnData): AnnData object containing sample metadata.
+
+        classes (str or list of str): Column(s) in `.obs` used to build sample names.
+
+            - str: return vlaues from a single column.
+            - list of str: combine multiple columns per row with `", "`.
 
     Returns:
-    - list of str: The sample names.
+        sample_names (list of str): Sample names dervied from `.obs`.
 
     Example:
-    >>> samples = get_samplenames(adata, 'cell_type')
-    """
+        Get sample names from a single metadata column:
+            ```python
+            samples = get_samplenames(adata, "cell_type")
+            ```
 
+        Combine multiple columns into sample identifiers:
+            ```python
+            samples = get_samplenames(adata, ["cell_type", "treatment"])
+            ```
+
+    Related Functions:
+        get_classlist: Return unique class values (not per-sample names).
+    """
     if classes is None:
         return None
     elif isinstance(classes, str):
@@ -129,18 +219,52 @@ def get_samplenames(adata, classes):
     
 def get_classlist(adata, classes = None, order = None):
     """
-    Returns a list of unique classes for the given class(es) type. Helper function for plot functions.
+    Retrieve unique class values for specified metadata columns. Useful 
+    for plot legends.
 
-    Parameters:
-    - adata (anndata.AnnData): The AnnData object containing the classes.
-    - classes (str or list of str): The classes to use for selecting samples. E.g. 'cell_type' or ['cell_type', 'treatment'].
-    - order (list of str): The order to sort the classes in. Default is None.
+    Unlike `get_samplenames`, which returns one identifier per row/sample,
+    this function extracts the set of unique class values for grouping
+    purposes (e.g., plotting categories). Supports optional reordering.
+
+    Args:
+        adata (anndata.AnnData): AnnData object containing sample metadata.
+
+        classes (str or list of str, optional): Column(s) in `.obs` to use.
+            
+            - None: combine all metadata columns up to the first `_quant` column.  
+            - str: return unique values from one column.  
+            - list of str: return unique combined values across multiple columns.  
+
+        order (list of str, optional): Custom order of categories. Must exactly
+            match the unique values; otherwise, a `ValueError` is raised.
 
     Returns:
-    - list of str: The unique classes.
+        class_list (list of str): Unique class values in `.obs`, optionally reordered.
+
+    Raises:
+        ValueError: If invalid columns are provided, or if `order` does not
+        match the unique class list.
 
     Example:
-    >>> classes = get_classlist(adata, classes = classes, order = order)
+        Get unique values from one metadata column:
+            ```python
+            classes = get_classlist(adata, classes="cell_type")
+            ```
+
+        Combine two columns and return unique class labels:
+            ```python
+            classes = get_classlist(adata, classes=["cell_type", "treatment"])
+            ```
+
+        Reorder categories explicitly:
+            ```python
+            classes = get_classlist(
+                adata, classes="cell_type", order=["A", "B", "C"]
+                )
+            ```
+
+    Related Functions:
+        get_samplenames: Return per-sample names (not unique class values).
     """
 
     if classes is None:
@@ -192,12 +316,19 @@ def get_adata_layer(adata, layer):
     """
     Safely extract layer data as dense numpy array.
 
-    Parameters:
-    - adata: AnnData object
-    - layer (str): Layer name or "X"
+    This helper returns the requested layer as a dense `numpy.ndarray`,
+    ensuring compatibility for downstream operations. Supports both
+    `.X` and `.layers[...]`.
+
+    Args:
+        adata (anndata.AnnData): AnnData object containing data matrices.
+
+        layer (str): Layer key.  
+            - `"X"`: return the main data matrix.  
+            - any other str: return the corresponding entry from `.layers`. E.g. "X_norm"
 
     Returns:
-    - numpy.ndarray
+        data (numpy.ndarray): Dense matrix representation of the requested layer.
     """
     if layer == "X":
         data = adata.X
@@ -209,6 +340,20 @@ def get_adata_layer(adata, layer):
     return data.toarray() if hasattr(data, 'toarray') else data
 
 def get_adata(pdata, on = 'protein'):
+    """
+    Retrieve the protein- or peptide-level AnnData object from a pAnnData container.
+
+    Args:
+        pdata (pAnnData): The parent pAnnData object containing both protein- and peptide-level data.
+
+        on (str): Which data object to return.  
+            - `"protein"`: return `pdata.prot`  
+            - `"peptide"`: return `pdata.pep`  
+
+    Returns:
+        adata (anndata.AnnData): The requested AnnData object.
+    """
+
     if on == 'protein':
         return pdata.prot
     elif on == 'peptide':
@@ -220,15 +365,33 @@ def get_abundance(pdata, *args, **kwargs):
     """
     Wrapper to extract abundance from either pAnnData or AnnData.
 
-    If pdata is a pAnnData object, calls pdata.get_abundance().
-    If pdata is an AnnData object, calls the internal logic directly.
+    This is a convenience wrapper that dispatches to the appropriate method:
+    - If `pdata` is a `pAnnData` object, it calls `pdata.get_abundance()`.
+    - If `pdata` is an `AnnData` object, it falls back to the internal
+      helper `_get_abundance_from_adata`.
 
-    Parameters:
-        pdata: pAnnData or AnnData
-        *args, **kwargs: passed to get_abundance
+    Args:
+        pdata (pAnnData or anndata.AnnData): Input object to extract abundance from.
+        *args: Positional arguments forwarded to `get_abundance`.
+        **kwargs: Keyword arguments forwarded to `get_abundance`.
+
+    Note:
+        See `pAnnData.get_abundance` for full parameter documentation. Briefly,
+
+            - namelist (list of str, optional): List of accessions or gene names to extract.
+            - layer (str): Data layer name (default = "X").
+            - on (str): "protein" or "peptide".
+            - classes (str or list of str, optional): Sample-level `.obs` column(s) to include.
+            - log (bool): If True, applies log2 transform to abundance values.
+            - x_label (str): Label features by "gene" or "accession".
 
     Returns:
-        pd.DataFrame
+        df (pandas.DataFrame): Long-form abundance DataFrame, optionally with
+        sample metadata and protein/peptide annotations.
+
+    See Also:
+        - :func:`pAnnData.get_abundance` (EditingMixin): Full-featured version with detailed docs.
+        - get_adata_layer: Helper to access abundance matrices from AnnData layers.
     """
     if hasattr(pdata, "get_abundance"):
         return pdata.get_abundance(*args, **kwargs)
@@ -274,16 +437,41 @@ def _get_abundance_from_adata(adata, namelist=None, layer='X', log=True,
 
 def resolve_accessions(adata, namelist, gene_col="Genes", gene_map=None):
     """
-    Resolve gene or accession names to accession IDs from .var_names.
+    Resolve gene or accession names to accession IDs from `.var_names`.
 
-    Parameters:
-        adata: AnnData or pAnnData object
-        namelist: list of input names (genes or accessions)
-        gene_col: column in .var containing gene names (default: "Genes")
-        gene_map: optional precomputed map of gene → accession
+    This function maps user-specified identifiers (gene names or accession IDs)
+    to the canonical accession IDs in an AnnData or pAnnData object. It first
+    checks `.var_names` for exact matches, then optionally resolves gene names
+    via a specified column (default `"Genes"`). Unmatched names are reported.
+
+    Args:
+        adata (AnnData or pAnnData): AnnData-like object containing `.var`.
+        namelist (list of str): Input identifiers to resolve (genes or accessions).
+        gene_col (str): Column in `.var` containing gene names (default: `"Genes"`).
+        gene_map (dict, optional): Precomputed mapping of gene → accession. If None,
+            a mapping is constructed from `gene_col`.
 
     Returns:
-        List of resolved accessions
+        resolved (list of str): List of accession IDs corresponding to the input names.
+
+    Raises:
+        ValueError: If none of the provided names can be resolved to `.var_names`
+            or the gene column.
+
+    Example:
+        Resolve gene symbols to accession IDs:
+            ```python
+            accs = resolve_accessions(adata, namelist=["UBE4B", "GAPDH"])
+            ```
+
+        Resolve accessions directly:    
+            ```python
+            accs = resolve_accessions(adata, namelist=["P12345", "Q67890"])
+            ```
+    
+    Related Functions:
+        - get_gene_maps: Build full accession → gene mapping dictionaries.
+        - get_abundance: Extract abundance values by gene or accession.
     """
     import pandas as pd
 
@@ -317,7 +505,7 @@ def resolve_accessions(adata, namelist, gene_col="Genes", gene_map=None):
         )
 
     if unmatched:
-        print("[resolve_accessions] Warning: Unmatched names:")
+        print(f"{format_log_prefix('warn')}resolve_accessions: Unmatched names:")
         for u in unmatched:
             print(f"  - {u}")
 
@@ -325,15 +513,54 @@ def resolve_accessions(adata, namelist, gene_col="Genes", gene_map=None):
 
 def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True, debug=False):
     """
-    Get the contents for an UpSet plot based on the specified case list. Helper function for UpSet plots.
+    Construct contents for an UpSet plot from a pAnnData object.
 
-    Parameters:
-    - pdata (pAnnData): The pAnnData object containing the samples.
-    - classes (str or list of str): The classes to use for selecting samples. E.g. 'cell_type' or ['cell_type', 'treatment'].
-    - on (str): The data type to use for the UpSet plot. Options are 'protein' or 'peptide'. Default is 'protein'.
+    This function extracts feature sets (proteins or peptides) present in
+    specified sample classes and returns them either as a dictionary or
+    in an `upsetplot`-compatible format.
+
+    Args:
+        pdata (pAnnData): The pAnnData object containing `.prot` and `.pep`.
+        classes (str or list of str): Metadata column(s) in `.obs` to define sample groups.
+            Examples: `"cell_type"`, or `["cell_type", "treatment"]`.
+        on (str): Data level to use. Options are `"protein"` (default) or `"peptide"`.
+        upsetForm (bool): If True, return an `UpSet`-compatible DataFrame via
+            `upsetplot.from_contents`. If False, return a raw dictionary.
+        debug (bool): If True, print filtering steps and class resolution details.
 
     Returns:
-    - dict: The contents for the UpSet plot.
+        upset_data (pandas.DataFrame): Binary presence/absence DataFrame for use with
+            `upsetplot.UpSet`, if `upsetForm=True`.
+        upset_dict (dict): Mapping of class → list of present features,
+            if `upsetForm=False`.
+
+    Raises:
+        ValueError: If `on` is not `"protein"` or `"peptide"`.
+
+    Example:
+        Get contents for an UpSet plot of sample classes:
+            ```python
+            upset_data = get_upset_contents(pdata, classes="treatment")
+            from upsetplot import UpSet
+            UpSet(upset_data, subset_size="count").plot()
+            ```
+
+        Retrieve raw dictionary of sets instead:
+            ```python
+            upset_dict = get_upset_contents(pdata, classes="treatment", upsetForm=False)
+            ```
+
+        Query proteins from a set and highlight them in a plot:
+            ```python
+            upset_data = scutils.get_upset_contents(pdata, classes="condition")
+            prot_df = scutils.get_upset_query(upset_data, present=["treated"], absent=["control"])
+            scplt.plot_rankquant(ax, pdata, classes="condition", cmap=cmaps, color=colors)
+            scplt.mark_rankquant(ax, pdata, mark_df=prot_df, class_values=["treated"], color="black")
+            ```
+
+    Related Functions:
+        - plot_upset: Plot UpSet diagrams directly.
+        - plot_venn: Plot Venn diagrams for up to 3 sets.
     """
 
     if on == 'protein':
@@ -365,43 +592,105 @@ def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True, debug=F
         return upset_dict
 
 def get_upset_query(upset_content, present, absent):
+    """
+    Query features from UpSet contents given inclusion and exclusion criteria.
+
+    This function extracts the set of features (proteins or peptides) that are
+    present in all specified groups and absent in others. It then queries
+    UniProt metadata for the resulting accessions.
+
+    Args:
+        upset_content (pandas.DataFrame): Output from `get_upset_contents` with
+            presence/absence encoding of features.
+        present (list of str): List of groups in which the features must be present.
+        absent (list of str): List of groups in which the features must be absent.
+
+    Returns:
+        prot_query_df (pandas.DataFrame): DataFrame of features matching the query,
+        annotated with UniProt metadata via `get_uniprot_fields`.
+
+    Example:
+        Query proteins unique to one group and highlight them in a plot:
+            ```python
+            upset_data = scutils.get_upset_contents(pdata, classes="condition")
+            prot_df = scutils.get_upset_query(upset_data, present=["treated"], absent=["control"])
+            scplt.plot_rankquant(ax, pdata, classes="condition", cmap=cmaps, color=colors)
+            scplt.mark_rankquant(ax, pdata, mark_df=prot_df, class_values=["treated"], color="black")
+            ```
+
+    Related Functions:
+        - get_upset_contents: Generate presence/absence sets for UpSet analysis.
+        - plot_upset: Plot UpSet diagrams from class-based sets.
+    """
     prot_query = upsetplot.query(upset_content, present=present, absent=absent).data['id'].tolist()
-    prot_query_df = get_uniprot_fields(prot_query)
+    prot_query_df = get_uniprot_fields(prot_query,verbose=False)
 
     return prot_query_df
 
-# TODO: check through all code and migrate to new filter_dict()
+# TODO: LEGACY, CHECK TO MAKE SURE IT"S NOT BEING USED ANYWHERE ELSE
 def filter(pdata, class_type, values, exact_cases = False, debug = False):
     """
-    Filters samples from either a pAnnData or AnnData object using legacy-style
-    (class_type + values) input.
+    Legacy-style filtering of samples in pAnnData or AnnData objects.
 
-    This function converts the input to the new dictionary-style format internally.
-    - If `pdata` is a pAnnData object, this delegates to the class method `filter_sample_values()`.
-    - If `pdata` is an AnnData object, filtering is performed directly on `.obs`.
+    This function filters samples based on metadata values using the older
+    `(class_type, values)` interface. For pAnnData objects, it automatically
+    delegates to `.filter_sample_values()` after converting the input into the
+    recommended dictionary-style format.
 
-    Note:
-    For pAnnData users, it is recommended to use the class method `.filter_sample_values()`
-    with dictionary-style input for cleaner and more consistent filtering.
+    !!! warning
 
-    Parameters:
-    - pdata (pAnnData or AnnData): The data object to filter.
-    - class_type (str or list of str): Class labels to filter on (e.g. 'treatment' or ['treatment', 'cellline'])
-    - values (list of str or list of list of str): Value(s) to match. For multiple class_types, this should be a list of values or a list of value-combinations. E.g. for cell_type: ['wt', 'kd'], or for a list of class_type [['wt', 'kd'],['control', 'treatment']].
-    - exact_cases (bool): If True, treat values as exact combinations (AND across class types); otherwise allow OR logic within each class type.
-    - debug (bool): If True, prints filter query.
-    
+        For pAnnData users, prefer `.filter_sample_values()` with dictionary-style
+        input, as it is more flexible and consistent. The `filter()` utility is
+        retained primarily for backward compatibility and direct AnnData usage.
+
+
+    Args:
+        pdata (pAnnData or AnnData): Input data object to filter.
+        class_type (str or list of str): Metadata field(s) in `.obs` to filter on.
+            Example: `"treatment"`, or `["cell_type", "treatment"]`.
+        values (list, dict, or list of dict): Metadata values to match.
+            - If `exact_cases=False`: Provide a dictionary or list-of-values per class.
+            - If `exact_cases=True`: Provide a list of dictionaries specifying
+              exact combinations across fields.
+        exact_cases (bool): Whether to interpret `values` as exact combinations (AND logic).
+            Defaults to False, which applies OR logic within each class type.
+        debug (bool): If True, print the query string used for filtering.
+
     Returns:
-    - Filtered object of the same type (pAnnData or AnnData).
+        filtered (pAnnData or AnnData): A filtered object of the same type as `pdata`.
+
+
+    Raises:
+        ValueError: If input types are invalid, if fields are missing in `.obs`,
+            or if `values` format does not match `exact_cases`.
 
     Example:
-    >>> samples = filter(pdata, class_type="treatment", values="kd")
+        Filter samples by a single metadata field:
+            ```python
+            samples = utils.filter(pdata, class_type="treatment", values="kd")
+            ```
 
-    >>> samples = utils.filter(adata, class_type = ['cell_type', 'treatment'], values = [['wt', 'kd'], ['control', 'treatment']])
-    # returns samples where cell_type is either 'wt' or 'kd' and treatment is either 'control' or 'treatment'
+        Filter by multiple fields with OR logic: 
+            ```python
+            samples = utils.filter(
+                    adata,
+                    class_type=["cell_type", "treatment"],
+                    values=[["wt", "kd"], ["control", "treatment"]]
+                ) 
+            # returns samples where cell_type is either 'wt' or 'kd' and treatment is either 'control' or 'treatment'
+            ```
 
-    >>> samples = utils.filter(adata, exact_cases = True, class_type = ['cell_type', 'treatment'], values = [['wt', 'control'], ['kd', 'treatment']])
-    # returns samples where cell_type is 'wt' and treatment is 'kd', or cell_type is 'control' and treatment is 'treatment'
+        Filter by exact case combinations:
+            ```python 
+            samples = utils.filter(
+                    adata,
+                    class_type=["cell_type", "treatment"],
+                    values=[{"cell_type": "wt", "treatment": "control"},
+                            {"cell_type": "kd", "treatment": "treatment"}],
+                    exact_cases=True
+                )
+            # returns samples where cell_type is 'wt' and treatment is 'kd', or cell_type is 'control' and treatment is 'treatment'
+            ```
     """
     
     if hasattr(pdata, "filter_sample_values"):
@@ -471,35 +760,81 @@ def filter(pdata, class_type, values, exact_cases = False, debug = False):
 
 def format_class_filter(classes, class_value, exact_cases=False):
     """
-    Converts legacy `classes` and `class_value` input into the new dictionary-style filter format.
+    Convert legacy-style filter input into dictionary-style format.
 
-    Parameters:
-    - classes (str or list of str): Field name(s) used for filtering (e.g. 'treatment' or ['treatment', 'cellline']).
-    - class_value (str, list of str, or list of list): The value(s) corresponding to the class(es).
-        If a string, it may be underscore-joined (e.g. 'kd_AS').
-        If a list of strings (e.g. ['kd_AS', 'sc_BE']), and exact_cases=True, each will be split and zipped with classes.
-        If a list of lists (e.g. [['AS', 'kd'], ['BE', 'sc']]), each inner list is interpreted as a full set of class values.
-    - exact_cases (bool): Whether to return a list of exact match dictionaries or a combined OR filter.
+    This function standardizes `(classes, class_value)` input into the dictionary
+    format expected by `pAnnData.filter_sample_values()`. It supports both loose
+    OR-style filtering and exact case matching across multiple metadata fields.
+
+    Args:
+        classes (str or list of str): Metadata field(s) to filter on.
+            Example: `"treatment"` or `["cellline", "treatment"]`.
+        class_value (str, list of str, or list of list): Values to filter by.
+            - str: May be underscore-joined (e.g. `"kd_AS"`).
+            - list of str: Multiple values, interpreted as OR (if `exact_cases=False`)
+              or split into combinations (if `exact_cases=True`).
+            - list of list: Each inner list defines a full set of values across classes.
+        exact_cases (bool): If True, return a list of dictionaries representing
+            exact combinations across fields. If False, return a dictionary with
+            OR logic applied.
 
     Returns:
-    - dict or list of dicts: Formatted for dictionary-style filter input.
+        formatted (dict or list of dict): Dictionary-style filter input compatible
+        with `.filter_sample_values()`.
 
-    Examples:
-    # Single class, loose match
-    format_class_filter("treatment", ["kd", "sc"])
-    → {'treatment': ['kd', 'sc']}
+    Raises:
+        ValueError: If input shapes are inconsistent with the number of classes,
+            or if `class_value` entries are not valid strings/lists.
 
-    # Multi-class, loose match
-    format_class_filter(["cellline", "treatment"], ["AS", "kd"])
-    → {'cellline': 'AS', 'treatment': 'kd'}
+    Example:
+        Single class with OR logic:
+            ```python
+            format_class_filter("treatment", ["kd", "sc"])
+            ```
+            ```
+            {'treatment': ['kd', 'sc']}
+            ```
 
-    # Multi-class, exact match from underscore-joined strings
-    format_class_filter(["cellline", "treatment"], ["AS_kd", "BE_sc"], exact_cases=True)
-    → [{'cellline': 'AS', 'treatment': 'kd'}, {'cellline': 'BE', 'treatment': 'sc'}]
+        Multiple classes with loose matching:
+            ```python
+            format_class_filter(["cellline", "treatment"], ["AS", "kd"])
+            ```
+            ```
+            {'cellline': 'AS', 'treatment': 'kd'}
+            ```
 
-    # Multi-class, exact match from list of lists
-    format_class_filter(["cellline", "treatment"], [["AS", "kd"], ["BE", "sc"]], exact_cases=True)
-    → [{'cellline': 'AS', 'treatment': 'kd'}, {'cellline': 'BE', 'treatment': 'sc'}]
+        Multiple classes with exact cases (underscore-joined strings):
+            ```python
+            format_class_filter(
+                ["cellline", "treatment"],
+                ["AS_kd", "BE_sc"],
+                exact_cases=True
+            )
+            ```
+            ```
+            [{'cellline': 'AS', 'treatment': 'kd'},
+             {'cellline': 'BE', 'treatment': 'sc'}]
+            ```
+
+        Multiple classes with exact cases (list of lists):
+            ```python 
+            format_class_filter(
+                ["cellline", "treatment"],
+                [["AS", "kd"], ["BE", "sc"]],
+                exact_cases=True
+            )
+            ```
+            ```
+            # [{'cellline': 'AS', 'treatment': 'kd'},
+             {'cellline': 'BE', 'treatment': 'sc'}]
+            ```
+
+    !!! warning "Note"
+
+        This function is primarily used internally by `utils.filter()` and
+        `pAnnData.filter_sample_values()`. End users should generally call
+        `.filter_sample_values()` directly on `pAnnData` objects instead of
+        using this helper.
     """
 
     if isinstance(classes, str):
@@ -544,17 +879,32 @@ def format_class_filter(classes, class_value, exact_cases=False):
 
 def resolve_class_filter(adata, classes, class_value, debug=False, *, filter_func=None):
     """
-    Helper to resolve (classes, class_value) inputs and apply filtering.
+    Resolve `(classes, class_value)` inputs and apply filtering.
 
-    Parameters:
-    - adata (AnnData or pAnnData): The data object to filter.
-    - classes (str, list, or None): Class label(s) for filtering.
-    - class_value (str or list): Corresponding value(s) to filter.
-    - debug (bool): Print resolved class/value pairs.
-    - filter_func (callable): Filtering function to use (default: `utils.filter`).
+    This helper standardizes class/value pairs into dictionary-style filters
+    and applies them to an AnnData or pAnnData object. It is primarily used
+    internally by plotting and analysis functions.
+
+    Args:
+        adata (AnnData or pAnnData): Input data object to filter.
+        classes (str or list of str): Metadata field(s) used for filtering.
+        class_value (str or list of str): Values corresponding to `classes`.
+        debug (bool): If True, print resolved class/value pairs.
+        filter_func (callable, optional): Filtering function to apply.
+            Defaults to `utils.filter`.
 
     Returns:
-    - Filtered data object (same type as input).
+        filtered (AnnData or pAnnData): Subset of the input object, same type as `adata`.
+
+    !!! warning
+        This is an internal helper for use inside functions such as
+        `plot_rankquant` and `plot_raincloud`. End users should call
+        `pAnnData.filter_sample_values()` instead.
+
+    Related Functions:
+        - filter: Legacy utility for sample filtering.
+        - format_class_filter: Standardizes filter inputs.
+        - pAnnData.filter_sample_values: Recommended user-facing filter method.
     """
 
     from scviz import utils  # safe to do here in case of circular import
@@ -574,22 +924,31 @@ def resolve_class_filter(adata, classes, class_value, debug=False, *, filter_fun
 
 def get_pep_prot_mapping(pdata, return_series=False):
     """
-    Returns the column name in .pep.var that maps peptides to proteins, or Series of mapping 
-    based on the data source recorded in pdata.metadata.
+    Retrieve the peptide-to-protein mapping column or mapping values.
 
-    Parameters:
-        pdata : pAnnData
-            The annotated proteomics object with .metadata and .pep
-        return_series : bool, optional (default=False)
-            If True, returns a Series mapping peptides to proteins.
-            If False, returns the name of the mapping column
+    This function resolves the appropriate `.pep.var` column for peptide-to-protein
+    mapping based on the data source recorded in `pdata.metadata["source"]`.
+
+    Args:
+        pdata (pAnnData): The annotated proteomics object containing `.metadata` and `.pep`.
+        return_series (bool): If True, return a pandas Series of peptide-to-protein
+            mappings. If False (default), return the column name as a string.
 
     Returns:
-        str : column name containing peptide-to-protein mapping
-        or pd.Series : mapping of peptides to proteins
+        col (str): Column name in `.pep.var` containing peptide-to-protein mapping,
+        if `return_series=False`.
+        mapping (pandas.Series): Series mapping peptides to proteins,
+        if `return_series=True`.
 
     Raises:
-        ValueError if source is unrecognized or mapping column not found.
+        ValueError: If the data source is unrecognized or no valid mapping column is found.
+
+    Note:
+        The mapping column depends on the import source:
+        
+        - Proteome Discoverer → `"Master Protein Accessions"`
+        - DIA-NN → `"Protein.Group"`
+        - MaxQuant → `"Leading razor protein"`
     """
     source = pdata.metadata.get("source", "").lower()
 
@@ -609,97 +968,180 @@ def get_pep_prot_mapping(pdata, return_series=False):
 
 # ----------------
 # API FUNCTIONS (STRING functions in enrichment.py)
-def get_uniprot_fields_worker(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], verbose = False):
-    """ Worker function to get data from Uniprot for a list of proteins, used by get_uniprot_fields(). Calls to UniProt REST API, and returns batch of maximum 1024 proteins at a time.
+def get_uniprot_fields_worker(prot_list, search_fields=None, verbose = False):
+    """
+    Query UniProt for a batch of protein accessions.
+
+    This function sends requests to the UniProt REST API for up to 1024 proteins
+    at a time and returns the requested fields as a DataFrame. It handles isoform
+    accessions, fallback queries, and UniProt ID redirects automatically.
 
     Args:
-        prot_list (list): list of protein IDs
-        search_fields (list): list of fields to search for.
-
-        For more information, see https://www.uniprot.org/help/return_fields for list of search_fields.
-        Current function accepts accession protein list. For more queries, see https://www.uniprot.org/help/query-fields for a list of query fields that can be searched for.
+        prot_list (list of str): List of protein accessions or IDs.
+        search_fields (list of str): UniProt return fields.
+            See: https://www.uniprot.org/help/return_fields
+        verbose (bool): If True, print progress messages and missing accessions.
 
     Returns:
-        pandas.DataFrame: DataFrame with the results
+        df (pandas.DataFrame): DataFrame containing UniProt metadata for the input proteins.
+
+    Raises:
+        ValueError: If `query_type` is unknown or the data source cannot be resolved.
+
+    !!! info
+        - This function is intended as a **worker** and is usually called by
+          `get_uniprot_fields`.
+        - It automatically resolves canonical vs. isoform accessions and will
+          attempt UniProt ID mapping if some accessions cannot be found.
+
+    Related Functions:
+        - get_uniprot_fields: High-level batch UniProt query wrapper.
     """
 
     base_url = 'https://rest.uniprot.org/uniprotkb/stream'
     fields = "%2C".join(search_fields)
-    query_parts = ["%28accession%3A" + id + "%29" for id in prot_list]
-    query = "+OR+".join(query_parts)
-    query = "%28" + query + "%29"
     format_type = 'tsv'
     
+    def query_uniprot_batch(ids, query_type="accession"):
+        if not ids:
+            return pd.DataFrame()
+
+        if query_type == "accession":
+            query_parts = [f"%28accession%3A{id}%29" for id in ids]
+        elif query_type == "id":
+            query_parts = [f"%28id%3A{id}%29" for id in ids]
+        else:
+            raise ValueError(f"Unknown query_type: {query_type}")
+
+        query = "+OR+".join(query_parts)
+        full_query = f"%28{query}%29"
+        url = f'{base_url}?fields={fields}&format={format_type}&query={full_query}'
+
+        if verbose:
+            print(f"Querying UniProt ({query_type}) for {len(ids)} proteins")
+
+        results = requests.get(url)
+        results.raise_for_status()
+        return pd.read_csv(io.StringIO(results.text), sep='\t')
+
     if verbose:
         print(f"Querying Uniprot for {len(prot_list)} proteins")
-
-    # full url
-    url = f'{base_url}?fields={fields}&format={format_type}&query={query}'
     
-    results = requests.get(url)
-    results.raise_for_status()
-    
-    df = pd.read_csv(io.StringIO(results.text), sep='\t')
+    def resolve_uniprot_redirects(accessions, from_db='UniProtKB_AC-ID', to_db='UniProtKB'):
+        url = 'https://rest.uniprot.org/idmapping/run'
+        data = {'from': from_db, 'to': to_db, 'ids': ','.join(accessions)}
 
-    isoform_prots = set(prot_list) - set(df['Entry'])
-    if isoform_prots:
-        # print statement for missing proteins, saying will now search for isoforms
+        res = requests.post(url, data=data)
+        res.raise_for_status()
+        job_id = res.json()['jobId']
+
+        # Poll until job is complete
+        while True:
+            status = requests.get(f"https://rest.uniprot.org/idmapping/status/{job_id}").json()
+            if status.get("jobStatus") == "RUNNING":
+                time.sleep(1)
+            else:
+                break
+
+        # Get results
+        results = requests.get(f"https://rest.uniprot.org/idmapping/uniprotkb/results/{job_id}").json()
+        mapping = {item['from']: item['to']['primaryAccession'] for item in results.get('results', [])}
+        return mapping
+
+    # Split isoform vs canonical accessions
+    isoform_ids = [acc for acc in prot_list if '-' in acc]
+    canonical_ids = [acc for acc in prot_list if '-' not in acc]
+
+    df_canonical = query_uniprot_batch(canonical_ids, query_type="accession")
+    df_isoform = query_uniprot_batch(isoform_ids, query_type="accession")
+
+    # Identify any isoforms that weren't found
+    found_isoform_ids = set(df_isoform['Entry']) if not df_isoform.empty else set()
+    missing_isoforms = [acc for acc in isoform_ids if acc not in found_isoform_ids]
+
+    if missing_isoforms and verbose:
+        print(f"Attempting fallback query for {len(missing_isoforms)} isoform base IDs")
+
+    # Attempt fallback query using base accessions
+    fallback_ids = list(set([id.split('-')[0] for id in missing_isoforms]))
+    df_fallback = query_uniprot_batch(fallback_ids, query_type="id")
+
+    # Combine all DataFrames
+    df = pd.concat([df_canonical, df_isoform, df_fallback], ignore_index=True)
+
+    # Final pass: insert missing rows if still unresolved
+    found_entries = set(df['Entry']) if 'Entry' in df.columns else set()
+    still_missing = set(prot_list) - found_entries
+
+    if still_missing:
         if verbose:
-            print(f'Searching for isoforms in unmapped accessions: {len(isoform_prots)}')
-        # these are typically isoforms, so we will try to search for them again
-        query_parts = ["%28accession%3A" + id + "%29" for id in isoform_prots]
-        query = "+OR+".join(query_parts)
-        query = "%28" + query + "%29"
-        url = f'{base_url}?fields={fields}&format={format_type}&query={query}'
-        
-        results = requests.get(url)
-        results.raise_for_status()
-        
-        isoform_df = pd.read_csv(io.StringIO(results.text), sep='\t')
-        
-        # now, let's search isoforms by entry name (id) instead
-        isoform_entrynames = isoform_df['Entry Name']
-        query_parts = ["%28id%3A" + id + "%29" for id in isoform_entrynames]
-        query = "+OR+".join(query_parts)
-        query = "%28" + query + "%29"
-        url = f'{base_url}?fields={fields}&format={format_type}&query={query}'
+            print(f"Trying UniProt ID mapping for {len(still_missing)} unresolved accessions...")
+        redirect_map = resolve_uniprot_redirects(list(still_missing))
+        if redirect_map:
+            redirected_ids = list(redirect_map.values())
+            df_redirected = query_uniprot_batch(redirected_ids, query_type="accession")
+            
+            # Remap back to original accession
+            inv_map = {v: k for k, v in redirect_map.items()}
+            if 'Entry' in df_redirected.columns:
+                df_redirected['Entry'] = df_redirected['Entry'].apply(lambda x: inv_map.get(x, x))
 
-        results = requests.get(url)
-        results.raise_for_status()
+            df = pd.concat([df, df_redirected], ignore_index=True)
 
-        isoform_df2 = pd.read_csv(io.StringIO(results.text), sep='\t')
-        entry_mapping = {entry.split('-')[0]: (entry, protein_name) for entry, protein_name in zip(isoform_df['Entry'], isoform_df['Protein names'])}
-        isoform_df2[['Entry', 'Protein names']] = isoform_df2['Entry'].apply(lambda x: entry_mapping.get(x.split('-')[0], (x, None))).apply(pd.Series)
-        
-        df = pd.concat([df, isoform_df2], axis=0)
-        
-        # what's left is missing proteins
-        missing_prots = set(prot_list) - set(df['Entry'])
-        if missing_prots:
-            print(f"Proteins not found in uniprot database after two attempts: {missing_prots}")
-            missing_df = pd.DataFrame(missing_prots, columns=['Entry'])
-            for col in df.columns:
-                if col != 'Entry':
-                    missing_df[col] = np.nan
-            df = pd.concat([df, missing_df], axis=0)
+            resolved = set(redirect_map.keys())
+            still_missing -= resolved
+
+    # Step 5: Fill in placeholders for totally missing accessions
+    if still_missing:
+        print(f"Proteins not found in UniProt database after all attempts: {still_missing}") if verbose else None
+        missing_df = pd.DataFrame({'Entry': list(still_missing)})
+        for col in search_fields:
+            if col != 'accession' and col not in missing_df.columns:
+                missing_df[col] = np.nan
+        df = pd.concat([df, missing_df], ignore_index=True)
+    
+    if 'STRING' in df.columns:
+        # keep first STRING ID (or join all if you prefer)
+        df['STRING_id'] = df['STRING'].apply(
+            lambda s: str(s).split(';')[0].strip() if pd.notna(s) and str(s).strip() else np.nan
+        )
     
     return df
 
-def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names', 'go', 'go_f' ,'go_f', 'go_c', 'go_p', 'cc_interaction'], batch_size=1024, verbose=False):
-    """ Get data from Uniprot for a list of proteins. Uses get_uniprot_fields_worker to get data in batches of batch_size. For more information, see https://www.uniprot.org/help/return_fields for list of search_fields.
-        Current function accepts accession protein list. For more queries, see https://www.uniprot.org/help/query-fields for a list of query fields that can be searched for.
+def get_uniprot_fields(
+    prot_list,
+    search_fields=['accession', 'id', 'protein_name', 'gene_primary', 'gene_names',
+                   'organism_id', 'go', 'go_f', 'go_c', 'go_p',
+                   'cc_interaction', 'xref_string'],
+    batch_size=100,
+    verbose=False
+):
+    """
+    Retrieve UniProt metadata for a list of protein accessions.
+
+    This function wraps `get_uniprot_fields_worker` to handle batching of
+    protein IDs, returning results as a single DataFrame.
 
     Args:
-        prot_list (list): list of protein IDs
-        search_fields (list): list of fields to search for.
-        batch_size (int): number of proteins to search for in each batch. Default (and maximum) is 1024.
+        prot_list (list of str): List of protein accessions.
+        search_fields (list of str): UniProt fields to return.
+            Defaults include accession, gene names, GO terms, and STRING IDs.
+        batch_size (int): Number of accessions per batch (max 1024, default=100).
+        verbose (bool): If True, print progress messages.
 
     Returns:
-        pandas.DataFrame: DataFrame with the results
-    
+        df (pandas.DataFrame): DataFrame containing UniProt metadata for the input proteins.
+
     Example:
-        >>> uniprot_list = ["P40925", "P40926"]
-        >>> df = get_uniprot_fields(uniprot_list)
+        Query UniProt for a small set of proteins:
+            ```python
+            proteins = ["P40925", "P40926"]
+            df = get_uniprot_fields(proteins)
+            df[["Entry", "Gene Names", "Organism Id"]].head()
+            ```
+
+    Related Functions:
+        - get_uniprot_fields_worker: Worker function that handles low-level UniProt API queries.
     """
 
     # BUGFIX: accession should be first in the list of search fields, otherwise error thrown in worker function
@@ -724,20 +1166,35 @@ def get_uniprot_fields(prot_list, search_fields=['accession', 'id', 'protein_nam
             print(f"Processing batch {batches.index(batch) + 1} of {len(batches)}")
         batch_df = get_uniprot_fields_worker(batch, search_fields)
         full_method_df = pd.concat([full_method_df, batch_df], ignore_index=True)
-    
+
     return full_method_df
 
 # ----------------
 # STATISTICAL TEST FUNCTIONS
 def pairwise_log2fc(data1, data2):
     """
-    Compute pairwise median log2FC for each feature between two sample groups. Helper function for pdata.de() in fold-change options pairwise_median and pep_pairwise_median.
+    Compute pairwise median log2 fold change (log2FC) between two groups.
 
-    Parameters:
-    - data1, data2: np.ndarray of shape (n_samples, n_features)
+    This function calculates all pairwise log2 ratios between features in
+    two groups of samples and returns the median value per feature. It is
+    primarily used as a helper for fold-change strategies in `pAnnData.de()`.
+
+    Args:
+        data1 (numpy.ndarray): Array of shape `(n_samples_group1, n_features)`
+            containing abundance values for group 1.
+        data2 (numpy.ndarray): Array of shape `(n_samples_group2, n_features)`
+            containing abundance values for group 2.
 
     Returns:
-    - median_log2fc: np.ndarray of shape (n_features,)
+        median_log2fc (numpy.ndarray): Array of shape `(n_features,)` containing
+        the median pairwise log2 fold change for each feature.
+
+    Note:
+        This is an internal helper for differential expression calculations.
+        End users should call `pAnnData.de()` instead of using this function directly.
+
+    Related Functions:
+        - pAnnData.de: Differential expression analysis with multiple fold change strategies.
     """
     n1, n2 = data1.shape[0], data2.shape[0]
 
@@ -753,21 +1210,35 @@ def pairwise_log2fc(data1, data2):
 
 def get_pca_importance(model: Union[dict, 'sklearn.decomposition.PCA'], initial_feature_names: List[str], n: int = 1) -> pd.DataFrame:
     """
-    Get the most important feature for each principal component in a PCA model.
+    Identify the most important features for each principal component.
+
+    This function ranks features by their absolute PCA loading values and
+    extracts the top contributors for each principal component.
 
     Args:
-        model (sklearn.decomposition.PCA): Either a fitted sklearn.decomposition.PCA model, or a dict with key 'PCs' (array-like, shape: n_components x n_features)
-        initial_feature_names (list): The initial feature names. Typically adata.var_names.
-        n (int): The number of top features to return for each principal component.
+        model (sklearn.decomposition.PCA or dict): Either a fitted PCA model
+            from scikit-learn, or a dictionary with key `"PCs"`
+            (array-like, shape: `(n_components, n_features)`).
+        initial_feature_names (list of str): Names of the features, typically
+            `adata.var_names`.
+        n (int): Number of top features to return per principal component
+            (default = 1).
 
-        
     Returns:
-        df (pd.DataFrame): A DataFrame with one row per principal component, listing the top contributing features.
+        df (pandas.DataFrame): DataFrame with one row per principal component,
+        listing the top contributing features.
 
     Example:
-        >>> from scviz import utils as scutils
-        >>> pdata.pca(n_components=5)
-        >>> df = scutils.get_pca_importance(pdata.prot.uns['pca'], pdata.prot.var_names, n=5)
+        Retrieve the top 5 features contributing to each PC:
+            ```python
+            from scviz import utils as scutils
+            pdata.pca(n_components=5)
+            df = scutils.get_pca_importance(
+                pdata.prot.uns['pca'],
+                pdata.prot.var_names,
+                n=5
+            )
+            ```
     """
 
     if isinstance(model, dict):
@@ -790,6 +1261,52 @@ def get_pca_importance(model: Union[dict, 'sklearn.decomposition.PCA'], initial_
     df = pd.DataFrame(result.items(), columns=["Principal Component", "Top Features"])
     return df
 
+def get_protein_clusters(pdata, on='prot', layer='X', t=5, criterion='maxclust'):
+    """
+    Retrieve hierarchical clusters of proteins from stored linkage.
+
+    This function uses linkage information stored in `pdata.stats` to
+    partition proteins into clusters.
+
+    Args:
+        pdata (pAnnData): Input object containing `.stats` with clustering results.
+        on (str): Data level to use, `"prot"` (default) or `"pep"`.
+        layer (str): Data layer name used when the linkage was computed (default = `"X"`).
+        t (int or float): Number of clusters (if `criterion="maxclust"`) or distance
+            threshold for clustering.
+        criterion (str): Clustering criterion passed to `scipy.cluster.hierarchy.fcluster`,
+            e.g. `"maxclust"` or `"distance"`.
+
+    Returns:
+        clusters (dict): Mapping of `cluster_id → list of proteins`.
+        None: If no linkage is found in `pdata.stats`.
+
+    Note:
+        Requires that a clustermap has been previously computed and linkage
+        stored under `pdata.stats[f"{on}_{layer}_clustermap"]`.
+
+    Related Functions:
+        - plot_clustermap: Generates clustered heatmaps and stores linkage.
+    """
+    from scipy.cluster.hierarchy import fcluster
+    
+    key = f"{on}_{layer}_clustermap"
+    stats = pdata.stats.get(key)
+    if not stats or "row_linkage" not in stats:
+        print(f"No linkage found for {key} in pdata.stats.")
+        return None
+
+    linkage = stats["row_linkage"]
+    labels = fcluster(linkage, t=t, criterion=criterion)
+    order = stats["row_order"]
+
+    from collections import defaultdict
+    clusters = defaultdict(list)
+    for label, prot in zip(labels, order):
+        clusters[label].append(prot)
+
+    return dict(clusters)
+
 # ----------------
 # TO FIX
 # TODO: fix with pdata.summary maybe call stats_ttest instead
@@ -808,11 +1325,13 @@ def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_resu
         list: A list of t-test results for each pair of groups. Each result is a tuple containing the t-statistic and the p-value.
 
     Example usage:
-        >>> test_variables = ['region','amt']
-        >>> test_pairs = [[['cortex','sc'], ['cortex','20000']], 
-                        [['cortex','20000'], ['snpc','10000']], 
-                        [['mp_cellbody','6000'], ['mp_axon','6000']]]
-        >>> ttestparams = run_summary_ttest(protein_summary_df, test_variables, test_pairs, test_variable='total_count')
+        ```python
+        test_variables = ['region','amt']
+        test_pairs = [[['cortex','sc'], ['cortex','20000']], 
+            [['cortex','20000'], ['snpc','10000']], 
+            [['mp_cellbody','6000'], ['mp_axon','6000']]]
+        ttestparams = run_summary_ttest(protein_summary_df, test_variables, test_pairs, test_variable='total_count')
+        ```
     """
     # check if every pair in test_pairs is a list of length 2, else throw error message
     if not all(len(pair) == 2 for pair in test_pairs):

@@ -1,12 +1,13 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.4
 Name: scviz
-Version: 0.1.8
+Version: 0.1.11
 Summary: A package to visualize single cell proteomics (and more to come!) data
 Author-email: Marion Pang <sr_pang@hotmail.com>
 Project-URL: Homepage, https://github.com/gnaprs/scviz
 Project-URL: Issues, https://github.com/gnaprs/scviz/issues
 Classifier: Programming Language :: Python :: 3
 Classifier: License :: OSI Approved :: MIT License
+Classifier: Development Status :: 3 - Alpha
 Classifier: Operating System :: OS Independent
 Requires-Python: >=3.8
 Description-Content-Type: text/markdown
@@ -20,11 +21,14 @@ Requires-Dist: scikit-learn
 Requires-Dist: scipy
 Requires-Dist: umap-learn
 Requires-Dist: adjustText
-Requires-Dist: AnnData
+Requires-Dist: anndata
 Requires-Dist: requests
 Requires-Dist: matplotlib_venn
+Requires-Dist: pyarrow
+Requires-Dist: scanpy
 Provides-Extra: pytest
 Requires-Dist: openpyxl; extra == "pytest"
+Dynamic: license-file
 
 # scviz
 The `scviz` package is a Python library designed for scientific visualization of single cell proteomics data, with plans to support more data types in the future.
