@@ -12,11 +12,13 @@ CHANGELOG.md
 dev/*.csv
 dev/*.tsv
 dev/scviz_planning.docx
+dev/peptide_params
 dev/*.png
 dev/*.xlsx
 dev/windy*.py
 dev/cellstore_analysis.ipynb
 dev/dia-me code.zip
+dev/alphamap
 .coverage
 .coverage.*
 testing.ipynb
