@@ -24,7 +24,7 @@ class FilterMixin:
         filter_prot_found: Keeps proteins or peptides found in a minimum number or proportion of samples within a group or file list.
         _filter_sync_peptides_to_proteins: Removes peptides orphaned by upstream protein filtering.
         filter_sample: Filters samples using categorical metadata, numeric thresholds, or file/sample lists.
-        _filter_sample_metadata: Internal helper for filtering samples using `.summary` conditions or name lists.
+        _filter_sample_condition: Internal helper for filtering samples using `.summary` conditions or name lists.
         _filter_sample_values: Filters samples using dictionary-style matching on metadata fields.
         _filter_sample_query: Parses and applies a raw pandas-style query string to `.obs` or `.summary`.
         filter_rs: Filters the RS matrix by peptide count and ambiguity, and updates `.prot`/`.pep` accordingly.
@@ -168,7 +168,7 @@ class FilterMixin:
             # Protein and peptide counts summary
             message += f"\n    → Proteins kept: {pdata.prot.shape[1]}"
             if pdata.pep is not None:
-                message += f"\n    → Peptides kept (linked): {pdata.pep.shape[1]}"
+                message += f"\n    → Peptides kept (linked): {pdata.pep.shape[1]}\n"
 
         print(message)
         pdata._append_history(message) # type: ignore[attr-defined]
@@ -547,24 +547,24 @@ class FilterMixin:
                 # Case A: obs column(s) expanded → show expanded_groups and add note
                 if auto_group_msg:
                     group_note = f" (all values of obs column(s))"
-                    print(f"    → Groups requested: {group_list}{group_note}")
+                    print(f"{format_log_prefix('filter_conditions')}Groups requested: {group_list}{group_note}")
                 else:
-                    print(f"    → Groups requested: {group_list}")
-                print(f"    → FDR threshold: {fdr_threshold}")
+                    print(f"{format_log_prefix('filter_conditions')}Groups requested: {group_list}")
+                print(f"{format_log_prefix('filter_conditions')}FDR threshold: {fdr_threshold}")
                 if min_ratio is not None:
-                    print(f"    → Minimum ratio: {min_ratio} (match_{logic} = {match_any})")
+                    print(f"{format_log_prefix('filter_conditions')}Minimum ratio: {min_ratio} (match_{logic} = {match_any})")
                 if min_count is not None:
-                    print(f"    → Minimum count: {min_count} (match_{logic} = {match_any})")
+                    print(f"{format_log_prefix('filter_conditions')}Minimum count: {min_count} (match_{logic} = {match_any})")
             else:
-                print(f"    → Files requested: All")
-                print(f"    → FDR threshold: {fdr_threshold}")
-                print(f"    → Logic: {logic} "
+                print(f"{format_log_prefix('filter_conditions')}Files requested: All")
+                print(f"{format_log_prefix('filter_conditions')}FDR threshold: {fdr_threshold}")
+                print(f"{format_log_prefix('filter_conditions')}Logic: {logic} "
                     f"(protein must be significant in {'≥1' if match_any else 'all'} file(s))")
 
             n_kept = int(mask.sum())
             n_total = len(mask)
             n_dropped = n_total - n_kept
-            print(f"    → Proteins kept: {n_kept}, Proteins dropped: {n_dropped}")
+            print(f"    → Proteins kept: {n_kept}, Proteins dropped: {n_dropped}\n")
 
         return filtered if return_copy else None
 
@@ -701,7 +701,7 @@ class FilterMixin:
             )
 
         if condition is not None or file_list is not None and not query_mode:
-            return self._filter_sample_metadata(
+            return self._filter_sample_condition(
                 condition=condition,
                 file_list=file_list,
                 return_copy=return_copy,
@@ -714,7 +714,7 @@ class FilterMixin:
         if condition is not None and query_mode:
             return self._filter_sample_query(query_string=condition, source='summary', return_copy=return_copy, debug=debug)
 
-    def _filter_sample_metadata(self, condition = None, return_copy = True, file_list=None, debug=False):
+    def _filter_sample_condition(self, condition = None, return_copy = True, file_list=None, debug=False):
         """
         Filter samples based on numeric metadata conditions or a list of sample identifiers.
 
@@ -739,12 +739,12 @@ class FilterMixin:
         Examples:
             Filter samples with more than 1000 proteins:
                 ```python
-                pdata.filter_sample_metadata(condition="protein_count > 1000")
+                pdata.filter_sample_condition(condition="protein_count > 1000")
                 ```
 
             Keep only specific sample files:
                 ```python
-                pdata.filter_sample_metadata(file_list=['fileA', 'fileB'])
+                pdata.filter_sample_condition(file_list=['fileA', 'fileB'])
                 ```
         """
         if not self._has_data(): # type: ignore[attr-defined], ValidationMixin
@@ -793,6 +793,8 @@ class FilterMixin:
         if pdata.pep is not None:
             pdata.pep = pdata.pep[pdata.pep.obs.index.isin(index_filter)]
 
+        pdata.update_summary(recompute=False) # type: ignore[attr-defined], SummaryMixin
+
         print(f"Length of pdata.prot.obs_names after filter: {len(pdata.prot.obs_names)}") if debug else None
 
         # Construct formatted message
@@ -807,17 +809,16 @@ class FilterMixin:
             if condition:
                 message += f"{format_log_prefix('filter_conditions')}Condition: {condition}\n"
             elif file_list:
-                message += f"    → Files requested: {len(file_list)}\n"
+                message += f"{format_log_prefix('filter_conditions')}Files requested: {len(file_list)}\n"
                 if missing:
-                    message += f"    → Missing samples ignored: {len(missing)}\n"
+                    message += f"{format_log_prefix('filter_conditions')}Missing samples ignored: {len(missing)}\n"
 
             message += f"    → Samples kept: {len(pdata.prot.obs)}, Samples dropped: {len(pdata.summary) - len(pdata.prot.obs)}"
-            message += f"\n    → Proteins kept: {len(pdata.prot.var)}"
+            message += f"\n    → Proteins kept: {len(pdata.prot.var)}\n"
 
         # Logging and history updates
         print(message)
         pdata._append_history(message) # type: ignore[attr-defined], HistoryMixin
-        pdata.update_summary(recompute=False) # type: ignore[attr-defined], SummaryMixin
 
         return pdata if return_copy else None
 
@@ -907,6 +908,7 @@ class FilterMixin:
         if pdata.pep is not None:
             adata = pdata.pep
             pdata.pep = adata[eval(query)]
+        pdata.update_summary(recompute=False, verbose=verbose) # type: ignore[attr-defined], SummaryMixin
 
         n_samples = len(pdata.prot)
         log_prefix = format_log_prefix("user")
@@ -934,11 +936,10 @@ class FilterMixin:
                     message += f"      - {k}: {valstr}\n"
 
             message += f"    → Samples kept: {n_samples}, Samples dropped: {len(pdata.summary) - n_samples}"
-            message += f"\n    → Proteins kept: {len(pdata.prot.var)}"
+            message += f"\n    → Proteins kept: {len(pdata.prot.var)}\n"
 
         print(message) if verbose else None
         pdata._append_history(message) # type: ignore[attr-defined], HistoryMixin
-        pdata.update_summary(recompute=False, verbose=verbose) # type: ignore[attr-defined], SummaryMixin
 
         return pdata
 
@@ -984,6 +985,7 @@ class FilterMixin:
             pdata.prot = pdata.prot[pdata.prot.obs_names.isin(index_filter)]
         if pdata.pep is not None:
             pdata.pep = pdata.pep[pdata.pep.obs_names.isin(index_filter)]
+        pdata.update_summary(recompute=False) # type: ignore[attr-defined], SummaryMixin
 
         n_samples = len(pdata.prot)
         log_prefix = format_log_prefix("user")
@@ -994,14 +996,13 @@ class FilterMixin:
             f"    {action} sample data based on query string:\n"
             f"   🔸 Query: {query_string}\n"
             f"    → Samples kept: {n_samples}, Samples dropped: {len(pdata.summary) - n_samples}\n"
-            f"    → Proteins kept: {len(pdata.prot.var)}"
+            f"    → Proteins kept: {len(pdata.prot.var)}\n"
         )
 
         print(message)
 
         history_message = f"{action} samples based on query string. Samples kept: {len(index_filter)}."
         pdata._append_history(history_message) # type: ignore[attr-defined], HistoryMixin
-        pdata.update_summary(recompute=False) # type: ignore[attr-defined], SummaryMixin
 
         return pdata if return_copy else None
 
@@ -1249,7 +1250,7 @@ class FilterMixin:
             str: A cleaned and properly formatted condition string suitable for `.eval()` or `.query()`.
 
         Note:
-            This is an internal helper used by methods such as `filter_sample_metadata()` and `filter_prot()` 
+            This is an internal helper used by methods such as `filter_sample_condition()` and `filter_prot()` 
             to support user-friendly string-based queries.
         """
 
