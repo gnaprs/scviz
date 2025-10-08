@@ -1,6 +1,6 @@
 site_name: scviz
 site_description: "Automatic documentation from sources, for MkDocs."
-site_url: https://sitename.example
+site_url: https://gnaprs.github.io/scviz/
 repo_url: "https://github.com/gnaprs/scviz"
 repo_name: "gnaprs/scviz"
 theme:
