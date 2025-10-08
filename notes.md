@@ -5,5 +5,6 @@
 
 # docs
 1. open cmd
-2. .\venv\Scripts\activate
-3. mkdocs serve
+2. conda deactivate
+3. .\venv\Scripts\activate
+4. mkdocs serve
