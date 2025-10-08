@@ -1,7 +1,5 @@
-[![ci](https://github.com/gnaprs/scviz/actions/workflows/ci.yml/badge.svg)](https://github.com/gnaprs/scviz/actions/workflows/ci.yml) [![Python py3.8/py3.11](https://github.com/gnaprs/scviz/actions/workflows/python-package.yml/badge.svg)](https://github.com/gnaprs/scviz/actions/workflows/python-package.yml)
-
 # scviz
-<img src="https://raw.githubusercontent.com/bbye98/mdcraft/main/assets/logo.png"
+<img src="https://raw.githubusercontent.com/gnaprs/scviz/refs/heads/main/docs/assets/logo.png"
  align="right" width="256"/>
 
 **Build & Tests:**  
