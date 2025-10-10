@@ -701,12 +701,32 @@ class AnalysisMixin:
         log_prefix = format_log_prefix("user")
         print(f"{log_prefix} Computing UMAP [{on}] using layer: {layer}")
 
-        if "n_neighbors" in kwargs:
-                    n_neighbors = kwargs.pop("n_neighbors")
-                    print(f"{format_log_prefix('info_only', indent=2)} `n_neighbors={n_neighbors}` provided. "
-                        f"Re-running neighbors with this setting before UMAP.")
-                    self.neighbor(on=on, layer=layer, n_neighbors=n_neighbors)
-                    self._append_history(f"{on}: Neighbors re-computed with n_neighbors={n_neighbors} before UMAP")  # type: ignore[attr-defined], HistoryMixin
+        if "n_neighbors" in kwargs or "metric" in kwargs or "n_pcs" in kwargs:
+                    n_neighbors = kwargs.pop("n_neighbors", None)
+                    metric = kwargs.pop("metric", None)
+                    n_pcs = kwargs.pop("n_pcs", None)
+
+                    # Prepare a readable message
+                    neighbor_args = []
+                    if n_neighbors is not None:
+                        neighbor_args.append(f"n_neighbors={n_neighbors}")
+                    else:
+                        n_neighbors = 15  # default value
+                    if metric is not None:
+                        neighbor_args.append(f"metric='{metric}'")
+                    else:
+                        metric = "euclidean"  # default value
+                    if n_pcs is not None:
+                        neighbor_args.append(f"n_pcs={n_pcs}")
+                    else:
+                        n_pcs = 50
+                    arg_str = ", ".join(neighbor_args)
+
+                    print(f"{format_log_prefix('info_only', indent=2)} {arg_str} provided. "
+                        f"Re-running neighbors with these settings before UMAP.")
+
+                    self.neighbor(on=on, layer=layer, n_neighbors=n_neighbors, metric=metric)
+                    self._append_history(f"{on}: Neighbors re-computed with {arg_str} before UMAP")  # type: ignore[attr-defined], HistoryMixin
         else:
             # check if neighbor has been run before, look for distances and connectivities in obsp
             if 'neighbors' not in adata.uns:

@@ -668,7 +668,7 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
              cmap='default', s=20, alpha=.8, plot_pc=[1, 2],
              pca_params=None, force=False,
              show_labels=False, label_column=None,
-             add_ellipses=False, ellipse_kwargs=None):
+             add_ellipses=False, ellipse_kwargs=None, return_fit=False):
     """
     Plot principal component analysis (PCA) of protein or peptide abundance.
 
@@ -715,6 +715,7 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
         add_ellipses (bool): If True, overlay confidence ellipses per class (2D only).
             Ellipses represent a 95% confidence region under a bivariate Gaussian assumption.
         ellipse_kwargs (dict, optional): Additional keyword arguments for the ellipse patch.
+        return_fit (bool): If True, also return the fitted PCA object.
 
     Returns:
         ax (matplotlib.axes.Axes): Axis containing the PCA scatter plot.
@@ -883,7 +884,10 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
                 loc='best',
                 frameon=False)
 
-    return ax, pca
+    if return_fit:
+        return ax, pca
+    else:
+        return ax
 
 def resolve_plot_colors(adata, classes, cmap, layer="X"):
     """
@@ -1023,7 +1027,7 @@ def plot_enrichment_svg(*args, **kwargs):
     from .enrichment import plot_enrichment_svg as actual_plot
     return actual_plot(*args, **kwargs)
 
-def plot_umap(ax, pdata, classes = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False):
+def plot_umap(ax, pdata, classes = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False, return_fit=False):
     """
     Plot UMAP projection of protein or peptide abundance data.
 
@@ -1050,6 +1054,7 @@ def plot_umap(ax, pdata, classes = None, layer = "X", on = 'protein', cmap='defa
         umap_params (dict): Parameters to pass to UMAP (e.g., 'min_dist', 'metric').
         text_size (int): Font size for axis labels and legend (default: 10).
         force (bool): If True, re-compute UMAP even if results already exist.
+        return_fit (bool): If True, return the fitted UMAP object along with the axis.
 
     Returns:
         ax (matplotlib.axes.Axes): The axis with the UMAP plot.
@@ -1119,7 +1124,10 @@ def plot_umap(ax, pdata, classes = None, layer = "X", on = 'protein', cmap='defa
         legend_title = "/".join(c.capitalize() for c in classes) if isinstance(classes, list) else classes.capitalize()
         ax.legend(handles=legend_elements, title=legend_title, loc='upper right', bbox_to_anchor=(1.3, 1), fontsize=text_size)
 
-    return ax, umap
+    if return_fit:
+        return ax, umap
+    else:
+        return ax
 
 def plot_pca_scree(ax, pca):
     """

@@ -161,7 +161,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
 def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample'], **kwargs):
     if not prot_file and not pep_file:
         raise ValueError(f"{format_log_prefix('error')} At least one of prot_file or pep_file must be provided to function. Try prot_file='proteome_discoverer_prot.txt' or pep_file='proteome_discoverer_pep.txt'.")
-    print("--------------------------\nStarting import [Proteome Discoverer]\n--------------------------")
+    print("--------------------------\nStarting import [Proteome Discoverer]\n")
 
     if prot_file:
         # -----------------------------
@@ -314,7 +314,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
 def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, obs: Optional[pd.DataFrame] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Normalised', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes'], **kwargs):
     if not report_file:
         raise ValueError(f"{format_log_prefix('error')} Importing from DIA-NN: report.tsv or report.parquet must be provided to function. Try report_file='report.tsv' or report_file='report.parquet'")
-    print("--------------------------\nStarting import [DIA-NN]\n--------------------------")
+    print("--------------------------\nStarting import [DIA-NN]\n")
 
     print(f"Source file: {report_file}")
     # if csv, then use pd.read_csv, if parquet then use pd.read_parquet('example_pa.parquet', engine='pyarrow')
@@ -386,6 +386,9 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
     # pep_var: peptide sequence with modifications (default: Genes, Protein.Group, Precursor.Charge, Modified.Sequence, Stripped.Sequence, Precursor.Id, All Mapped Proteins, All Mapped Genes)
     existing_pep_var_columns = [col for col in pep_var_columns if col in report_all.columns]
     missing_columns = set(pep_var_columns) - set(existing_pep_var_columns)
+    # if missing columns are ['All Mapped Proteins'] and ['All Mapped Genes'], then it is likely that the DIA-NN version is <1.8.1, so we can skip the warning
+    if missing_columns == {'All Mapped Proteins', 'All Mapped Genes'}:
+        missing_columns = set()
 
     # Precursor.Quantity layer (if using directLFQ for nomalization)
     if 'Precursor.Quantity' in report_all.columns:
@@ -563,8 +566,8 @@ def _create_pAnnData_from_parts(
     if history_msg:
         pdata._append_history(history_msg)
 
-    print("--------------------------")
     print(f"{format_log_prefix('result')} Import complete. Use `print(pdata)` to view the object.")
+    print("--------------------------")
 
     return pdata
 
