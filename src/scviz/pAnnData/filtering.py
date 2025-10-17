@@ -492,8 +492,21 @@ class FilterMixin:
             k.lower().endswith("_qval") or k.lower().endswith("_fdr") for k in adata.layers.keys()
         )
 
+        # --- Handle missing significance data entirely ---
+        if not has_protein_level_significance and "Global_Q_value" not in adata.var.columns:
+            raise ValueError(
+                "No per-sample layer (e.g., *_qval) or global significance column ('Global_Q_value') "
+                "found in .prot. Please ensure your data includes q-values or run annotate_significant()."
+            )
+
         # --- 1️⃣ Global fallback mode (e.g. PD-based imports) ---
         if not has_protein_level_significance and "Global_Q_value" in adata.var.columns:
+            if group is not None:
+                raise ValueError(
+                    f"Cannot filter by group {group}: per-sample significance data missing "
+                    "and only global q-values available."
+                )
+            
             global_mask = adata.var["Global_Q_value"] < fdr_threshold
 
             n_total = len(global_mask)
@@ -665,7 +678,7 @@ class FilterMixin:
             return_copy_str = "Returning a copy of" if return_copy else "Filtered and modified"
             print(f"    {return_copy_str} protein data based on significance thresholds:")
 
-            if is_group_mode:
+            if mode == "group":
                 # Case A: obs column(s) expanded → show expanded_groups and add note
                 if auto_group_msg:
                     group_note = f" (all values of obs column(s))"
@@ -951,7 +964,11 @@ class FilterMixin:
         Filter samples using dictionary-style categorical matching.
 
         This internal method filters samples based on class-like annotations (e.g., treatment, cellline),
-        using either loose field-wise filtering or strict combination matching.
+        using either loose field-wise filtering or strict combination matching. It supports:
+    
+        - Single dictionary (e.g., `{'cellline': 'A'}`)
+        - List of dictionaries (e.g., `[{...}, {...}]` for multiple matching cases)
+        - Exact matching (`exact_cases=True`) across all key–value pairs
 
         Args:
             values (dict or list of dict): Filtering conditions.
@@ -964,7 +981,7 @@ class FilterMixin:
             return_copy (bool): If True, returns a filtered copy. Otherwise modifies in place.
 
         Returns:
-            AnnData: Filtered view of the input AnnData object if `return_copy=True`; otherwise modifies in place and returns None.
+            pAnnData: Filtered view of the input AnnData object if `return_copy=True`; otherwise modifies in place and returns None.
 
         Note:
             This method is used internally by `filter_sample()`. For general use, call `filter_sample()` directly.

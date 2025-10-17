@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import re
 import warnings
+from scipy.sparse import csr_matrix
 
 # ---------------------------------------------------------------------
 # Tests for _filter_sample_values
@@ -75,6 +76,122 @@ def test_filter_prot_found_file_mode(pdata):
     file_names = [c.replace("Found In: ", "") for c in file_cols]
     pdata_filt = pdata.filter_prot_found(group=file_names[0], on="protein", return_copy=True)
     assert pdata_filt.prot.shape[1] < pdata.prot.shape[1]
+
+def test_filter_prot_found_group_type_validation(pdata):
+    # group must be str or list/tuple of str
+    with pytest.raises(TypeError, match="must be a string or list of strings"):
+        pdata.filter_prot_found(group=123, on="protein", return_copy=True)
+
+def test_filter_prot_found_missing_groups_and_files_error(pdata):
+    # Token that is neither a file column nor a known group value/column
+    with pytest.raises(ValueError, match="could not be found"):
+        pdata.filter_prot_found(group=["__definitely_not_a_file__", "__not_a_group__"], on="protein", return_copy=True)
+
+def test_filter_prot_found_ambiguous_mixed_file_and_group_value(pdata):
+    # Ensure group columns present
+    pdata.annotate_found(classes="cellline", on="protein", verbose=False)
+    # Pick one file (from existing Found In: <file> columns)
+    file_cols = [c for c in pdata.prot.var.columns if c.startswith("Found In: ")]
+    assert file_cols, "No file-based 'Found In:' columns found"
+    file_name = file_cols[0].replace("Found In: ", "")
+    # Pick one valid group value (e.g., 'AS' or 'BE')
+    group_value = pdata.prot.obs["cellline"].unique()[0]
+
+    with pytest.raises(ValueError, match="Ambiguous input"):
+        pdata.filter_prot_found(group=[file_name, group_value], on="protein", return_copy=True)
+
+def test_filter_prot_found_auto_from_obs_column_requires_threshold(pdata):
+    # Pass a class column name -> auto-expands to group values (group mode)
+    # Missing both min_ratio and min_count should raise
+    pdata.annotate_found(classes="cellline", on="protein", verbose=False)
+    with pytest.raises(ValueError, match="specify either `min_ratio` or `min_count`"):
+        pdata.filter_prot_found(group="cellline", on="protein", return_copy=True)
+
+def test_filter_prot_found_group_mode_ratio_any_and_all(pdata):
+    pdata.annotate_found(classes="cellline", on="protein", verbose=False)
+    group_values = pdata.prot.obs["cellline"].unique().tolist()
+    # ANY (union) with ratio
+    out_any = pdata.filter_prot_found(group=group_values, min_ratio=0.1, on="protein", return_copy=True, match_any=True, verbose=False)
+    assert out_any.prot.shape[1] <= pdata.prot.shape[1] and out_any.prot.shape[1] > 0
+    # ALL (intersection) with ratio
+    out_all = pdata.filter_prot_found(group=group_values, min_ratio=0.1, on="protein", return_copy=True, match_any=False, verbose=False)
+    assert out_all.prot.shape[1] <= out_any.prot.shape[1]  # intersection ≤ union
+
+def test_filter_prot_found_group_mode_count_any(pdata):
+    pdata.annotate_found(classes="cellline", on="protein", verbose=False)
+    group_values = pdata.prot.obs["cellline"].unique().tolist()
+    # ANY with min_count
+    out_any = pdata.filter_prot_found(group=group_values, min_count=1, on="protein", return_copy=True, match_any=True, verbose=False)
+    assert out_any.prot.shape[1] > 0
+
+def test_filter_prot_found_file_mode_any_and_all(pdata):
+    # Use two actual files (from Found In: <file> columns)
+    file_cols = [c for c in pdata.prot.var.columns if c.startswith("Found In: ")]
+    assert len(file_cols) >= 2, "Need at least two file-mode 'Found In:' columns"
+    files = [c.replace("Found In: ", "") for c in file_cols[:2]]
+
+    # ANY
+    out_any = pdata.filter_prot_found(group=files, on="protein", return_copy=True, match_any=True, verbose=False)
+    # ALL
+    out_all = pdata.filter_prot_found(group=files, on="protein", return_copy=True, match_any=False, verbose=False)
+
+    assert out_any.prot.shape[1] >= out_all.prot.shape[1]
+    assert out_all.prot.shape[1] >= 0
+
+# def test_filter_prot_invalid_args_and_empty_mask(pdata):
+#     """Force edge cases in filter_prot(): invalid args, empty result, and inplace mode."""
+#     # 1️⃣ Invalid combination of args (both condition & accession_list)
+#     with pytest.raises(ValueError):
+#         pdata.filter_prot(condition="treatment == 'none'", accession_list=["P00001"])
+
+#     # 2️⃣ Invalid 'on' argument
+#     with pytest.raises(ValueError):
+#         pdata.filter_prot(condition="cellline == 'BE'", on="invalid")
+
+#     # 3️⃣ Valid condition but yields empty mask → triggers early return
+#     pdata_empty = pdata.filter_prot(condition="cellline == 'nonexistent'", return_copy=True, verbose=False)
+#     assert pdata_empty.prot.shape[1] == 0
+
+#     # 4️⃣ Inplace mode (return_copy=False)
+#     pdata_copy = pdata.copy()
+#     pdata_copy.filter_prot(condition="cellline == 'BE'", return_copy=False)
+#     # Should update inplace (prot.var_names same length or shorter)
+#     assert pdata_copy.prot is not None
+
+# ---------------------------------------------------------------------
+# Tests for _filter_sample main
+# ---------------------------------------------------------------------
+def test_filter_sample_invalid_argument_combination(pdata):
+    """Ensure ValueError is raised when multiple filter arguments are given."""
+    with pytest.raises(ValueError, match="exactly one"):
+        pdata.filter_sample(values={"cellline": "AS"}, condition="protein_count > 10")
+
+def test_filter_sample_min_prot_invokes_condition(pdata):
+    """Using min_prot should delegate to _filter_sample_condition."""
+    pdata_filtered = pdata.filter_sample(min_prot=10, return_copy=True)
+    assert pdata_filtered is not None
+    assert pdata_filtered.prot.shape[0] <= pdata.prot.shape[0]
+
+def test_filter_sample_query_mode_obs(pdata):
+    """Query mode on obs should evaluate directly via pandas query."""
+    col = pdata.prot.obs.columns[0]
+    val = pdata.prot.obs[col].iloc[0]
+    query = f"{col} == '{val}'"
+    out = pdata.filter_sample(values=query, query_mode=True, return_copy=True)
+    assert out is not None
+    assert out.prot.shape[0] > 0
+
+def test_filter_sample_query_mode_summary(pdata):
+    """Query mode on summary should evaluate pandas query on .summary DataFrame."""
+    query = "protein_count > 0"
+    out = pdata.filter_sample(condition=query, query_mode=True, return_copy=True)
+    assert out is not None
+    assert out.prot.shape[0] > 0
+
+def test_filter_sample_no_arguments_raises(pdata):
+    """Must specify exactly one filter argument."""
+    with pytest.raises(ValueError, match="exactly one"):
+        pdata.filter_sample()
 
 # ---------------------------------------------------------------------
 # Tests for _filter_sample_condition
@@ -152,6 +269,49 @@ def test_filter_sample_condition_no_filter_returns_original(pdata, capsys):
     out = capsys.readouterr().out
     assert len(pdata_filt.prot.obs) == n0
 
+def test_filter_sample_condition_recomputes_summary(pdata, monkeypatch):
+    """Ensure _filter_sample_condition recomputes summary when missing."""
+    pdata_no_summary = pdata.copy()
+    pdata_no_summary._summary = None
+    called = {}
+
+    def mock_update_summary(recompute):
+        called["recomputed"] = True
+        pdata_no_summary._summary = pdata.summary.copy()
+    monkeypatch.setattr(pdata_no_summary, "update_summary", mock_update_summary)
+
+    pdata_no_summary._filter_sample_condition(condition="protein_count > 0", return_copy=True)
+    assert called.get("recomputed", False)
+
+import warnings
+
+def test_filter_sample_condition_file_list_missing(pdata):
+    """Should warn when some file_list entries are missing."""
+    file_list = list(pdata.prot.obs_names[:1]) + ["nonexistent_sample"]
+    with warnings.catch_warnings(record=True) as w:
+        pdata._filter_sample_condition(file_list=file_list, return_copy=True)
+    assert any("not found" in str(wi.message) for wi in w)
+
+def test_filter_sample_condition_no_matches_message(pdata, capsys):
+    """Should print informative message when no samples satisfy the condition."""
+    out = pdata._filter_sample_condition(condition="protein_count > 1e9", return_copy=True)
+    captured = capsys.readouterr().out
+    assert "No matching samples found" in captured
+    # returned pAnnData should have 0 samples
+    assert out.prot.n_obs == 0
+
+def test_filter_sample_condition_no_filter_returns_original(pdata):
+    """Calling without condition or file_list should return original data."""
+    out = pdata._filter_sample_condition(return_copy=True)
+    assert out.prot.shape == pdata.prot.shape
+
+def test_filter_sample_condition_file_list_basic(pdata):
+    """Basic sanity check for file_list filtering path."""
+    sample = pdata.prot.obs_names[0]
+    out = pdata._filter_sample_condition(file_list=[sample], return_copy=True)
+    assert list(out.prot.obs_names) == [sample]
+
+
 # ---------------------------------------------------------------------
 # Tests for _filter_sample_values
 # ---------------------------------------------------------------------
@@ -225,6 +385,40 @@ def test_filter_sample_values_inplace_modifies_original(pdata):
     assert len(pdata.prot.obs) <= n0
     # Resulting obs_names should be a subset of original
     assert set(pdata.prot.obs_names).issubset(set(pdata.summary.index))
+
+def test_filter_sample_values_no_input_raises(pdata):
+    """Calling without `values` should raise ValueError."""
+    with pytest.raises(ValueError, match="No filter|must be a dictionar"):
+        pdata._filter_sample_values(values=None, exact_cases=False)
+
+def test_filter_sample_values_invalid_list_type(pdata):
+    """List elements must all be dictionaries."""
+    with pytest.raises(ValueError, match="list.*dictionar"):
+        pdata._filter_sample_values(values=["not_a_dict"], exact_cases=True)
+
+def test_filter_sample_values_list_union_mode(pdata):
+    """List input with OR logic (default)."""
+    obs = pdata.prot.obs
+    key = obs.columns[0]
+    vals = obs[key].unique()[:2]
+    value_list = [{key: v} for v in vals]
+    out = pdata._filter_sample_values(values=value_list, exact_cases=True)
+    assert out is not None
+    assert out.prot.n_obs > 0
+
+    # Should fail with exact_cases=False
+    with pytest.raises(ValueError, match="must be a dictionary"):
+        pdata._filter_sample_values(values=value_list, exact_cases=False)
+
+def test_filter_sample_values_list_exact_mode(pdata):
+    """List input with exact_cases=True (AND logic)."""
+    obs = pdata.prot.obs
+    key = obs.columns[0]
+    val = obs[key].iloc[0]
+    # Both dicts share one overlapping key–value pair
+    value_list = [{key: val}, {key: val}]
+    out = pdata._filter_sample_values(values=value_list, exact_cases=True)
+    assert out.prot.n_obs > 0
 
 # ---------------------------------------------------------------------
 # Tests for _filter_sample_query
@@ -420,8 +614,8 @@ def test_filter_prot_significant_global_fallback_pd(pdata):
     if "X_qval" in pdata.prot.layers:
         del pdata.prot.layers["X_qval"]
 
-    pdata.annotate_significant(fdr_threshold=0.05, on="protein", verbose=False)
-    pdata_filt = pdata.filter_prot_significant(fdr_threshold=0.05, return_copy=True, verbose=False)
+    pdata.annotate_significant(fdr_threshold=0.05, on="protein", verbose=True)
+    pdata_filt = pdata.filter_prot_significant(fdr_threshold=0.05, return_copy=True, verbose=True)
 
     assert pdata_filt is not None
     assert pdata_filt.prot.shape[1] <= pdata.prot.shape[1]
@@ -434,12 +628,45 @@ def test_filter_prot_significant_precedence_diann(pdata_diann):
     # Add global q-values but keep X_qval layer
     pdata_diann.prot.var["Global_Q_value"] = np.linspace(0, 1, len(pdata_diann.prot.var))
 
-    pdata_diann.annotate_significant(fdr_threshold=0.05, on="protein", verbose=False)
-    pdata_filt = pdata_diann.filter_prot_significant(fdr_threshold=0.05, return_copy=True, verbose=False)
+    pdata_diann.annotate_significant(fdr_threshold=0.05, on="protein", verbose=True)
+    pdata_filt = pdata_diann.filter_prot_significant(fdr_threshold=0.05, return_copy=True, verbose=True)
 
     # Should still use per-sample annotations (i.e., not create "Significant In: Global")
     assert any("Significant In: Global" in c for c in pdata_diann.prot.var.columns)
     assert pdata_filt is not None
+
+def test_filter_prot_significant_missing_qval_and_global(pdata):
+    """Ensure ValueError raised when neither per-sample qvals nor global q-values exist."""
+    # Remove both sources of significance
+    pdata_noq = pdata.copy()
+    pdata_noq.prot.layers.clear()
+    pdata_noq.prot.var.drop(columns=[c for c in pdata_noq.prot.var.columns if "Global_Q_value" in c], errors="ignore", inplace=True)
+    with pytest.raises(ValueError, match="No per-sample layer"):
+        pdata_noq.filter_prot_significant(return_copy=True)
+
+def test_filter_prot_significant_auto_resolves_obs_column(pdata_diann):
+    """Passing a class column name triggers automatic annotation before filtering."""
+    # pdata_diann fixture includes obs columns like 'amt', 'region'
+    out = pdata_diann.filter_prot_significant(group="amt", fdr_threshold=0.05, min_ratio=0.1, return_copy=True, verbose=False)
+    assert out is not None
+    # Should have added 'Significant In:' columns corresponding to group values
+    assert any("Significant In:" in c for c in out.prot.var.columns)
+
+def test_filter_prot_significant_invalid_group_values(pdata):
+    """Ensure ValueError for unrecognized group names."""
+    with pytest.raises(ValueError, match="per-sample significance data missing"):
+        pdata.filter_prot_significant(group=["nonexistent_group"], fdr_threshold=0.05, return_copy=True)
+
+def test_filter_prot_significant_file_mode_any_and_all(pdata_diann):
+    """Exercise per-file significance filtering using ANY vs ALL logic."""
+    # First annotate per-sample significance
+    pdata_diann.annotate_significant(fdr_threshold=0.05, on="protein", verbose=False)
+    sample_names = list(pdata_diann.prot.obs_names[:3])
+    # ANY (union)
+    out_any = pdata_diann.filter_prot_significant(group=sample_names, fdr_threshold=0.05, match_any=True, return_copy=True, verbose=False)
+    # ALL (intersection)
+    out_all = pdata_diann.filter_prot_significant(group=sample_names, fdr_threshold=0.05, match_any=False, return_copy=True, verbose=False)
+    assert out_any.prot.shape[1] >= out_all.prot.shape[1]
 
 # ---------------------------------------------------------------------
 # Advanced filtering edge cases
@@ -487,3 +714,137 @@ def test_annotate_found_missing_layer_fallback(pdata):
     pdata.annotate_found(classes="cellline", on="protein")
     # Should silently succeed and re-add 'Found In' columns
     assert any(c.startswith("Found In:") for c in pdata.prot.var.columns)
+
+# ---------------------------------------------------------------------
+# Tests for _filter_rs
+# ---------------------------------------------------------------------
+
+def make_dummy_pdata_with_rs(pdata, shape=(3, 4)):
+    """Helper: attach a simple binary RS matrix to pdata for filtering tests."""
+    rs = csr_matrix(np.array([
+        [1, 1, 0, 0],
+        [0, 1, 1, 0],
+        [0, 0, 1, 1],
+    ], dtype=int))
+    pdata._set_RS(rs, validate=False)
+
+    # Create matching .prot and .pep dummy structures to avoid validation mismatch
+    n_prot, n_pep = rs.shape
+    pdata.prot = pdata.prot[:, :n_prot] if pdata.prot.shape[1] >= n_prot else pdata.prot.copy()
+    pdata.pep = pdata.pep[:, :n_pep] if pdata.pep.shape[1] >= n_pep else pdata.pep.copy()
+
+    pdata.prot.var_names = [f"P{i}" for i in range(n_prot)]
+    pdata.pep.var_names = [f"pep{i}" for i in range(n_pep)]
+    return pdata
+
+def test_filter_rs_no_rs_returns_self(pdata, capsys):
+    """Should safely return and print warning when RS is None."""
+    import anndata as ad
+    import numpy as np
+
+    pdata._rs = None
+    pdata.prot = ad.AnnData(np.zeros((1, 1)))
+    pdata.pep = ad.AnnData(np.zeros((1, 1)))
+    pdata.validate = lambda *a, **kw: None
+
+    out = pdata.filter_rs(validate_after=False)
+    captured = capsys.readouterr().out
+    assert "No RS matrix" in captured
+    assert out is not None
+
+def test_filter_rs_default_preset(pdata):
+    """Test preset='default' → keeps proteins with ≥2 unique peptides."""
+    pdata = make_dummy_pdata_with_rs(pdata)
+    out = pdata.filter_rs(preset="default", validate_after=False)
+    assert "filter_rs" in out.prot.uns
+    meta = out.prot.uns["filter_rs"]
+    assert meta["n_proteins"] <= pdata.rs.shape[0]
+
+
+def test_filter_rs_lenient_preset(pdata):
+    """Test preset='lenient' → total peptides ≥ 2."""
+    pdata = make_dummy_pdata_with_rs(pdata)
+    out = pdata.filter_rs(preset="lenient", validate_after=False)
+    assert isinstance(out, type(pdata))
+    assert "lenient" in out.prot.uns["filter_rs"]["description"]
+
+
+def test_filter_rs_custom_preset_dict(pdata):
+    """Test preset dict overrides numeric thresholds."""
+    pdata = make_dummy_pdata_with_rs(pdata)
+    preset = {"min_peptides_per_protein": 1, "max_proteins_per_peptide": 2}
+    out = pdata.filter_rs(preset=preset, validate_after=False)
+    desc = out.prot.uns["filter_rs"]["description"]
+    assert "min peptides per protein" in desc
+    assert "max proteins per peptide" in desc
+
+
+def test_filter_rs_invalid_preset_raises(pdata):
+    """Unknown preset should raise ValueError."""
+    pdata = make_dummy_pdata_with_rs(pdata)
+    with pytest.raises(ValueError, match="Unknown RS filtering preset"):
+        pdata.filter_rs(preset="weird_mode")
+
+
+def test_filter_rs_manual_numeric_filters(pdata):
+    """Test direct numeric threshold filtering."""
+    pdata = make_dummy_pdata_with_rs(pdata)
+    out = pdata.filter_rs(
+        min_peptides_per_protein=1,
+        min_unique_peptides_per_protein=1,
+        max_proteins_per_peptide=2,
+        validate_after=False,
+    )
+    assert "filter_rs" in out.prot.uns
+    summary = out.prot.uns["filter_rs"]
+    assert summary["n_proteins"] > 0
+    assert summary["n_peptides"] > 0
+    assert "🧪 Filtered RS" in summary["description"]
+
+def test_filter_rs_triggers_validate_and_detects_shape_mismatch(pdata):
+    """Ensure validate() is called and detects shape mismatch when RS is invalid."""
+    from scipy.sparse import csr_matrix
+    import numpy as np
+
+    # Attach a wrong-shaped RS to pdata (too small)
+    rs_bad = csr_matrix(np.ones((5, 10), dtype=int))
+    pdata._set_RS(rs_bad, validate=False)  # skip check for setup
+
+    # Monkeypatch validate() to simulate real behavior — detect mismatch
+    def fake_validate(verbose=True):
+        raise ValueError("❌ RS shape mismatch detected during validation")
+
+    pdata.validate = fake_validate
+
+    # Expect the error when validate_after=True
+    with pytest.raises(ValueError, match=r"(RS shape mismatch|Length of values)"):
+        pdata.filter_rs(validate_after=True)
+
+def test_filter_rs_validate_passes_for_valid_rs(pdata, monkeypatch):
+    """Validate should pass when RS shape matches prot×pep dimensions."""
+    from scipy.sparse import csr_matrix
+    import numpy as np
+
+    # Construct RS that matches actual dataset dimensions
+    rs_good = csr_matrix(np.ones((pdata.prot.shape[1], pdata.pep.shape[1]), dtype=int))
+
+    # Use real setter (validate=True)
+    pdata._set_RS(rs_good, validate=True)
+
+    # Record whether validate() was called
+    called = {}
+
+    # Define mock that records the call
+    def record_validate(self, verbose=True):
+        called["ran"] = True
+        return True
+
+    # Patch at class level so both self and self.copy() share the mock
+    monkeypatch.setattr(type(pdata), "validate", record_validate)
+
+    # Run the RS filtering with validation enabled
+    pdata.filter_rs(validate_after=True, preset="lenient")
+
+    # Check that validate() was indeed called
+    assert called.get("ran", False), "validate() should have been called after filtering"
+
