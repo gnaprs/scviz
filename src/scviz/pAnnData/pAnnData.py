@@ -1,3 +1,4 @@
+from scviz.pAnnData.plot import PlotMixin
 from .base import BaseMixin
 from .validation import ValidationMixin
 from .summary import SummaryMixin
@@ -16,7 +17,7 @@ from scviz.TrackedDataFrame import TrackedDataFrame
 
 class pAnnData(BaseMixin, ValidationMixin, SummaryMixin, MetricsMixin,
                IdentifierMixin, HistoryMixin, EditingMixin, FilterMixin,
-               AnalysisMixin, EnrichmentMixin, IOMixin):
+               AnalysisMixin, EnrichmentMixin, IOMixin, PlotMixin):
     """
     Unified data container for protein and peptide expression in single-cell and bulk proteomics.
 
@@ -39,6 +40,7 @@ class pAnnData(BaseMixin, ValidationMixin, SummaryMixin, MetricsMixin,
     - **FilterMixin**: Provides flexible filtering of samples and proteins/peptides based on metadata, presence, or quantification.
     - **AnalysisMixin**: Core statistical operations: differential expression, imputation, PCA, clustering, etc.
     - **EnrichmentMixin**: Runs STRING-based enrichment analyses (GO, pathways, PPI) using ranked or unranked protein sets.
+    - **PlotMixin**: Used to plot and visualize attributes of the pAnnData object, frequently for QC.
 
     Args:
         prot (AnnData): Protein-level expression matrix, with `.obs` containing sample metadata and `.var` describing protein features.
