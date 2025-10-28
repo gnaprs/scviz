@@ -14,14 +14,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # full history needed for git-cliff
-          ref: ${{ github.ref }}  # ensures we checkout the tagged commit
-
-      - name: Reattach HEAD to main
-        run: |
-          git fetch origin main
-          git checkout main
-          git pull origin main
-          git merge --no-edit ${{ github.ref }} || true  # ensure tag commit is included
 
       - name: Fetch all tags
         run: git fetch --tags --force
@@ -31,12 +23,10 @@ jobs:
         uses: orhun/git-cliff-action@v4
         with:
           config: .git-cliff.toml
-          args: --verbose
+          args: --verbose --latest -o CHANGELOG.md
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OUTPUT: CHANGELOG.md
-
-      - name: Print changelog (for debugging)
-        run: cat "${{ steps.git-cliff.outputs.changelog }}"
 
       - name: Commit and push changelog
         run: |
@@ -49,3 +39,6 @@ jobs:
             git commit -m "chore: update changelog for ${GITHUB_REF_NAME}"
             git push
           fi
+
+      - name: Copy changelog to docs
+        run: cp CHANGELOG.md docs/CHANGELOG.md
