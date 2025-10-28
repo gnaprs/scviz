@@ -371,7 +371,7 @@ def plot_summary(ax, pdata, value='protein_count', classes=None, plot_mean=True,
         if classes is None:
             raise ValueError("Classes must be specified when plot_mean is True.")
         elif isinstance(classes, str):
-            sns.barplot(x=classes, y=value, hue=classes, data=summary_data, ci='sd', ax=ax, **kwargs)
+            sns.barplot(x=classes, y=value, hue=classes, data=summary_data, errorbar='sd', ax=ax, **kwargs)
             ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
         elif isinstance(classes, list) and len(classes) > 0:
             if len(classes) == 1:
@@ -497,7 +497,6 @@ def plot_abundance_housekeeping(ax, pdata, classes=None, loading_control='all', 
         palette = get_color('colors', n=len(loading_controls[loading_control]))
         plot_abundance(ax, pdata, namelist=loading_controls[loading_control], classes=classes, layer='X', palette=palette, **kwargs)
         ax.set_title(loading_control.title())
-
 
 def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
                    classes=None, return_df=False, order=None, palette=None,
@@ -666,7 +665,7 @@ def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
 
 def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
              cmap='default', s=20, alpha=.8, plot_pc=[1, 2],
-             pca_params=None, force=False,
+             pca_params=None, force=False, basis='X_pca',
              show_labels=False, label_column=None,
              add_ellipses=False, ellipse_kwargs=None, return_fit=False):
     """
@@ -702,6 +701,7 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
         plot_pc (list of int): Principal components to plot, e.g. `[1, 2]` or `[1, 2, 3]`.
         pca_params (dict, optional): Additional parameters for `sklearn.decomposition.PCA`.
         force (bool): If True, recompute PCA even if it is already cached.
+        basis (str): PCA basis to use. Defaults to `X_pca`, alternatives include `X_pca_harmony` after running pdata.harmony(batch="<key>").
         show_labels (bool or list): Whether to label points.
             
             - False: no labels.
@@ -801,13 +801,21 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
     default_pca_params = {'n_comps': min(len(adata.obs_names), len(adata.var_names)) - 1, 'random_state': 42}
     pca_param = {**default_pca_params, **(pca_params or {})}
 
-    if 'X_pca' in adata.obsm and not force:
-        print(f'{utils.format_log_prefix("warn")} PCA already exists in {on} data — using existing. Run with `force=True` to recompute.')
+    if basis != "X_pca":
+        # User-specified alternative basis (e.g. Harmony, ICA)
+        if basis not in adata.obsm:
+            raise KeyError(f"{utils.format_log_prefix('error',2)} Custom PCA basis '{basis}' not found in adata.obsm.")
     else:
-        pdata.pca(on=on, layer=layer, **pca_param)
+        # Standard PCA case
+        if "X_pca" not in adata.obsm or force:
+            print(f"{utils.format_log_prefix('info')} Computing PCA (force={force})...")
+            pdata.pca(on=on, layer=layer, **pca_param)
+        else:
+            print(f"{utils.format_log_prefix('info')} Using existing PCA embedding.")
 
-    X_pca = adata.obsm['X_pca']
-    pca = adata.uns['pca']
+    # --- Select PCA basis for plotting ---
+    X_pca = adata.obsm[basis] if basis in adata.obsm else adata.obsm["X_pca"]
+    pca = adata.uns["pca"]
 
     # Get colors
     color_mapped, cmap_resolved, legend_elements = resolve_plot_colors(adata, classes, cmap, layer=layer)
@@ -1121,7 +1129,12 @@ def plot_umap(ax, pdata, classes = None, layer = "X", on = 'protein', cmap='defa
         ax.set_zlabel('UMAP 3', fontsize=text_size)
 
     if legend_elements:
-        legend_title = "/".join(c.capitalize() for c in classes) if isinstance(classes, list) else classes.capitalize()
+        if classes is None:
+            legend_title = None
+        elif isinstance(classes, list):
+            legend_title = "/".join(c.capitalize() for c in classes)
+        else:
+            legend_title = str(classes).capitalize()
         ax.legend(handles=legend_elements, title=legend_title, loc='upper right', bbox_to_anchor=(1.3, 1), fontsize=text_size)
 
     if return_fit:
