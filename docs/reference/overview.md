@@ -98,7 +98,7 @@ graph TB
     - [Differential Expression](../tutorials/de.md)  
     - [Enrichment + Networks](../tutorials/enrichment.md)  
 
-    For a guided introduction, start with the [Quickstart](../quickstart.md).  
+    For a guided introduction, start with the [Quickstart](../tutorials/quickstart.md).  
 
 ---
 
