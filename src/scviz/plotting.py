@@ -305,7 +305,6 @@ def plot_cv(ax, pdata, classes=None, layer='X', on='protein', order=None, return
     pdata.cv(classes = classes, on = on, layer = layer)
     adata = utils.get_adata(pdata, on)    
     classes_list = utils.get_classlist(adata, classes = classes, order = order)
-
     cv_data = []
     for class_value in classes_list:
         cv_col = f'CV: {class_value}'
@@ -313,6 +312,10 @@ def plot_cv(ax, pdata, classes=None, layer='X', on='protein', order=None, return
             cv_values = adata.var[cv_col].values
             cv_data.append(pd.DataFrame({'Class': class_value, 'CV': cv_values}))
 
+    if not cv_data:
+        warnings.warn("[plot_cv] No valid subsets found — skipping plot.")
+        return ax if ax is not None else None
+    
     cv_df = pd.concat(cv_data, ignore_index=True)
 
     # return cv_df for user to plot themselves
