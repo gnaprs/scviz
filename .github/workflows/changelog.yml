@@ -10,16 +10,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # full history needed for git-cliff
 
-      - name: Install git-cliff
-        uses: orhun/git-cliff-action@v3
+      - name: Generate changelog
+        id: git-cliff
+        uses: orhun/git-cliff-action@v4
         with:
           config: .git-cliff.toml
-          args: -a -o CHANGELOG.md
+          args: -a --verbose
+        env:
+          OUTPUT: CHANGELOG.md
+
+      - name: Print changelog (for debugging)
+        run: cat "${{ steps.git-cliff.outputs.changelog }}"
 
       - name: Commit and push changelog
         run: |
