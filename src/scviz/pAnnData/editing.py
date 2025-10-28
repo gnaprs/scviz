@@ -103,8 +103,8 @@ class EditingMixin:
                 df_abund = get_abundance(pdata, namelist=["UBE4B", "GAPDH"], on="protein", classes=["treatment", "cellline"])
                 ```
         """
-
-        gene_to_acc, _ = self.get_gene_maps(on='protein' if on == 'peptide' else on) # type: ignore[attr-defined]
+        on_user = on.lower()
+        gene_to_acc, _ = self.get_gene_maps(on='protein' if on_user in ('peptide', 'pep') else on_user) # type: ignore[attr-defined]
 
 
         if on == 'peptide' and namelist:
