@@ -14,6 +14,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # full history needed for git-cliff
+          ref: ${{ github.ref }}  # ensures we checkout the tagged commit
+
+      - name: Reattach HEAD to main
+        run: |
+          git fetch origin main
+          git checkout main
+          git pull origin main
+          git merge --no-edit ${{ github.ref }} || true  # ensure tag commit is included
 
       - name: Generate changelog
         id: git-cliff

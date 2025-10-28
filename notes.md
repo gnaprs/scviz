@@ -23,9 +23,9 @@ style():
 perf():
 test():
 
-# for tag
-git tag "v$(grep -m1 version pyproject.toml | cut -d'"' -f2)" -m "Release v$(grep -m1 version pyproject.toml | cut -d'"' -f2)" \
-&& git push origin "v$(grep -m1 version pyproject.toml | cut -d'"' -f2)"
+# for tag (in git bash)
+git tag "v$(grep -m1 version pyproject.toml | cut -d'"' -f2)" -m "Release v$(grep -m1 version pyproject.toml | cut -d'"' -f2)"
+git push origin "v$(grep -m1 version pyproject.toml | cut -d'"' -f2)"
 
 ## delete
 git tag -d v0.4.1 
