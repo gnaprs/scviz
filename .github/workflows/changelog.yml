@@ -23,6 +23,9 @@ jobs:
           git pull origin main
           git merge --no-edit ${{ github.ref }} || true  # ensure tag commit is included
 
+      - name: Fetch all tags
+        run: git fetch --tags --force
+
       - name: Generate changelog
         id: git-cliff
         uses: orhun/git-cliff-action@v4

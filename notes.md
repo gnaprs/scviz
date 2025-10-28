@@ -28,4 +28,5 @@ git tag "v$(grep -m1 version pyproject.toml | cut -d'"' -f2)" -m "Release v$(gre
 git push origin "v$(grep -m1 version pyproject.toml | cut -d'"' -f2)"
 
 ## delete
-git tag -d v0.4.1 
+git tag -d v0.4.2-alpha v0.4.1-alpha
+git push --delete origin v0.4.2-alpha v0.4.1-alpha
