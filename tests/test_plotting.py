@@ -11,20 +11,6 @@ import anndata as ad
 
 from conftest import _is_axes_container, _count_artists
 
-# mock utilities
-class DummyUtils:
-    """Mock subset of scviz.utils used by these plotting functions."""
-    @staticmethod
-    def get_upset_contents(pdata, classes, upsetForm=True):
-        # Return simple dummy content mimicking protein sets
-        return {
-            "GroupA": {"P1", "P2", "P3"},
-            "GroupB": {"P2", "P3", "P4"}
-        }
-
-# Inject dummy utils into module (isolates from heavy upstream dependencies)
-scplt.utils = DummyUtils()
-
 # test get_color
 
 def test_get_color_colors_basic():
@@ -721,6 +707,16 @@ def test_plot_venn_invalid_number_of_sets(monkeypatch):
     plt.close(fig)
 
 # test plot_upset
+# mock utilities
+class DummyUtils:
+    """Mock subset of scviz.utils used by these plotting functions."""
+    @staticmethod
+    def get_upset_contents(pdata, classes, upsetForm=True):
+        # Return simple dummy content mimicking protein sets
+        return {
+            "GroupA": {"P1", "P2", "P3"},
+            "GroupB": {"P2", "P3", "P4"}
+        }
 
 class DummyUpSet:
     def __init__(self, df, **kwargs):
@@ -729,6 +725,14 @@ class DummyUpSet:
     def plot(self):
         return {"intersections": "mock_axes", "totals": "mock_axes"}
 
+@pytest.fixture
+def mock_upset_utils(monkeypatch):
+    """Temporarily replace scplt.utils with DummyUtils for UpSet tests."""
+    monkeypatch.setattr(scplt, "utils", DummyUtils())
+    yield
+    # pytest will restore scplt.utils afterward
+
+@pytest.mark.usefixtures("mock_upset_utils")
 def test_plot_upset_runs(monkeypatch):
     """Ensure plot_upset runs and returns an UpSet mock."""
     monkeypatch.setattr(scplt, "upsetplot", type("m", (), {"UpSet": DummyUpSet}))
@@ -739,6 +743,7 @@ def test_plot_upset_runs(monkeypatch):
     assert isinstance(upset_obj, DummyUpSet)
     plt.close(fig)
 
+@pytest.mark.usefixtures("mock_upset_utils")
 def test_plot_upset_return_contents(monkeypatch):
     """Ensure return_contents=True returns both UpSet and contents."""
     monkeypatch.setattr(scplt, "upsetplot", type("m", (), {"UpSet": DummyUpSet}))
@@ -784,7 +789,6 @@ class DummyMatrix(np.ndarray):
     def toarray(self):
         return self
 
-
 class DummyUtilsRain:
     """Mock subset of utils for raincloud tests."""
     @staticmethod
@@ -817,9 +821,15 @@ class DummyUtilsRain:
         X = np.abs(np.random.randn(3, 3)).view(DummyMatrix)
         return DummySubset(X)
 
-scplt.utils = DummyUtilsRain()
+@pytest.fixture
+def mock_raincloud_utils(monkeypatch):
+    """Temporarily replace scplt.utils with DummyUtilsRain inside a test."""
+    monkeypatch.setattr(scplt, "utils", DummyUtilsRain())
+    yield
+    # pytest automatically restores the original after the test exits
 
 # test plot_raincloud
+@pytest.mark.usefixtures("mock_raincloud_utils")
 def test_plot_raincloud_runs_without_error():
     """Ensure plot_raincloud runs normally and returns Axes."""
     fig, ax = plt.subplots()
@@ -832,6 +842,7 @@ def test_plot_raincloud_runs_without_error():
 
     plt.close(fig)
 
+@pytest.mark.usefixtures("mock_raincloud_utils")
 def test_plot_raincloud_debug_mode_returns_data():
     """Ensure debug=True returns both axis and data_X arrays."""
     fig, ax = plt.subplots()
