@@ -63,6 +63,8 @@ extra:
       link: https://linkedin.com/in/marionpang
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/scviz/
+  include_markdown:
+    - ../CHANGELOG.md
 plugins:
   - mkdocstrings:
       handlers:

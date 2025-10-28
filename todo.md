@@ -35,17 +35,8 @@
 5. clustermap bug when linkage
 6. plot_abundnace_housekeeping throws error when no housekeeping gene is found
 7. check that we're syncing rs and filtering rs matrix for every filter opration (currently, only for filter sample by condition?)
-7. When importing, the warn statement appears before the peptides (i.e.)
-```
---------------------------
-Starting import [DIA-NN]
---------------------------
-Source file: data/2509_humanNHP/report.parquet
-Number of files: 45
-Proteins: 5999
-     ⚠️ [WARN] The following columns are missing: All Mapped Genes, All Mapped Proteins. Consider running analysis in the newer version of DIA-NN (1.8.1). Peptide-protein mapping may differ.
-Peptides: 39533
-```
+9. When filtering by samples, need to clean up empty proteins?
+10. when impute throws error because wrong obs column given, pretty format the error so that people understand better
 
 ## MAINTENANCE
 1. Check out scprep repo for possible utility functions
