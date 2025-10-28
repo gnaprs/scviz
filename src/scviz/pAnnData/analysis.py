@@ -141,6 +141,9 @@ class AnalysisMixin:
 
         if not isinstance(values, list) or len(values) != 2:
             raise ValueError("`values` must be a list of two group dictionaries (or legacy value pairs).")
+                
+        if values[0] == values[1]:
+            raise ValueError("Both groups in `values` refer to the same condition. Please provide two distinct groups.")
 
         group1_dict, group2_dict = (
             [values[0]] if not isinstance(values[0], list) else values[0],
@@ -179,13 +182,30 @@ class AnalysisMixin:
 
         # --- Compute fold change ---
         if fold_change_mode == 'mean':
-            group1_mean = np.nanmean(data1, axis=0)
-            group2_mean = np.nanmean(data2, axis=0)
-            with np.errstate(divide='ignore', invalid='ignore'):
+            with np.errstate(all='ignore'):
+                group1_mean = np.nanmean(data1, axis=0)
+                group2_mean = np.nanmean(data2, axis=0)
+
+                # Identify zeros or NaNs in either group
+                mask_invalid = (group1_mean == 0) | (group2_mean == 0) | np.isnan(group1_mean) | np.isnan(group2_mean)
                 log2fc_vals = np.log2(group1_mean / group2_mean)
+                log2fc_vals[mask_invalid] = np.nan
+
+                n_invalid = np.sum(mask_invalid)
+                if n_invalid > 0:
+                    print(f"{format_log_prefix('info',2)} {n_invalid} proteins were not comparable (zero or NaN mean in one group).")
 
         elif fold_change_mode == 'pairwise_median':
+            mask_invalid = ( # Detect invalid features (any 0 or NaN in either group)
+                np.any((data1 == 0) | np.isnan(data1), axis=0) |
+                np.any((data2 == 0) | np.isnan(data2), axis=0)
+            )
+            # Compute median pairwise log2FC
             log2fc_vals = utils.pairwise_log2fc(data1, data2)
+            log2fc_vals[mask_invalid] = np.nan # Mark invalid features as NaN
+            n_invalid = np.sum(mask_invalid)
+            if n_invalid > 0:
+                print(f"{format_log_prefix('info',2)} {n_invalid} proteins were not comparable (zero or NaN mean in one group).")
         
         elif fold_change_mode == 'pep_pairwise_median':
             # --- Validate .pep presence ---
@@ -202,28 +222,52 @@ class AnalysisMixin:
                 actual_layer = 'X'
 
             # Get peptide data
-            pep_data1 = utils.get_adata_layer(pdata_case1.pep, actual_layer)
-            pep_data2 = utils.get_adata_layer(pdata_case2.pep, actual_layer)
-            pep_data1 = np.asarray(pep_data1)
-            pep_data2 = np.asarray(pep_data2)
+            pep_data1 = np.asarray(utils.get_adata_layer(pdata_case1.pep, actual_layer))
+            pep_data2 = np.asarray(utils.get_adata_layer(pdata_case2.pep, actual_layer))
+
+            # Detect invalid peptides (any 0 or NaN in either group)
+            mask_invalid_pep = (
+                np.any((pep_data1 == 0) | np.isnan(pep_data1), axis=0) |
+                np.any((pep_data2 == 0) | np.isnan(pep_data2), axis=0)
+            )
 
             # Compute per-peptide pairwise log2FCs
             pep_log2fc = utils.pairwise_log2fc(pep_data1, pep_data2)
+            pep_log2fc[mask_invalid_pep] = np.nan  # mark invalids
+
+            n_invalid_pep = np.sum(mask_invalid_pep)
+            if n_invalid_pep > 0:
+                print(f"{format_log_prefix('info',2)} {n_invalid_pep} peptides were not comparable (zero or NaN mean in one group).")
 
             # Map peptides to proteins
             pep_to_prot = utils.get_pep_prot_mapping(self, return_series=True)
 
             # Aggregate peptide log2FCs into protein-level log2FCs
             prot_log2fc = pd.Series(index=self.prot.var_names, dtype=float)
+            not_comparable_prot = []
+
             for prot in self.prot.var_names:
                 matching_peptides = pep_to_prot[pep_to_prot == prot].index
                 if len(matching_peptides) == 0:
                     continue
+
                 idxs = self.pep.var_names.get_indexer(matching_peptides)
                 valid_idxs = idxs[idxs >= 0]
-                if len(valid_idxs) > 0:
+                if len(valid_idxs) == 0:
+                    continue
+
+                valid_log2fc = pep_log2fc[valid_idxs]
+
+                if np.all(np.isnan(valid_log2fc)):
+                    prot_log2fc[prot] = np.nan
+                    not_comparable_prot.append(prot)
+                else:
                     prot_log2fc[prot] = np.nanmedian(pep_log2fc[valid_idxs])
+
             log2fc_vals = prot_log2fc.values
+            if len(not_comparable_prot) > 0:
+                print(f"{format_log_prefix('info',2)} {len(not_comparable_prot)} proteins were not comparable (all peptides invalid or missing).")
+
         else:
             raise ValueError(f"Unsupported fold_change_mode: {fold_change_mode}")
 
@@ -260,11 +304,12 @@ class AnalysisMixin:
         df_stats['-log10(p_value)'] = -np.log10(df_stats['p_value'].replace(0, np.nan).astype(float))
         df_stats['significance_score'] = df_stats['-log10(p_value)'] * df_stats['log2fc']
         df_stats['significance'] = 'not significant'
+        mask_not_comparable = df_stats['log2fc'].isna()
+        df_stats.loc[mask_not_comparable, 'significance'] = 'not comparable'
         df_stats.loc[(df_stats['p_value'] < pval) & (df_stats['log2fc'] > log2fc), 'significance'] = 'upregulated'
         df_stats.loc[(df_stats['p_value'] < pval) & (df_stats['log2fc'] < -log2fc), 'significance'] = 'downregulated'
-        df_stats['significance'] = pd.Categorical(df_stats['significance'], categories=['upregulated', 'downregulated', 'not significant'], ordered=True)
+        df_stats['significance'] = pd.Categorical(df_stats['significance'], categories=['upregulated', 'downregulated', 'not significant', 'not comparable'], ordered=True)
 
-        df_stats = df_stats.dropna(subset=['p_value', 'log2fc', 'significance'])
         df_stats = df_stats.sort_values(by='significance')
 
         # --- Store and return ---
@@ -312,26 +357,45 @@ class AnalysisMixin:
         adata = self.prot if on == 'protein' else self.pep
         classes_list = utils.get_classlist(adata, classes)
         
-        for j, class_value in enumerate(classes_list):
-            rank_data = utils.resolve_class_filter(adata, classes, class_value, debug=True)
+        for class_value in classes_list:
+            rank_data = utils.resolve_class_filter(adata, classes, class_value)
+            if layer == "X":
+                layer_data = rank_data.X.toarray()
+            elif layer in rank_data.layers:
+                layer_data = rank_data.layers[layer].toarray()
+            else:
+                raise ValueError(f"Layer '{layer}' not found in layers.")
 
-            rank_df = rank_data.to_df().transpose()
-            rank_df['Average: '+class_value] = np.nanmean(rank_data.X.toarray(), axis=0)
-            rank_df['Stdev: '+class_value] = np.nanstd(rank_data.X.toarray(), axis=0)
-            rank_df.sort_values(by=['Average: '+class_value], ascending=False, inplace=True)
-            rank_df['Rank: '+class_value] = np.where(rank_df['Average: '+class_value].isna(), np.nan, np.arange(1, len(rank_df) + 1))
+            # Convert sparse to dense if needed
+            if hasattr(layer_data, 'toarray'):
+                layer_data = layer_data.toarray()
 
-            # revert back to original data order (need to do so, because we sorted rank_df)
-            sorted_indices = rank_df.index
-            rank_df = rank_df.loc[adata.var.index]
-            adata.var['Average: ' + class_value] = rank_df['Average: ' + class_value]
-            adata.var['Stdev: ' + class_value] = rank_df['Stdev: ' + class_value]
-            adata.var['Rank: ' + class_value] = rank_df['Rank: ' + class_value]
-            rank_df = rank_df.reindex(sorted_indices)
+            # Transpose to get DataFrame of shape (features, samples)
+            rank_df = pd.DataFrame(layer_data.T, index=rank_data.var.index, columns=rank_data.obs_names)
+
+            # Compute stats
+            avg_col = f"Average: {class_value}"
+            std_col = f"Stdev: {class_value}"
+            rank_col = f"Rank: {class_value}"
+
+            with np.errstate(invalid='ignore', divide='ignore'):
+                rank_df[avg_col] = np.nanmean(layer_data, axis=0)
+                rank_df[std_col] = np.nanstd(layer_data, axis=0)
+
+            # Sort by average (descending), assign rank
+            rank_df.sort_values(by=avg_col, ascending=False, inplace=True)
+            rank_df[rank_col] = np.where(rank_df[avg_col].isna(), np.nan, np.arange(1, len(rank_df) + 1))
+
+            # Reindex back to original order in adata.var
+            rank_df = rank_df.reindex(adata.var.index)
+
+            adata.var[avg_col] = rank_df[avg_col]
+            adata.var[std_col] = rank_df[std_col]
+            adata.var[rank_col] = rank_df[rank_col]
 
         self._history.append(f"{on}: Ranked {layer} data. Ranking, average and stdev stored in var.") # type: ignore[attr-defined], HistoryMixin
 
-    def impute(self, classes=None, layer="X", method='mean', on='protein', set_X=True, **kwargs):
+    def impute(self, classes=None, layer="X", method='mean', on='protein', min_scale=1, set_X=True, **kwargs):
         """
         Impute missing values across samples globally or within groups.
 
@@ -349,6 +413,7 @@ class AnalysisMixin:
                 - "knn": Use K-nearest neighbors (only supported for global imputation).
 
             on (str): Whether to impute "protein" or "peptide" data.
+            min_scale (float): Scaled multiplication of minimum value for imputation, i.e. 0.2 would be 20% of minimum value (default is 1).
             set_X (bool): If True, updates `.X` to use the imputed result.
             **kwargs: Additional arguments passed to the imputer (e.g., `n_neighbors` for KNN).
 
@@ -399,6 +464,7 @@ class AnalysisMixin:
             if method == 'min':
                 min_vals = np.nanmin(impute_data, axis=0)
                 min_vals = np.where(np.isnan(min_vals), 0, min_vals)
+                min_vals = min_vals * min_scale
                 mask = np.isnan(impute_data)
                 impute_data[mask] = np.take(min_vals, np.where(mask)[1])
             elif method == 'knn':
@@ -411,7 +477,8 @@ class AnalysisMixin:
                 impute_data = imputer.fit_transform(impute_data)
                 impute_data[:, nan_columns] = np.nan
 
-            print(f"{format_log_prefix('user')} Global imputation using '{method}'. Layer saved as '{layer_name}'.")
+            min_message = "" if method != 'min' else f"Minimum scaled by {min_scale}."
+            print(f"{format_log_prefix('user')} Global imputation using '{method}'. Layer saved as '{layer_name}'. {min_message}")
             skipped_features = np.sum(np.isnan(impute_data).all(axis=0))
 
         else:
@@ -430,6 +497,7 @@ class AnalysisMixin:
                 if method == 'min':
                     min_vals = np.nanmin(group_data, axis=0)
                     min_vals = np.where(np.isnan(min_vals), 0, min_vals)
+                    min_vals = min_vals * min_scale
                     mask = np.isnan(group_data)
                     group_data[mask] = np.take(min_vals, np.where(mask)[1])
                     imputed_group = group_data
@@ -441,7 +509,8 @@ class AnalysisMixin:
 
                 impute_data[idx, :] = imputed_group
 
-            print(f"{format_log_prefix('user')} Group-wise imputation using '{method}' on class(es): {classes}. Layer saved as '{layer_name}'.")
+            min_message = "" if method != 'min' else f"Minimum scaled by {min_scale}."
+            print(f"{format_log_prefix('user')} Group-wise imputation using '{method}' on class(es): {classes}. Layer saved as '{layer_name}'. {min_message}")
 
         summary_lines = []
         if classes is None:
@@ -529,7 +598,7 @@ class AnalysisMixin:
             f"{on}: Imputed layer '{layer}' using '{method}' (grouped by {classes if classes else 'ALL'}). Stored in '{layer_name}'."
         )
 
-    def neighbor(self, on = 'protein', layer = "X", use_rep='X_pca', **kwargs):
+    def neighbor(self, on = 'protein', layer = "X", use_rep='X_pca', user_indent=0,**kwargs):
         """
         Compute a neighbor graph based on protein or peptide data.
 
@@ -574,9 +643,9 @@ class AnalysisMixin:
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             pass
         
-        if on == 'protein':
+        if on.lower() in ["prot", "protein"]:
             adata = self.prot
-        elif on == 'peptide':
+        elif on.lower() in ["pep", "peptide"]:
             adata = self.pep
 
         if layer == "X":
@@ -585,7 +654,7 @@ class AnalysisMixin:
         elif layer in adata.layers.keys():
             self.set_X(layer = layer, on = on) # type: ignore[attr-defined], EditingMixin
 
-        log_prefix = format_log_prefix("user")
+        log_prefix = format_log_prefix("user") if user_indent == 0 else format_log_prefix("user_only",2)
         print(f"{log_prefix} Computing neighbors [{on}] using layer: {layer}")
 
         if use_rep == 'X_pca':
@@ -646,9 +715,12 @@ class AnalysisMixin:
         log_prefix = format_log_prefix("user")
         print(f"{log_prefix} Performing Leiden clustering [{on}] using layer: {layer}")
 
+        if 'resolution' in kwargs:
+            resolution = kwargs.pop("resolution", 0.25)
+
         if 'neighbors' not in adata.uns:
             print(f"{format_log_prefix('info_only', indent=2)} Neighbors not found in AnnData object. Running neighbors with default settings.")
-            self.neighbor(on = on, layer = layer)
+            self.neighbor(on = on, layer = layer, **kwargs)
 
         if layer == "X":
             # do nothing
@@ -656,7 +728,7 @@ class AnalysisMixin:
         elif layer in adata.layers.keys():
             self.set_X(layer = layer, on = on) # type: ignore[attr-defined], EditingMixin
 
-        sc.tl.leiden(adata, **kwargs)
+        sc.tl.leiden(adata, resolution)
 
         self._append_history(f'{on}: Leiden clustering fitted on {layer}, stored in obs["leiden"]') # type: ignore[attr-defined], HistoryMixin
         print(f"{format_log_prefix('result_only', indent=2)} Leiden clustering complete. Results stored in:")
@@ -672,7 +744,14 @@ class AnalysisMixin:
         Args:
             on (str): Whether to use "protein" or "peptide" data.
             layer (str): Data layer to use for UMAP (default is "X").
-            **kwargs: Additional keyword arguments passed to `scanpy.tl.umap()`.
+            **kwargs: Additional keyword arguments passed to `scanpy.tl.umap()`, `scanpy.tl.neighbor()` or the scviz `pca` function.
+                Example:
+                    "n_neighbors": neighbor argument
+                    "min_dist": umap argument
+                    "metric": neighbor argument
+                    "spread": umap argument
+                    "random_state": umap argument
+                    "n_pcs": neighbor argument
 
         Returns:
             None
@@ -682,7 +761,6 @@ class AnalysisMixin:
                 ```python
                 pdata.umap(on="protein", layer="X")
                 ```
-
         Note:
             - UMAP coordinates are stored in `.obsm["X_umap"]`.
             - UMAP settings are stored in `.uns["umap"]`.
@@ -725,7 +803,7 @@ class AnalysisMixin:
                     print(f"{format_log_prefix('info_only', indent=2)} {arg_str} provided. "
                         f"Re-running neighbors with these settings before UMAP.")
 
-                    self.neighbor(on=on, layer=layer, n_neighbors=n_neighbors, metric=metric)
+                    self.neighbor(on=on, layer=layer, n_neighbors=n_neighbors, metric=metric, user_indent=2)
                     self._append_history(f"{on}: Neighbors re-computed with {arg_str} before UMAP")  # type: ignore[attr-defined], HistoryMixin
         else:
             # check if neighbor has been run before, look for distances and connectivities in obsp
@@ -820,14 +898,45 @@ class AnalysisMixin:
         print(f"       • Variance explained by PC1/PC2: {var_pc1*100:.2f}% , {var_pc2*100:.2f}%") 
 
     def harmony(self, key, on = 'protein'):
-        # uses sc.external.pp.harmony_integrate
-        # requires harmonypy
+        """
+        Perform batch correction using Harmony integration.
+
+        This method applies Harmony-based batch correction (via `scanpy.external.pp.harmony_integrate`)
+        on PCA-reduced protein or peptide data to mitigate batch effects across samples.
+
+        Args:
+            key (str): Column name in `.obs` representing the batch variable to correct.
+            on (str): Whether to use "protein" or "peptide" data. Accepts "prot"/"protein" or "pep"/"peptide" (default: "protein").
+
+        Returns:
+            None
+
+        Example:
+            Perform Harmony integration on protein-level PCA embeddings:
+                ```python
+                pdata.harmony(key="batch", on="protein")
+                ```
+
+            Apply Harmony on peptide-level data instead:
+                ```python
+                pdata.harmony(key="run_id", on="peptide")
+                ```
+
+        Note:
+            - Harmony requires prior PCA computation. If PCA is missing, it will be computed automatically.
+            - The Harmony-corrected coordinates are stored in `.obsm["X_pca_harmony"]`.
+            - Updates the processing history via `.history`.
+
+        Todo:
+            Add optional arguments for controlling Harmony parameters (e.g., `max_iter_harmony`, `theta`, `lambda`).
+        """
+
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             pass
        
-        if on == 'protein':
+        if on == 'protein' or on == 'prot':
             adata = self.prot
-        elif on == 'peptide':
+        elif on == 'peptide' or on == 'pep':
             adata = self.pep
 
         log_prefix = format_log_prefix("user")
@@ -849,7 +958,44 @@ class AnalysisMixin:
         print(f"       • obsm['X_pca_harmony'] (PCA coordinates)")
 
     def nanmissingvalues(self, on = 'protein', limit = 0.5):
-        # sets columns (proteins and peptides) with > limit (default 0.5) missing values to NaN across all samples
+        """
+        Set columns (proteins or peptides) with excessive missing values to NaN.
+
+        This method scans all features and replaces their corresponding columns with NaN
+        if the fraction of missing values exceeds the given threshold. It helps ensure
+        downstream normalization and imputation steps are applied to meaningful features only.
+
+        Args:
+            on (str): Whether to use "protein" or "peptide" data. Accepts "prot"/"protein" or "pep"/"peptide" (default: "protein").
+            limit (float): Proportion threshold for missing values (default: 0.5). 
+                Features with more than `limit × 100%` missing values are set entirely to NaN.
+
+        Returns:
+            None
+
+        !!! warning "Deprecation Notice"
+            This function may be deprecated in future releases.  
+            Use [`annotate_found`](reference/pAnnData/editing_mixins/#src.scviz.pAnnData.editing_mixins.annotate_found)  
+            and [`filter_prot_found`](reference/pAnnData/editing_mixins/#src.scviz.pAnnData.editing_mixins.filter_prot_found)  
+            for more robust and configurable detection-based filtering.
+            
+        Example:
+            Mask proteins with more than 50% missing values:
+                ```python
+                pdata.nanmissingvalues(on="protein", limit=0.5)
+                ```
+
+            Apply the same filter for peptide-level data:
+                ```python
+                pdata.nanmissingvalues(on="peptide", limit=0.3)
+                ```
+
+        Note:
+            - The missing-value fraction is computed per feature across all samples.
+            - This operation modifies the `.X` matrix in-place.
+            - The updated data are stored back into `.prot` or `.pep`.
+        """
+        import scipy.sparse
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             pass
 
@@ -859,9 +1005,14 @@ class AnalysisMixin:
         elif on == 'peptide':
             adata = self.pep
 
-        missing_proportion = np.isnan(adata.X.toarray()).mean(axis=0)
+        if scipy.sparse.issparse(adata.X):
+            X = adata.X.toarray()
+        else:
+            X = adata.X
+        missing_proportion = np.isnan(X).mean(axis=0)
         columns_to_nan = missing_proportion > limit
-        adata.X[:, columns_to_nan] = np.nan
+        X[:, columns_to_nan] = np.nan
+        adata.X = scipy.sparse.csr_matrix(X) if scipy.sparse.issparse(adata.X) else X
 
         if on == 'protein':
             self.prot = adata
@@ -869,25 +1020,85 @@ class AnalysisMixin:
             self.pep = adata
 
     def normalize(self, classes = None, layer = "X", method = 'sum', on = 'protein', set_X = True, force = False, use_nonmissing = False, **kwargs):  
-        """ 
-        Normalize the data across samples (globally or within groups).
+        """
+        Normalize sample intensities across protein or peptide data.
+
+        This method performs global or group-wise normalization of the selected data layer.
+        It supports multiple normalization strategies ranging from simple scaling
+        (e.g., sum, median) to advanced approaches such as `reference_feature` and
+        [`directlfq`]((https://doi.org/10.1016/j.mcpro.2023.100581)).
 
         Args:
-            classes (str or list): Sample-level class/grouping column(s) in .obs.
-            layer (str): Data layer to normalize from (default='X').
-            method (str): Normalization method. Options: 
-                'sum', 'median', 'mean', 'max', 'reference_feature', 
-                'robust_scale', 'quantile_transform', 'directlfq'
-            on (str): 'protein' or 'peptide'.
-            set_X (bool): Whether to set .X to the normalized result.
-            force (bool): Whether to force normalization even with bad rows.
-            use_nonmissing (bool): If True, only use columns with no missing values across all samples when computing scaling factors.
-            **kwargs: Additional arguments for normalization methods.
-                (e.g., reference_columns for 'reference_feature', n_neighbors for 'knn').
-                * max_missing_fraction: Maximum fraction of missing values allowed in a row. Default is 0.5.
-                * input_type_to_use: For 'directlfq', specify whether pAnnData or diann input. If diann input, use either 'diann_precursor_ms1_and_ms2' or 'diann_precursor_ms1'.
-                * path: For 'directlfq', if using diann input, specify path to report.tsv or report.parquet file.
+            classes (str or list, optional): Sample-level grouping column(s) in `.obs` to
+                perform group-wise normalization. If None, normalization is applied globally.
+            layer (str, optional): Data layer to normalize from (default: `"X"`).
+            method (str, optional): Normalization strategy to apply. Options include:
+                `'sum'`, `'median'`, `'mean'`, `'max'`, `'reference_feature'`,
+                `'robust_scale'`, `'quantile_transform'`, `'directlfq'`.
+            on (str, optional): Whether to use `"protein"` or `"peptide"` data.
+            set_X (bool, optional): Whether to set `.X` to the normalized result (default: True).
+            force (bool, optional): Proceed with normalization even if samples exceed the
+                allowed fraction of missing values (default: False).
+            use_nonmissing (bool, optional): If True, only use columns with no missing values
+                across all samples when computing scaling factors (default: False).
+            **kwargs: Additional keyword arguments for normalization methods.
+                - `reference_columns` (list): For `'reference_feature'`, specify columns or
+                gene names to normalize against.
+                - `max_missing_fraction` (float): Maximum allowed fraction of missing values
+                per sample (default: 0.5).
+                - `n_neighbors` (int): For methods requiring neighbor-based computations.
+                - `input_type_to_use` (str): For `'directlfq'`, specify `'pAnnData'`,
+                `'diann_precursor_ms1'`, or `'diann_precursor_ms1_and_ms2'`.
+                - `path` (str): For `'directlfq'`, path to the `report.tsv` or `report.parquet`
+                file from DIA-NN output.
+
+        Returns:
+            None
+
+        Example:
+            Perform global normalization using the median intensity:
+                ```python
+                pdata.normalize(on="protein", method="median")
+                ```
+
+            Apply group-wise normalization by treatment class using sum-scaling:
+                ```python
+                pdata.normalize(classes="treatment", method="sum", on="protein")
+                ```
+
+            Run reference-feature normalization using specific genes:
+                ```python
+                pdata.normalize(
+                    on="protein",
+                    method="reference_feature",
+                    reference_columns=["ACTB", "GAPDH"]
+                )
+                ```
+
+        !!! tip "About `directlfq` normalization"
+            - The `directlfq` method aggregates peptide-level data to protein-level intensities
+            and stores results in a new protein-layer (e.g. `'X_norm_directlfq'`).
+            - It does not support group-wise normalization.
+            - Processing time may scale with dataset size.
+            - For algorithmic and benchmarking details, see:  
+            **Ammar, Constantin et al. (2023)**  
+            *Accurate Label-Free Quantification by directLFQ to Compare Unlimited Numbers of Proteomes.*  
+            *Molecular & Cellular Proteomics*, 22(7):100581.  
+            [https://doi.org/10.1016/j.mcpro.2023.100581](https://doi.org/10.1016/j.mcpro.2023.100581)
+
+
+
+        Note:
+            - Results are stored in a new layer named `'X_norm_<method>'`.
+            - The normalized layer replaces `.X` if `set_X=True`.
+            - Normalization operations are recorded in `.history`.
+            - For consistency across runs, consider running `.impute()` before normalization.
+
+        Todo:
+            - Add optional z-score and percentile normalization modes.
+            - Add support for specifying external scaling factors.
         """
+
         
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
             return
@@ -1038,7 +1249,8 @@ class AnalysisMixin:
             else:
                 row_vals = reducer(data, axis=1)
 
-            scale = np.nanmax(row_vals) / row_vals
+            with np.errstate(divide='ignore', invalid='ignore'):
+                scale = np.nanmax(row_vals) / row_vals
             scale = np.where(np.isnan(scale), 1.0, scale)
             data_norm = data * scale[:, None]
 
@@ -1096,7 +1308,10 @@ class AnalysisMixin:
         elif method == 'quantile_transform':
             # norm by quantile_transform: Transform features using quantiles information. See sklearn.preprocessing.quantile_transform for more information.
             from sklearn.preprocessing import quantile_transform
-            data_norm = quantile_transform(data, axis=1)
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                data_norm = quantile_transform(data, axis=1)
 
         else:
             raise ValueError(f"Unknown method: {method}")
@@ -1180,11 +1395,14 @@ class AnalysisMixin:
             verbose (bool): Whether to print summary messages.
 
         Returns:
-            np.ndarray or None: Cleaned matrix if `inplace=False`, otherwise `None`.
+            np.ndarray: Cleaned matrix if `inplace=False`, otherwise `None`.
         """
         if not self._check_data(on):
             return
-        adata = self.prot if on == 'prot' else self.pep
+        if on == 'prot' or on == 'protein':
+            adata = self.prot
+        elif on == 'pep' or on == 'peptide': 
+            adata = self.pep
 
         print(f'{format_log_prefix("user")} Cleaning {on} data: making scanpy compatible, replacing NaNs with {set_to} in {"layer " + layer if layer else ".X"}.')
 
