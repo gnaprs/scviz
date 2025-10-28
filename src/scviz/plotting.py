@@ -80,7 +80,6 @@ import matplotlib.colors as mcolors
 import matplotlib.collections as clt
 import matplotlib.cm as cm
 import matplotlib.patheffects as PathEffects
-from matplotlib_venn import venn2_unweighted, venn2_circles, venn3_unweighted, venn3_circles
 import upsetplot
 from adjustText import adjust_text
 import umap.umap_ as umap
@@ -2099,12 +2098,30 @@ def plot_venn(ax, pdata, classes, set_colors = 'default', return_contents = Fals
         set_labels = list(upset_contents.keys())
         set_list = [set(value) for value in upset_contents.values()]
 
-    venn_functions = {
-        2: lambda: (venn2_unweighted(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, **kwargs),
-                    venn2_circles(subsets=(1, 1, 1), ax = ax,  linewidth=1)),
-        3: lambda: (venn3_unweighted(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, **kwargs),
-                    venn3_circles(subsets=(1, 1, 1, 1, 1, 1, 1), ax = ax, linewidth=1))
-    }
+    try:
+        # New API (matplotlib-venn ≥ 0.12)
+        from matplotlib_venn.layout.venn2 import DefaultLayoutAlgorithm as Venn2Layout
+        from matplotlib_venn.layout.venn3 import DefaultLayoutAlgorithm as Venn3Layout
+        from matplotlib_venn import venn2, venn2_circles, venn3, venn3_circles
+        USE_LAYOUT = True
+    except ImportError:
+        # Older API (no layout subpackage)
+        from matplotlib_venn import venn2_unweighted, venn3_unweighted, venn2_circles, venn3_circles
+        USE_LAYOUT = False
+
+    if USE_LAYOUT:
+        venn_functions = {
+            2: lambda: (venn2(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, layout_algorithm=Venn2Layout(fixed_subset_sizes=(1,1,1)), **kwargs),
+                        venn2_circles(subsets=(1, 1, 1), ax = ax,  linewidth=1)),
+            3: lambda: (venn3(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, layout_algorithm=Venn3Layout(fixed_subset_sizes=(1,1,1,1,1,1,1)), **kwargs),
+                        venn3_circles(subsets=(1, 1, 1, 1, 1, 1, 1), ax = ax, linewidth=1))
+        }
+    else:
+        venn_functions = { 
+            2: lambda: (venn2_unweighted(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, **kwargs), 
+                        venn2_circles(subsets=(1, 1, 1), ax = ax, linewidth=1)), 
+            3: lambda: (venn3_unweighted(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, **kwargs), 
+                        venn3_circles(subsets=(1, 1, 1, 1, 1, 1, 1), ax = ax, linewidth=1)) }        
 
     if num_keys in venn_functions:
         ax = venn_functions[num_keys]()
