@@ -101,8 +101,10 @@ def format_log_prefix(level: str, indent=None) -> str:
             - `"result_only"`: ✅  
             - `"blank"`: empty string  
             - `"update"`: 🔄 [UPDATE]  
+            - `"api"`: 🌐 [API]
             - `"update_only"`: 🔄  
-            - `"warn_only"`: ⚠️  
+            - `"warn_only"`: ⚠️
+            - `"user_only"`: 🧭
 
         indent (int or None, optional): Indentation level override. Options:
 
@@ -151,8 +153,10 @@ def format_log_prefix(level: str, indent=None) -> str:
         "result_only": "✅",
         "blank": "",
         "update": "🔄 [UPDATE]",
+        "api": "🌐 [API]",
         "update_only": "🔄",
-        "warn_only": "⚠️"
+        "warn_only": "⚠️",
+        "user_only": "🧭"
     }
 
     if level not in base_prefixes:
@@ -354,9 +358,9 @@ def get_adata(pdata, on = 'protein'):
         adata (anndata.AnnData): The requested AnnData object.
     """
 
-    if on == 'protein':
+    if on in ('protein','prot'):
         return pdata.prot
-    elif on == 'peptide':
+    elif on in ('peptide','pep'):
         return pdata.pep
     else:
         raise ValueError("Invalid value for 'on'. Options are 'protein' or 'peptide'.")
@@ -580,8 +584,10 @@ def get_upset_contents(pdata, classes, on = 'protein', upsetForm = True, debug=F
     for j, class_value in enumerate(classes_list):
         data_filtered = resolve_class_filter(adata, classes, class_value, debug=True)
 
-        # get proteins that are present in the filtered data (at least one value is not NaN)
-        prot_present = data_filtered.var_names[(~np.isnan(data_filtered.X.toarray())).sum(axis=0) > 0]
+        # get proteins that are present in the filtered data (at least one value is not NaN, not 0)
+        X = data_filtered.X.toarray()
+        mask_present = (~np.isnan(X)) & (X != 0)
+        prot_present = data_filtered.var_names[mask_present.sum(axis=0) > 0]
         upset_dict[class_value] = prot_present.tolist()
 
     if upsetForm:
@@ -1018,14 +1024,20 @@ def get_uniprot_fields_worker(prot_list, search_fields=None, verbose = False):
         url = f'{base_url}?fields={fields}&format={format_type}&query={full_query}'
 
         if verbose:
-            print(f"Querying UniProt ({query_type}) for {len(ids)} proteins")
+            print(f"Querying UniProt ({query_type}, TSV mode) for {len(ids)} proteins")
 
         results = requests.get(url)
         results.raise_for_status()
-        return pd.read_csv(io.StringIO(results.text), sep='\t')
+
+        # Handle empty response gracefully
+        if not results.text.strip():
+            print(f"{format_log_prefix('warn_only', 2)} UniProt returned empty response for {len(ids)} proteins.")
+            return pd.DataFrame()
+
+        return pd.read_csv(io.StringIO(results.text), sep="\t")
 
     if verbose:
-        print(f"Querying Uniprot for {len(prot_list)} proteins")
+        print(f"{format_log_prefix('API', 1)} Querying UniProt for {len(prot_list)} total proteins [TSV mode].")
     
     def resolve_uniprot_redirects(accessions, from_db='UniProtKB_AC-ID', to_db='UniProtKB'):
         url = 'https://rest.uniprot.org/idmapping/run'
@@ -1060,7 +1072,7 @@ def get_uniprot_fields_worker(prot_list, search_fields=None, verbose = False):
     missing_isoforms = [acc for acc in isoform_ids if acc not in found_isoform_ids]
 
     if missing_isoforms and verbose:
-        print(f"Attempting fallback query for {len(missing_isoforms)} isoform base IDs")
+        print(f"{format_log_prefix('info_only', 3)} Attempting fallback query for {len(missing_isoforms)} isoform base IDs")
 
     # Attempt fallback query using base accessions
     fallback_ids = list(set([id.split('-')[0] for id in missing_isoforms]))
@@ -1075,7 +1087,7 @@ def get_uniprot_fields_worker(prot_list, search_fields=None, verbose = False):
 
     if still_missing:
         if verbose:
-            print(f"Trying UniProt ID mapping for {len(still_missing)} unresolved accessions...")
+            print(f"{format_log_prefix('info_only', 3)} Attempting UniProt ID redirect for {len(still_missing)} unresolved accessions.")
         redirect_map = resolve_uniprot_redirects(list(still_missing))
         if redirect_map:
             redirected_ids = list(redirect_map.values())
@@ -1093,7 +1105,7 @@ def get_uniprot_fields_worker(prot_list, search_fields=None, verbose = False):
 
     # Step 5: Fill in placeholders for totally missing accessions
     if still_missing:
-        print(f"Proteins not found in UniProt database after all attempts: {still_missing}") if verbose else None
+        print(f"{format_log_prefix('warn_only', 3)} Proteins not found in UniProt: {list(still_missing)[:5]}") if verbose else None
         missing_df = pd.DataFrame({'Entry': list(still_missing)})
         for col in search_fields:
             if col != 'accession' and col not in missing_df.columns:
@@ -1102,10 +1114,11 @@ def get_uniprot_fields_worker(prot_list, search_fields=None, verbose = False):
     
     if 'STRING' in df.columns:
         # keep first STRING ID (or join all if you prefer)
-        df['STRING_id'] = df['STRING'].apply(
+        df['xref_string'] = df['STRING'].apply(
             lambda s: str(s).split(';')[0].strip() if pd.notna(s) and str(s).strip() else np.nan
         )
-    
+        df.drop(columns=['STRING'], inplace=True)
+
     return df
 
 def get_uniprot_fields(
@@ -1114,7 +1127,9 @@ def get_uniprot_fields(
                    'organism_id', 'go', 'go_f', 'go_c', 'go_p',
                    'cc_interaction', 'xref_string'],
     batch_size=100,
-    verbose=False
+    verbose=True,
+    standardize=True,
+    worker_verbose=False,
 ):
     """
     Retrieve UniProt metadata for a list of protein accessions.
@@ -1128,6 +1143,9 @@ def get_uniprot_fields(
             Defaults include accession, gene names, GO terms, and STRING IDs.
         batch_size (int): Number of accessions per batch (max 1024, default=100).
         verbose (bool): If True, print progress messages.
+        standardize (bool): If True (default), normalize UniProt column names
+            to canonical lowercase keys (e.g., "gene_primary", "organism_id",
+            "xref_string") for consistent downstream processing.
 
     Returns:
         df (pandas.DataFrame): DataFrame containing UniProt metadata for the input proteins.
@@ -1140,34 +1158,146 @@ def get_uniprot_fields(
             df[["Entry", "Gene Names", "Organism Id"]].head()
             ```
 
+        Retrieve raw UniProt field names without renaming:
+            >>> df_raw = get_uniprot_fields(proteins, standardize=False)
+
     Related Functions:
         - get_uniprot_fields_worker: Worker function that handles low-level UniProt API queries.
+        - standardize_uniprot_columns: Helper used internally for column normalization.
     """
 
-    # BUGFIX: accession should be first in the list of search fields, otherwise error thrown in worker function
-    if 'accession' not in search_fields:
-        search_fields = ['accession'] + search_fields
-    elif search_fields[0] != 'accession':
-        search_fields.remove('accession')
-        search_fields = ['accession'] + search_fields
-    # Split the id_list into batches of size batch_size
+    # --- Ensure 'accession' field comes first (UniProt requirement)
+    search_fields = ["accession"] + [f for f in search_fields if f != "accession"]
+
+    # --- Split IDs into batches
     batches = [prot_list[i:i + batch_size] for i in range(0, len(prot_list), batch_size)]
-    # print total number and number of batches
-    if verbose:
-        print(f"Total number of proteins: {len(prot_list)}, Number of batches: {len(batches)}")
-        print(f"Fields: {search_fields}")
-    # Initialize an empty dataframe to store the results
-    full_method_df = pd.DataFrame()
-    
-    # Loop through each batch and get the uniprot fields
-    for batch in batches:
-        # print progress
+    all_results = []
+
+    for i, batch in enumerate(batches, start=1):
         if verbose:
-            print(f"Processing batch {batches.index(batch) + 1} of {len(batches)}")
-        batch_df = get_uniprot_fields_worker(batch, search_fields)
-        full_method_df = pd.concat([full_method_df, batch_df], ignore_index=True)
+            print(
+                f"{format_log_prefix('api', indent=2)} Querying UniProt for batch {i}/{len(batches)} "
+                f"({len(batch)} proteins) [fields: {', '.join(search_fields)}]"
+            )
+
+            if len(batches) > 1:
+                print(f"{format_log_prefix('info_only', indent=3)} Processing batch {i}/{len(batches)}...")
+
+        try:
+            batch_df = get_uniprot_fields_worker(batch, search_fields, verbose=worker_verbose)
+            if standardize:
+                batch_df = standardize_uniprot_columns(batch_df)
+            all_results.append(batch_df)
+        except Exception as e:
+            print(f"{format_log_prefix('warn')} Failed batch {i}: {e}")
+            continue
+
+    if not all_results:
+        if verbose:
+            print(f"{format_log_prefix('warn')} No results retrieved from UniProt.")
+        return pd.DataFrame()
+
+    full_method_df = pd.concat(all_results, ignore_index=True)
+    if verbose:
+        print(f"{format_log_prefix('result_only', 2)} Retrieved UniProt metadata for {len(full_method_df)} entries.")
 
     return full_method_df
+
+def standardize_uniprot_columns(df):
+    """
+    Normalize UniProt DataFrame column names to a consistent lowercase, snake_case schema.
+
+    This ensures stability across UniProt REST API version changes while keeping
+    the user informed only when critical fields are affected.
+
+    Args:
+        df (pd.DataFrame): Raw UniProt metadata table.
+
+    Returns:
+        pd.DataFrame: Copy of the DataFrame with standardized column names.
+    """
+    if df is None or not isinstance(df, pd.DataFrame) or df.shape[1] == 0:
+        return df
+
+    rename_map = {}
+    aliases = {
+        # identifiers
+        "entry": "accession",
+        "entry_name": "id",
+        "accession": "accession",
+        "primaryaccession": "accession",
+
+        # gene fields
+        "gene_names_primary": "gene_primary",
+        "gene_name_primary": "gene_primary",
+        "gene_primary_name": "gene_primary",
+        "gene_primary": "gene_primary",
+        "gene_primaryname": "gene_primary",
+        "gene_primary_name_": "gene_primary",
+        "gene_primaryname_": "gene_primary",
+
+        # organism fields
+        "organism_id": "organism_id",
+        "organism_identifier": "organism_id",
+        "organismid": "organism_id",
+
+        # STRING / cross-reference
+        "cross_reference_string": "xref_string",
+        "xref_string_id": "xref_string",
+        "crossreference_string": "xref_string",
+        "string": "xref_string",
+        "string_id": "xref_string",
+        "xref_string": "xref_string",
+    }
+
+    # critical canonical fields we care about if changed or missing
+    critical_fields = {"accession", "gene_primary", "organism_id", "xref_string"}
+
+    # known benign patterns — don't warn if these change
+    benign_patterns = {
+        "gene_ontology",
+        "go",
+        "gene_names",      # non-primary gene list
+        "protein_name",    # descriptive only
+        "cc_interaction",  # crossref metadata
+    }
+
+    for col in df.columns:
+        norm = (
+            re.sub(r"[^a-z0-9]+", "_", col.lower())
+            .strip("_")
+            .replace("__", "_")
+        )
+
+        mapped = aliases.get(norm, None)
+
+        if mapped:
+            rename_map[col] = mapped
+        else:
+            # warn only if this looks like a drifted critical column
+            if (
+                any(k in norm for k in ["accession", "gene", "organism", "string"])
+                and not any(p in norm for p in benign_patterns)
+            ):
+                warnings.warn(
+                    f"[standardize_uniprot_columns] ⚠️ Unrecognized UniProt column '{col}' "
+                    f"(normalized='{norm}') — may affect critical mapping.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            rename_map[col] = norm  # keep normalized fallback name
+
+    df = df.rename(columns=rename_map)
+    # verify that all critical fields exist at least once
+    missing_critical = [c for c in critical_fields if c not in df.columns]
+    if missing_critical:
+        warnings.warn(
+            f"[standardize_uniprot_columns] Missing expected UniProt columns: {', '.join(missing_critical)}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    return df.rename(columns=rename_map)
 
 # ----------------
 # STATISTICAL TEST FUNCTIONS
@@ -1203,9 +1333,19 @@ def pairwise_log2fc(data1, data2):
     # The result is an array of shape (n1, n2, n_features)
     with np.errstate(divide='ignore', invalid='ignore'):
         pairwise_ratios = np.log2(data1[:, None, :] / data2[None, :, :])  # (n1, n2, features)
+        pairwise_flat = pairwise_ratios.reshape(-1, data1.shape[1])
 
-    # Reshape to (n1*n2, n_features) and compute the median along the first axis.
-    median_fc = np.nanmedian(pairwise_ratios.reshape(-1, data1.shape[1]), axis=0)
+    # Identify columns that are entirely NaN
+    mask_all_nan = np.all(np.isnan(pairwise_flat), axis=0)
+    median_fc = np.full(data1.shape[1], np.nan, dtype=float)
+
+    # Compute only on valid columns
+    if not np.all(mask_all_nan):
+        valid_cols = ~mask_all_nan
+        median_fc[valid_cols] = np.nanmedian(pairwise_flat[:, valid_cols], axis=0)
+
+    # # Reshape to (n1*n2, n_features) and compute the median along the first axis.
+    # median_fc = np.nanmedian(pairwise_ratios.reshape(-1, data1.shape[1]), axis=0)
     return median_fc
 
 def get_pca_importance(model: Union[dict, 'sklearn.decomposition.PCA'], initial_feature_names: List[str], n: int = 1) -> pd.DataFrame:
@@ -1308,80 +1448,233 @@ def get_protein_clusters(pdata, on='prot', layer='X', t=5, criterion='maxclust')
     return dict(clusters)
 
 # ----------------
-# TO FIX
-# TODO: fix with pdata.summary maybe call stats_ttest instead
-def run_summary_ttest(protein_summary_df, test_variables, test_pairs, print_results=False, test_variable='total_count'):
+# TO DOUBLE CHECK/THINK ABOUT...
+def _map_uniprot_field(from_type: str, to_type):
     """
-    Run t-tests on specified groups in a DataFrame returned from get_protein_summary.
+    Internal helper to resolve UniProt column names and required fields
+    for a given identifier conversion request.
 
     Args:
-        protein_summary_df (pd.DataFrame): The DataFrame returned from get_protein_summary.
-        test_variables (list): The variables to use for grouping.
-        test_pairs (list): The pairs of groups to compare.
-        print_results (bool, optional): Whether to print the t-test results. Defaults to False.
-        test_variable (str, optional): The variable to test for in the t-test. Acceptable variables are any of the columns in df_files. Defaults to 'total_count'.
+        from_type (str): Source identifier type ('accession', 'gene').
+        to_type (str or list of str): Target identifier type(s).
+            Supported: 'gene', 'string', 'organism_id'.
 
     Returns:
-        list: A list of t-test results for each pair of groups. Each result is a tuple containing the t-statistic and the p-value.
-
-    Example usage:
-        ```python
-        test_variables = ['region','amt']
-        test_pairs = [[['cortex','sc'], ['cortex','20000']], 
-            [['cortex','20000'], ['snpc','10000']], 
-            [['mp_cellbody','6000'], ['mp_axon','6000']]]
-        ttestparams = run_summary_ttest(protein_summary_df, test_variables, test_pairs, test_variable='total_count')
-        ```
+        tuple: (from_col, to_cols, required_fields)
     """
-    # check if every pair in test_pairs is a list of length 2, else throw error message
-    if not all(len(pair) == 2 for pair in test_pairs):
-        raise ValueError("Error: Each pair in test_pairs must contain two groups (e.g. compare [['circle','big'] and ['square','small']])")
+    if isinstance(to_type, str):
+        to_type = [to_type]
 
-    # check if every element in test_pairs[i][0] and test_pairs[i][1] is the same length as test_variables, else throw error message
-    if not all(len(pair[0]) == len(test_variables) and len(pair[1]) == len(test_variables) for pair in test_pairs):
-        raise ValueError("Error: Each group in each pair in test_pairs must match the length of test_variables")
+    # Validate allowed types
+    valid_types = {"accession", "gene", "string", "organism_id"}
+    if from_type not in valid_types:
+        raise ValueError(f"Invalid from_type: '{from_type}'. Must be one of {valid_types}")
+    if any(t not in valid_types for t in to_type):
+        raise ValueError(f"Invalid to_type: {to_type}. Must be subset of {valid_types}")
+    if from_type == "organism_id":
+        raise ValueError("'organism_id' can only be used as a target (to_type).")
 
-    ttest_params = []
-    for pair in test_pairs:
-        group1 = filter_by_group(protein_summary_df, test_variables, pair[0])
-        group2 = filter_by_group(protein_summary_df, test_variables, pair[1])
-
-        t_stat, p_val = ttest_ind(group1[test_variable], group2[test_variable])
-        if print_results:
-            print(f"Testing for {test_variable} between pair {pair[0]} and {pair[1]}:")
-            print(f"N1: {len(group1)}, N2: {len(group2)}")
-            print(f"t-statistic: {t_stat}, p-value: {p_val}") 
-        ttest_params.append([pair[0], pair[1], t_stat, p_val, len(group1), len(group2)])
-
-    ttest_df = pd.DataFrame(ttest_params, columns=['Group1', 'Group2', 'T-statistic', 'P-value', 'N1', 'N2'])
-    return ttest_df
-
-# TODO: sync with get_uniprot_fields
-def convert_identifiers(input_list, input_type, output_type, df):
-    """
-    Convert a list of gene information of a certain type to another type.
-
-    Args:
-        input_list (list): The list of gene information to convert.
-        input_type (str): The type of the input gene information. Must be one of 'gene_symbol', 'accession', or 'gene_id'.
-        output_type (str): The type of the output gene information. Must be one of 'gene_symbol', 'accession', or 'gene_id'.
-        df (pd.DataFrame): The DataFrame containing the gene information.
-
-    Returns:
-        output_list (list): The converted list of gene information.
-    """
-    if input_type not in ['gene_symbol', 'accession', 'gene_id'] or output_type not in ['gene_symbol', 'accession', 'gene_id']:
-        raise ValueError("input_type and output_type must be one of 'gene_symbol', 'accession', or 'gene_id'")
-
-    convert_dict = {
-        'gene_symbol': 'Gene Symbol',
-        'accession': 'Accession',
-        'gene_id': 'Gene ID'
+    field_map = {
+        "accession": "accession",
+        "gene": "gene_primary",
+        "string": "xref_string",
+        "organism_id": "organism_id",
     }
 
-    input_type = convert_dict[input_type]
-    output_type = convert_dict[output_type]
-        
-    output_list = df.loc[df[input_type].isin(input_list), output_type].tolist()
+    from_col = field_map[from_type]
+    to_cols = [field_map[t] for t in to_type]
 
-    return output_list
+    # Determine required UniProt fields for the query
+    required_fields = set(["accession", from_col, *to_cols])
+    if from_type == "gene":
+        # Gene lookups usually need accession linkage
+        required_fields |= {"accession"}
+
+    return from_col, to_cols, list(required_fields)
+
+def convert_identifiers(
+    ids,
+    from_type: str,
+    to_type,
+    pdata=None,
+    use_cache: bool = True,
+    return_type: str = "dict",
+    verbose: bool = True,
+):
+    """
+    Convert identifiers between UniProt-compatible types.
+
+    Supports mapping between protein accessions, gene names, STRING IDs,
+    and organism IDs. Multiple output types may be requested at once.
+
+    Args:
+        ids (list of str): Input identifiers.
+        from_type (str): Source identifier type ('accession', 'gene').
+            'organism_id' cannot be used as a source.
+        to_type (str or list of str): Target identifier type(s).
+            May include any of: ['gene', 'string', 'organism_id'].
+        pdata (pAnnData, optional): pAnnData object providing cached
+            accession–gene mappings. If provided, `use_cache` is
+            automatically set to True.
+        use_cache (bool): Whether to use cached mappings from `pdata`.
+            (default: True)
+        return_type (str): Output format:
+            - 'dict': {input → {to_type → value}}
+            - 'df': DataFrame with columns [from_type, *to_type]
+            - 'both': (dict, DataFrame)
+        verbose (bool): Whether to print progress messages.
+
+    Returns:
+        dict, pandas.DataFrame, or tuple: Depending on `return_type`.
+
+    Example:
+        >>> convert_identifiers(["P12345", "Q9XYZ1"], "accession", "gene", pdata=pdata)
+        >>> convert_identifiers(["P12345"], "accession", ["gene", "string", "organism_id"], return_type="df")
+    """
+    import pandas as pd
+    import numpy as np
+
+    if not ids:
+        empty_df = pd.DataFrame(columns=[from_type] + ([to_type] if isinstance(to_type, str) else list(to_type)))
+        return {} if return_type != "df" else empty_df
+
+    if pdata is not None:
+        use_cache = True
+
+    from_col, to_cols, search_fields = _map_uniprot_field(from_type, to_type)
+    if isinstance(to_type, str):
+        to_type = [to_type]
+
+    # canonical UniProt field map (consistent with standardize_uniprot_columns)
+    _FIELD_MAP = {
+        "accession": "accession",
+        "gene": "gene_primary",
+        "string": "xref_string",
+        "organism_id": "organism_id",
+    }
+
+    # --- Logging
+    if verbose:
+        print(f"{format_log_prefix('search', indent=1)} Converting from '{from_type}' to {to_type} for {len(ids)} identifiers...")
+        if pdata is not None:
+            cacheable_types = {"accession", "gene"}
+            api_needed = [t for t in to_type if t not in cacheable_types]
+            if set([from_type] + to_type).issubset(cacheable_types):
+                print(f"{format_log_prefix('info_only', indent=2)} Using cached mapping from pdata (no UniProt queries).")
+            elif api_needed:
+                api_list = ", ".join(api_needed)
+                print(f"{format_log_prefix('info_only', indent=2)} Using cached mapping for gene/accession; UniProt lookup required for: {api_list}.")
+        else:
+            print(f"{format_log_prefix('info_only', indent=2)} No pdata provided — querying UniProt for all target fields.")
+
+    # --- Tier 1: cache lookup (only accession <-> gene)
+    resolved = {id_: {t: None for t in to_type} for id_ in ids}
+    to_query = list(ids)
+
+    if pdata is not None and use_cache and {"accession", "gene"}.issuperset({from_type, *to_type}):
+        if from_type == "accession" and "gene" in to_type:
+            _, acc_to_gene = pdata.get_identifier_maps(on="protein")
+            for acc in ids:
+                if acc in acc_to_gene:
+                    resolved[acc]["gene"] = acc_to_gene[acc]
+        elif from_type == "gene" and "accession" in to_type:
+            gene_to_acc, _ = pdata.get_identifier_maps(on="protein")
+            for gene in ids:
+                if gene in gene_to_acc:
+                    resolved[gene]["accession"] = gene_to_acc[gene]
+
+        # Filter unmapped
+        to_query = [x for x, v in resolved.items() if not any(vv for vv in v.values())]
+
+    # --- Tier 3: UniProt API
+    df = pd.DataFrame()
+    if len(to_query) > 0:
+        # Hybrid case: gene → STRING / organism_id
+        if from_type == "gene":
+            gene_to_acc = convert_identifiers(to_query, "gene", "accession", pdata=pdata, use_cache=use_cache, verbose=False)
+            accs = [v.get("accession") for v in gene_to_acc.values() if v.get("accession")]
+            if accs:
+                df = get_uniprot_fields(accs, search_fields=search_fields, standardize=True)
+                df = standardize_uniprot_columns(df)
+                df = df.drop_duplicates(subset="accession", keep="first")
+
+                # Build per-target maps
+                per_target_maps = {}
+                for t in to_type:
+                    col = _FIELD_MAP[t]
+                    if col in df.columns:
+                        per_target_maps[t] = dict(zip(df["accession"], df[col]))
+                    else:
+                        per_target_maps[t] = {}
+
+                # Assign results
+                for g, acc_dict in gene_to_acc.items():
+                    acc = acc_dict.get("accession")
+                    for t in to_type:
+                        resolved[g][t] = per_target_maps[t].get(acc) if acc else None
+            else:
+                for g in to_query:
+                    for t in to_type:
+                        resolved[g][t] = None
+
+        else:
+            # Direct mapping (accession → X)
+            df = get_uniprot_fields(to_query, search_fields=search_fields, standardize=True)
+
+            # --- Clean up STRING results if present
+            if not df.empty:
+                if "xref_string" in df.columns and isinstance(df["xref_string"], pd.Series):
+                    df["xref_string"] = (
+                        df["xref_string"]
+                        .astype(str)
+                        .apply(lambda s: s.replace(";", "").strip() if isinstance(s, str) else np.nan)
+                        .replace({"nan": np.nan, "None": np.nan, "": np.nan})
+                    )
+                elif "string" in to_type and verbose:
+                    print(f"{format_log_prefix('warn_only', indent=3)} UniProt did not return 'xref_string' field — possible API schema drift.")
+
+            if not df.empty and from_col in df.columns:
+                per_target_maps = {}
+                for t in to_type:
+                    col = _FIELD_MAP[t]
+                    if col in df.columns:
+                        per_target_maps[t] = dict(zip(df[from_col], df[col]))
+                    else:
+                        per_target_maps[t] = {}
+
+                for id_ in to_query:
+                    for t in to_type:
+                        resolved[id_][t] = per_target_maps[t].get(id_)
+            else:
+                for id_ in to_query:
+                    for t in to_type:
+                        resolved[id_][t] = None
+
+    # --- Reporting
+    resolved_count = sum(
+        any(vv is not None and not pd.isna(vv) for vv in v.values()) for v in resolved.values()
+    )
+    missing = [k for k, v in resolved.items() if all(vv is None or pd.isna(vv) for vv in v.values())]
+
+    if verbose:
+        local_resolved = len(ids) - len(to_query)
+        api_resolved = resolved_count - local_resolved
+        print(f"{format_log_prefix('result_only', indent=2)} {resolved_count}/{len(ids)} identifiers successfully converted "
+            f"({local_resolved} local, {api_resolved} via UniProt).")
+        if missing:
+            print(f"{format_log_prefix('warn_only', indent=2)} {len(missing)} identifiers could not be resolved:")
+            print("        " + ", ".join(missing[:10]) + ("..." if len(missing) > 10 else ""))
+
+    # --- Output
+    result_df = pd.DataFrame({from_type: list(resolved.keys())})
+    for t in to_type:
+        result_df[t] = [resolved[i][t] for i in result_df[from_type]]
+
+    if return_type == "dict":
+        return resolved
+    elif return_type == "df":
+        return result_df
+    elif return_type == "both":
+        return resolved, result_df
+    else:
+        raise ValueError("Invalid return_type. Choose from {'dict', 'df', 'both'}.")
