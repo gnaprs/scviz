@@ -665,6 +665,7 @@ def test_plot_rankquant_debug_mode_runs(pdata, capsys):
     plt.close(fig)
 
 # test plot_venn()
+@pytest.mark.usefixtures("mock_upset_utils")
 def test_plot_venn_runs_and_returns_contents(monkeypatch):
     """Ensure plot_venn runs without error and returns correct outputs."""
     fig, ax = plt.subplots()
@@ -679,6 +680,7 @@ def test_plot_venn_runs_and_returns_contents(monkeypatch):
 
     plt.close(fig)
 
+@pytest.mark.usefixtures("mock_upset_utils")
 def test_plot_venn_invalid_color_length():
     """Ensure plot_venn raises error for mismatched color count."""
     fig, ax = plt.subplots()
@@ -687,6 +689,7 @@ def test_plot_venn_invalid_color_length():
         scplt.plot_venn(ax, pdata, classes=["GroupA", "GroupB"], set_colors=["#1f77b4"])
     plt.close(fig)
 
+@pytest.mark.usefixtures("mock_upset_utils")
 def test_plot_venn_invalid_label_order():
     """Ensure label_order mismatch raises ValueError."""
     fig, ax = plt.subplots()
@@ -695,6 +698,7 @@ def test_plot_venn_invalid_label_order():
         scplt.plot_venn(ax, pdata, classes=["GroupA", "GroupB"], label_order=["Wrong", "Labels"])
     plt.close(fig)
 
+@pytest.mark.usefixtures("mock_upset_utils")
 def test_plot_venn_invalid_number_of_sets(monkeypatch):
     """Ensure >3 sets raises a ValueError."""
     def mock_get_upset_contents(pdata, classes, upsetForm=False):
