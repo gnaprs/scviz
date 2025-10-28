@@ -20,7 +20,7 @@ jobs:
         uses: orhun/git-cliff-action@v4
         with:
           config: .git-cliff.toml
-          args: -a --verbose
+          args: --verbose
         env:
           OUTPUT: CHANGELOG.md
 
