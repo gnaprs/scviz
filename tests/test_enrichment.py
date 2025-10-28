@@ -1,9 +1,7 @@
 import pytest
 import pandas as pd
-from unittest.mock import patch
-from unittest.mock import Mock
-
-import warnings
+from unittest.mock import patch, Mock
+from io import BytesIO
 
 from scviz.enrichment import enrichment_functional, _resolve_de_key, enrichment_ppi, _pretty_vs_key
 
@@ -204,3 +202,105 @@ def test_resolve_de_key_finds_pretty_match():
     }
     resolved = _resolve_de_key(keys, "AS_kd vs AS_sc_up")
     assert resolved in keys
+
+
+# ----------------------------------------------------------------------
+# get_string_mappings edge cases
+def test_get_string_mappings_uniprot_failure(monkeypatch, pdata):
+    """Simulate UniProt API failure to cover exception path."""
+    def fail_uniprot(*args, **kwargs):
+        raise RuntimeError("Simulated UniProt failure")
+    
+    import scviz.utils as utils_mod
+    monkeypatch.setattr(utils_mod, "get_uniprot_fields", fail_uniprot)
+    pdata.prot.var["STRING_id"] = pd.NA
+    # Should print warning and still return empty df
+    df = pdata.get_string_mappings(["X1", "X2"], debug=False)
+    assert isinstance(df, pd.DataFrame)
+
+def test_get_string_mappings_all_cached(pdata):
+    """If all identifiers already cached, skip STRING step."""
+    pdata.prot.var["STRING_id"] = ["S1"] * pdata.prot.shape[1]
+    df = pdata.get_string_mappings(pdata.prot.var_names[:3].tolist())
+    assert "string_identifier" in df.columns
+
+# ----------------------------------------------------------------------
+# resolve_to_accessions edge case
+def test_resolve_to_accessions_unresolved(pdata):
+    """One gene resolves, one does not."""
+    resolved, unresolved = pdata.resolve_to_accessions(["NONEXISTENT", list(pdata.prot.var_names)[0]])
+    assert isinstance(resolved, list)
+    assert "NONEXISTENT" in unresolved
+
+# ----------------------------------------------------------------------
+# enrichment_functional error paths
+def test_enrichment_functional_no_input_raises(pdata):
+    """Raises when neither genes nor from_de=True."""
+    with pytest.raises(ValueError, match="Must provide 'genes'"):
+        pdata.enrichment_functional(from_de=False)
+
+def test_enrichment_functional_empty_mapping(monkeypatch, pdata):
+    """Covers empty mapping_df -> raises ValueError."""
+    monkeypatch.setattr(pdata, "resolve_to_accessions", lambda x: (["X"], []))
+    monkeypatch.setattr(pdata, "get_string_mappings", lambda *a, **k: pd.DataFrame(columns=["string_identifier", "ncbi_taxon_id"]))
+    with pytest.raises(ValueError, match="No valid STRING mappings"):
+        pdata.enrichment_functional(genes=["X"], from_de=False)
+
+# ----------------------------------------------------------------------
+# enrichment_ppi edge case
+def test_enrichment_ppi_empty_mapping(monkeypatch, pdata):
+    """Covers branch where mapping_df.empty raises ValueError."""
+    monkeypatch.setattr(pdata, "resolve_to_accessions", lambda x: (["X"], []))
+    monkeypatch.setattr(pdata, "get_string_mappings", lambda *a, **k: pd.DataFrame(columns=["string_identifier", "ncbi_taxon_id"]))
+    with pytest.raises(ValueError, match="No valid STRING mappings"):
+        pdata.enrichment_ppi(genes=["X"])
+
+# ----------------------------------------------------------------------
+# list_enrichments coverage
+def test_list_enrichments_print(capsys, pdata):
+    """Covers list_enrichments() print output."""
+    pdata.stats["functional"] = {"UserSearch1": {"result": pd.DataFrame(), "string_url": "https://string-db.org"}}
+    pdata.stats["ppi"] = {"UserPPI1": {"result": {"edges": 3}}}
+    pdata.stats["de_results"] = {"[{'cellline': 'BE'}] vs [{'cellline': 'AS'}]": pd.DataFrame()}
+    pdata.list_enrichments()
+    out = capsys.readouterr().out
+    assert "Listing STRING enrichment status" in out
+    assert "Completed STRING enrichment results" in out
+
+# ----------------------------------------------------------------------
+# plot_enrichment_svg coverage
+@patch("scviz.enrichment.requests.get")
+def test_plot_enrichment_svg_missing_key(mock_get, pdata, tmp_path):
+    """Covers error branch for missing functional key."""
+    pdata.stats["functional"] = {}
+    with pytest.raises(ValueError, match="Could not find enrichment results for"):
+        pdata.plot_enrichment_svg("Nonexistent")
+
+@patch("scviz.enrichment.requests.get")
+def test_plot_enrichment_svg_direction_error(mock_get, pdata):
+    """Covers direction missing for DE key."""
+    pdata.stats["functional"] = {"A_vs_B_up": {"string_ids": ["S1"], "species": "9606"}}
+    with pytest.raises(ValueError, match="You must specify direction"):
+        pdata.plot_enrichment_svg("A_vs_B")
+
+@patch("scviz.enrichment.requests.get")
+def test_plot_enrichment_svg_fetch_and_save(mock_get, pdata, tmp_path):
+    """Covers normal flow including saving SVG."""
+    pdata.stats["functional"] = {"UserSearch1": {"string_ids": ["S1"], "species": "9606"}}
+    mock_get.return_value = Mock(status_code=200, content=b"<svg></svg>")
+    tmpfile = tmp_path / "test.svg"
+    pdata.plot_enrichment_svg("UserSearch1", save_as=str(tmpfile))
+    assert tmpfile.exists()
+
+# ----------------------------------------------------------------------
+# get_string_network_link coverage
+def test_get_string_network_link_errors(pdata):
+    """Covers ValueErrors in get_string_network_link."""
+    with pytest.raises(ValueError, match="Must provide either"):
+        pdata.get_string_network_link()
+    pdata.stats["functional"] = {}
+    with pytest.raises(ValueError, match="Key 'K' not found"):
+        pdata.get_string_network_link(key="K")
+    pdata.stats["functional"]["UserSearch1"] = {"string_ids": [], "species": "9606"}
+    with pytest.raises(ValueError, match="No STRING IDs"):
+        pdata.get_string_network_link(key="UserSearch1")

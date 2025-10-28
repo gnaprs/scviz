@@ -4,9 +4,45 @@ import pandas as pd
 from scviz import utils
 import re
 
-
 from scviz.utils import format_log_prefix
 import warnings
+
+def _detect_ambiguous_input(group, var, group_metrics=None):
+    """
+    Detects ambiguous user input mixing file and group identifiers.
+
+    This helper checks whether the `group` list includes both
+    file-like identifiers (present in `.var` as 'Found In: <file>')
+    and group-like identifiers (present in `.uns` as ('group', 'count') tuples).
+
+    Args:
+        group (list of str): User-provided identifiers for filtering.
+        var (pd.DataFrame): The `.var` table of the corresponding AnnData object.
+        group_metrics (pd.DataFrame, optional): MultiIndex DataFrame from `.uns`
+            containing per-group ('count', 'ratio') metrics.
+
+    Returns:
+        tuple(bool, list, list):
+            (is_ambiguous, annotated_files, annotated_groups)
+            - is_ambiguous (bool): True if both file-like and group-like entries coexist.
+            - annotated_files (list): Entries that match file-level columns.
+            - annotated_groups (list): Entries that match group-level metrics.
+    """
+    annotated_files = [g for g in group if f"Found In: {g}" in var.columns]
+    annotated_groups = []
+    if group_metrics is not None:
+        annotated_groups = [
+            g for g in group
+            if (g, "count") in group_metrics.columns or (g, "ratio") in group_metrics.columns
+        ]
+
+    has_file_like = bool(annotated_files)
+    has_group_like = bool(annotated_groups)
+
+    # Ambiguous only if both exist and sets are distinct
+    is_ambiguous = has_file_like and has_group_like and set(annotated_files) != set(annotated_groups)
+
+    return is_ambiguous, annotated_files, annotated_groups
 
 class FilterMixin:
     """
@@ -184,7 +220,9 @@ class FilterMixin:
 
         Args:
             group (str or list of str): Group name(s) corresponding to 'Found In: {group} ratio' 
-                (e.g., "HCT116_DMSO") or a list of filenames (e.g., ["F1", "F2"]).
+                (e.g., "HCT116_DMSO") or a list of filenames (e.g., ["F1", "F2"]). If this argument matches one or more `.obs` columns, the function automatically 
+                interprets it as a class name, expands it to all class values, and annotates the
+                necessary `'Found In:'` features.
             min_ratio (float, optional): Minimum proportion (0.0–1.0) of samples the feature must be 
                 found in. Ignored for file-based filtering.
             min_count (int, optional): Minimum number of samples the feature must be found in. Alternative 
@@ -196,6 +234,11 @@ class FilterMixin:
 
         Returns:
             pAnnData: A filtered pAnnData object if `return_copy=True`; otherwise, modifies in place and returns None.
+
+        Note:
+            - If `group` matches `.obs` column names, the method automatically annotates found 
+              features by class before filtering.
+            - For file-based filtering, use the file identifiers from `.prot.obs_names`.            
 
         Examples:
             Filter proteins found in both "groupA" and "groupB" groups, in at least 2 samples each:
@@ -213,6 +256,11 @@ class FilterMixin:
                 pdata.annotate_found(classes=['group','treatment'])
                 pdata.filter_prot_found(group=["groupA_control", "groupB_treated"])
                 ```
+
+            If a single class column (e.g., `"cellline"`) is given, filter proteins based on each of its unique values (e.g. Line A, Line B):
+                ```python
+                pdata.filter_prot_found(group="cellline", min_ratio=0.5)
+                ```
         """
         if not self._check_data(on): # type: ignore[attr-defined]
             return
@@ -226,52 +274,79 @@ class FilterMixin:
         if not isinstance(group, (list, tuple)):
             raise TypeError("`group` must be a string or list of strings.")
 
-        # Determine filtering mode: group vs file
+        # Auto-resolve obs columns passed instead of group values
+        auto_value_msg = None
+        if all(g in adata.obs.columns for g in group):
+            if len(group) == 1:
+                obs_col = group[0]
+                expanded_groups = adata.obs[obs_col].unique().tolist()
+            else:
+                expanded_groups = (
+                    adata.obs[group].astype(str)
+                        .agg("_".join, axis=1)
+                        .unique()
+                        .tolist()
+                )
+            # auto-annotate found features by these obs columns
+            self.annotate_found(classes=group, on=on, verbose=False)
+            group = expanded_groups
+            auto_value_msg = (
+                f"{format_log_prefix('info', 2)} Found matching obs column(s): {group}. "
+                "Automatically annotating detection by group values."
+            )
+
+        if verbose and auto_value_msg:
+            print(auto_value_msg)
+
+        # Determine filtering mode: group vs file or handle ambiguity/missing
         group_metrics = adata.uns.get(f"found_metrics_{on}")
 
-        group_cols_exist = (
-            group_metrics is not None and
-            all((g, "count") in group_metrics.columns and (g, "ratio") in group_metrics.columns for g in group)
+        mode = None
+        all_file_cols = all(f"Found In: {g}" in var.columns for g in group)
+        all_group_cols = (
+            group_metrics is not None
+            and all((g, "count") in group_metrics.columns for g in group)
         )
-        file_cols_exist = []
-        for g in group:
-            has_file_col = f"Found In: {g}" in var.columns
-            has_ratio_col = f"Found In: {g} ratio" in var.columns
-            file_cols_exist.append(has_file_col and not has_ratio_col)
 
-        # Determine mode or handle ambiguity
-        if group_cols_exist and all(file_cols_exist):
+        # --- 1️⃣ Explicit ambiguity: both file- and group-level indicators exist ---
+        is_ambiguous, annotated_files, annotated_groups = _detect_ambiguous_input(group, var, group_metrics)
+        if is_ambiguous:
             raise ValueError(
-                f"Ambiguous input: some items in {group} appear to be both files and groups.\n"
+                f"Ambiguous input: items in {group} include both file identifiers {annotated_files} "
+                f"and group values {annotated_groups}.\n"
                 "Please separate group-based and file-based filters into separate calls."
             )
-        elif group_cols_exist:
+
+        # --- 2️⃣ Group-based mode ---
+        elif all_group_cols:
             mode = "group"
-        elif all(file_cols_exist):
+
+        # --- 3️⃣ File-based mode ---
+        elif all_file_cols:
             mode = "file"
+
+        # --- 4️⃣ Mixed or unresolved case (fallback) ---
         else:
-            # Prepare helpful error message for missing entries
             missing = []
             for g in group:
                 group_missing = (
-                    group_metrics is None or
-                    (g, "count") not in group_metrics.columns or
-                    (g, "ratio") not in group_metrics.columns
+                    group_metrics is None
+                    or (g, "count") not in group_metrics.columns
+                    or (g, "ratio") not in group_metrics.columns
                 )
                 file_missing = f"Found In: {g}" not in var.columns
 
                 if group_missing and file_missing:
                     missing.append(g)
 
-            message = (
-                f"The following group(s)/file(s) could not be found: {missing}\n"
-                "→ If these are group names, make sure you ran:\n"
-                f"   pdata.annotate_found(classes={group})\n"
-                "→ If these are file names, ensure 'Found In: <file>' columns exist.\n"
-            )
+            # Consistent, readable user message
+            msg = [f"The following group(s)/file(s) could not be found: {missing or '—'}"]
+            msg.append("→ If these are group names, make sure you ran:")
+            msg.append(f"   pdata.annotate_found(classes={group})")
+            msg.append("→ If these are file names, ensure 'Found In: <file>' columns exist.\n")
+            raise ValueError("\n".join(msg))
 
-            raise ValueError(message)
-
+        # ---------------
         # Apply filtering
         mask = np.ones(len(var), dtype=bool)
 
@@ -412,11 +487,69 @@ class FilterMixin:
         adata = self.prot 
         var = adata.var
 
+        # Detect per-sample significance layer
+        has_protein_level_significance = any(
+            k.lower().endswith("_qval") or k.lower().endswith("_fdr") for k in adata.layers.keys()
+        )
+
+        # --- Handle missing significance data entirely ---
+        if not has_protein_level_significance and "Global_Q_value" not in adata.var.columns:
+            raise ValueError(
+                "No per-sample layer (e.g., *_qval) or global significance column ('Global_Q_value') "
+                "found in .prot. Please ensure your data includes q-values or run annotate_significant()."
+            )
+
+        # --- 1️⃣ Global fallback mode (e.g. PD-based imports) ---
+        if not has_protein_level_significance and "Global_Q_value" in adata.var.columns:
+            if group is not None:
+                raise ValueError(
+                    f"Cannot filter by group {group}: per-sample significance data missing "
+                    "and only global q-values available."
+                )
+            
+            global_mask = adata.var["Global_Q_value"] < fdr_threshold
+
+            n_total = len(global_mask)
+            n_kept = int(global_mask.sum())
+            n_dropped = n_total - n_kept
+
+            filtered = self.copy() if return_copy else self
+            filtered.prot = adata[:, global_mask]
+
+            if filtered.pep is not None and filtered.rs is not None:
+                proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names = filtered._filter_sync_peptides_to_proteins(
+                    original=self, updated_prot=filtered.prot, debug=verbose
+                )
+                filtered._apply_rs_filter(
+                    keep_proteins=proteins_to_keep,
+                    keep_peptides=peptides_to_keep,
+                    orig_prot_names=orig_prot_names,
+                    orig_pep_names=orig_pep_names,
+                    debug=verbose,
+                )
+
+            filtered.update_summary(recompute=True)
+            filtered._append_history(
+                f"Filtered by global significance (Global_Q_value < {fdr_threshold}); "
+                f"{n_kept}/{n_total} proteins retained."
+            )
+
+            if verbose:
+                print(f"{format_log_prefix('user')} Filtering proteins by significance [Global-mode]:")
+                print(f"{format_log_prefix('info', 2)} Using global protein-level q-values (no per-sample significance available).")
+                return_copy_str = "Returning a copy of" if return_copy else "Filtered and modified"
+                print(f"    {return_copy_str} protein data based on significance thresholds:")
+                print(f"{format_log_prefix('filter_conditions')}Files requested: All")
+                print(f"{format_log_prefix('filter_conditions')}FDR threshold: {fdr_threshold}")
+                print(f"    → Proteins kept: {n_kept}, Proteins dropped: {n_dropped}\n")
+
+            return filtered if return_copy else None
+
+        # --- 2️⃣ Per-sample significance data available ---
         no_group_msg = None
         auto_group_msg = None
         auto_value_msg = None
 
-        # Default to using sample names if no group provided
         if group is None:
             group_list = list(adata.obs_names)
             if verbose:
@@ -424,7 +557,6 @@ class FilterMixin:
         else:
             group_list = [group] if isinstance(group, str) else group
             
-
         # Ensure annotations exist or auto-generate
         missing_cols = [f"Significant In: {g}" for g in group_list]
         if all(col in var.columns for col in missing_cols):
@@ -459,7 +591,6 @@ class FilterMixin:
                         break
 
                 if found_obs_col is not None:
-                    # annotation_msg = f"{format_log_prefix('user')} Annotated significant features by group: {group_list} using FDR threshold {fdr_threshold}."
                     self.annotate_significant(classes=[found_obs_col],
                                             fdr_threshold=fdr_threshold,
                                             on="protein", indent=2, verbose=False)
@@ -472,39 +603,43 @@ class FilterMixin:
                         "Please either pass valid obs column(s), provide values from a valid `.obs` column or run `annotate_significant()` first."
                     )
 
-        # Mode detection: group vs file
+        # --- 3️⃣ Mode detection and ambiguity handling ---
         metrics_key = "significance_metrics_protein"
         metrics_df = adata.uns.get(metrics_key, pd.DataFrame())
 
-        is_group_mode = all((g, "count") in metrics_df.columns for g in group_list)
+        is_ambiguous, annotated_files, annotated_groups = _detect_ambiguous_input(group_list, var, metrics_df)
+        if is_ambiguous:
+            raise ValueError(
+                f"Ambiguous input: items in {group_list} include both file identifiers {annotated_files} "
+                f"and group values {annotated_groups}.\n"
+                "Please separate group-based and file-based filters into separate calls."
+            )
+
+        all_group_cols = (
+            metrics_df is not None
+            and all((g, "count") in metrics_df.columns for g in group_list)
+        )
+        all_file_cols = all(f"Significant In: {g}" in var.columns for g in group_list)
+        mode = "group" if all_group_cols else "file"
+
+        # Build filtering mask
         mask = np.zeros(len(var), dtype=bool) if match_any else np.ones(len(var), dtype=bool)
 
-        if is_group_mode:
+        if mode == "group":
             if min_ratio is None and min_count is None:
                 raise ValueError("Specify `min_ratio` or `min_count` for group-based filtering.")
-
             for g in group_list:
                 count = metrics_df[(g, "count")]
                 ratio = metrics_df[(g, "ratio")]
-                if min_ratio is not None:
-                    this_mask = ratio >= min_ratio
-                else:
-                    this_mask = count >= min_count
-                
-                if match_any:
-                    mask |= this_mask
-                else:
-                    mask &= this_mask
-        else:
+                this_mask = ratio >= min_ratio if min_ratio is not None else count >= min_count
+                mask = mask | this_mask if match_any else mask & this_mask
+        else:  # file mode
             for g in group_list:
                 col = f"Significant In: {g}"
                 this_mask = var[col].values
-                if match_any:
-                    mask |= this_mask
-                else:
-                    mask &= this_mask
+                mask = mask | this_mask if match_any else mask & this_mask
 
-        # Apply filtering
+        # --- 4️⃣ Apply filtering and sync ---
         filtered = self.copy() if return_copy else self
         filtered.prot = adata[:, mask]
 
@@ -529,9 +664,9 @@ class FilterMixin:
 
         if verbose:
             logic = "any" if match_any else "all"
-            mode_str = "Group-mode" if is_group_mode else "File-mode"
+            mode_str = "Group-mode" if mode == "group" else "File-mode"
 
-            print(f"{format_log_prefix('user')} Filtering proteins by significance [{mode_str}]:")
+            print(f"{format_log_prefix('user')} Filtering proteins [Significance|{mode_str}]:")
 
             if no_group_msg:
                 print(no_group_msg)
@@ -543,7 +678,7 @@ class FilterMixin:
             return_copy_str = "Returning a copy of" if return_copy else "Filtered and modified"
             print(f"    {return_copy_str} protein data based on significance thresholds:")
 
-            if is_group_mode:
+            if mode == "group":
                 # Case A: obs column(s) expanded → show expanded_groups and add note
                 if auto_group_msg:
                     group_note = f" (all values of obs column(s))"
@@ -757,6 +892,8 @@ class FilterMixin:
         pdata = self.copy() if return_copy else self # type: ignore[attr-defined], EditingMixin
         action = "Returning a copy of" if return_copy else "Filtered and modified"
 
+        orig_sample_count = len(pdata.prot.obs)
+
         if debug:
             print("self.prot id:", id(self.prot))
             print("pdata.prot id:", id(pdata.prot))
@@ -813,7 +950,7 @@ class FilterMixin:
                 if missing:
                     message += f"{format_log_prefix('filter_conditions')}Missing samples ignored: {len(missing)}\n"
 
-            message += f"    → Samples kept: {len(pdata.prot.obs)}, Samples dropped: {len(pdata.summary) - len(pdata.prot.obs)}"
+            message += f"    → Samples kept: {len(pdata.prot.obs)}, Samples dropped: {orig_sample_count - len(pdata.prot.obs)}"
             message += f"\n    → Proteins kept: {len(pdata.prot.var)}\n"
 
         # Logging and history updates
@@ -827,7 +964,11 @@ class FilterMixin:
         Filter samples using dictionary-style categorical matching.
 
         This internal method filters samples based on class-like annotations (e.g., treatment, cellline),
-        using either loose field-wise filtering or strict combination matching.
+        using either loose field-wise filtering or strict combination matching. It supports:
+    
+        - Single dictionary (e.g., `{'cellline': 'A'}`)
+        - List of dictionaries (e.g., `[{...}, {...}]` for multiple matching cases)
+        - Exact matching (`exact_cases=True`) across all key–value pairs
 
         Args:
             values (dict or list of dict): Filtering conditions.
@@ -840,7 +981,7 @@ class FilterMixin:
             return_copy (bool): If True, returns a filtered copy. Otherwise modifies in place.
 
         Returns:
-            AnnData: Filtered view of the input AnnData object if `return_copy=True`; otherwise modifies in place and returns None.
+            pAnnData: Filtered view of the input AnnData object if `return_copy=True`; otherwise modifies in place and returns None.
 
         Note:
             This method is used internally by `filter_sample()`. For general use, call `filter_sample()` directly.
@@ -865,6 +1006,7 @@ class FilterMixin:
 
         pdata = self.copy() if return_copy else self # type: ignore[attr-defined], EditingMixin
         obs_keys = pdata.summary.columns # type: ignore[attr-defined]
+        orig_sample_count = len(pdata.prot.obs)
 
         if exact_cases:
             if not isinstance(values, list) or not all(isinstance(v, dict) for v in values):
@@ -935,7 +1077,7 @@ class FilterMixin:
                     valstr = v if isinstance(v, str) else ", ".join(map(str, v))
                     message += f"      - {k}: {valstr}\n"
 
-            message += f"    → Samples kept: {n_samples}, Samples dropped: {len(pdata.summary) - n_samples}"
+            message += f"    → Samples kept: {n_samples}, Samples dropped: {orig_sample_count - n_samples}"
             message += f"\n    → Proteins kept: {len(pdata.prot.var)}\n"
 
         print(message) if verbose else None
@@ -962,6 +1104,7 @@ class FilterMixin:
         """
         pdata = self.copy() if return_copy else self # type: ignore[attr-defined], EditingMixin
         action = "Returning a copy of" if return_copy else "Filtered and modified"
+        orig_sample_count = len(pdata.prot.obs)
 
         print(f"{format_log_prefix('warn',indent=1)} Advanced query mode enabled — interpreting string as a pandas-style expression.")
 
@@ -995,7 +1138,7 @@ class FilterMixin:
             f"{log_prefix} Filtering samples [query]:\n"
             f"    {action} sample data based on query string:\n"
             f"   🔸 Query: {query_string}\n"
-            f"    → Samples kept: {n_samples}, Samples dropped: {len(pdata.summary) - n_samples}\n"
+            f"    → Samples kept: {n_samples}, Samples dropped: {orig_sample_count - n_samples}\n"
             f"    → Proteins kept: {len(pdata.prot.var)}\n"
         )
 
@@ -1322,7 +1465,7 @@ class FilterMixin:
             for sample in found.columns:
                 adata.var[f"Found In: {sample}"] = found[sample]
 
-    def annotate_found(self, classes=None, on='protein', layer='X', threshold=0.0):
+    def annotate_found(self, classes=None, on='protein', layer='X', threshold=0.0, indent=1, verbose=True):
         """
         Add group-level 'Found In' annotations for proteins or peptides.
 
@@ -1334,6 +1477,8 @@ class FilterMixin:
             on (str): Whether to annotate 'protein' or 'peptide' level features.
             layer (str): Data layer to use for evaluation (default is "X").
             threshold (float): Minimum intensity value to be considered "found".
+            indent (int): Indentation level for printed messages.
+            verbose (bool): If True, prints a summary message after annotation.
 
         Returns:
             None
@@ -1402,13 +1547,14 @@ class FilterMixin:
             metrics_df = metrics_df.sort_index(axis=1)
             adata.uns[metrics_key] = metrics_df
 
-
-        self._history.append( # type: ignore[attr-defined], HistoryMixin
+        self._history.append(  # type: ignore[attr-defined], HistoryMixin
             f"{on}: Annotated features 'found in' class combinations {classes} using threshold {threshold}."
         )
-        print(
-            f"{format_log_prefix('user')} Annotated features: 'found in' class combinations {classes} using threshold {threshold}."
-        )
+        if verbose:
+            print(
+                f"{format_log_prefix('user', indent=indent)} Annotated 'found in' features by group: "
+                f"{classes} using threshold {threshold}."
+            )
 
     def annotate_significant(self, classes=None, on='protein', fdr_threshold=0.01, indent=1, verbose=True):
         """
@@ -1444,7 +1590,21 @@ class FilterMixin:
         # Check if significance layer exists
         sig_layer = 'X_qval'
         if sig_layer not in adata.layers:
-            raise ValueError(f"Layer '{sig_layer}' not found in {on}.layers. Unable to annotate significant features.")
+            # Try global q-values as fallback
+            if "Global_Q_value" in var.columns:
+                global_mask = var["Global_Q_value"] < fdr_threshold
+                var["Significant In: Global"] = global_mask
+                adata.uns[f"significance_metrics_{on}"] = pd.DataFrame(
+                    {"Global_count": global_mask.sum(), "Global_ratio": global_mask.mean()},
+                    index=["Global"]
+                )
+                if verbose:
+                    print(f"{format_log_prefix('user', indent=indent)} Annotated global significant features using FDR threshold {fdr_threshold}.")
+                return
+            else:
+                raise ValueError(
+                    f"No per-sample layer ('{sig_layer}') or 'Global_Q_value' column found for {on}-level significance."
+                )
 
         data = pd.DataFrame(
             adata.layers[sig_layer].toarray() if hasattr(adata.layers[sig_layer], 'toarray') else adata.layers[sig_layer],
@@ -1479,7 +1639,7 @@ class FilterMixin:
             metrics_df = metrics_df.sort_index(axis=1)
             adata.uns[metrics_key] = metrics_df
 
-        self._history.append(  # type: ignore[attr-defined]
+        self._history.append(  # type: ignore[attr-defined], HistoryMixin
             f"{on}: Annotated significance across classes {classes} using FDR threshold {fdr_threshold}."
         )
         if verbose:
@@ -1509,8 +1669,13 @@ class FilterMixin:
             if adata is None:
                 continue
 
+            if "Global_Q_value" in adata.var.columns:
+                adata.var["Significant In: Global"] = adata.var["Global_Q_value"] < fdr_threshold
+
             sig_layer = 'X_qval'
             if sig_layer not in adata.layers:
+                # Fallback to global q-values if available
+                print(f"{format_log_prefix('info', 2)} Using global q-values for '{level}' significance annotation.")
                 continue  # Skip if significance data not available
 
             data = pd.DataFrame(

@@ -1,6 +1,7 @@
 # scviz
 <img src="https://raw.githubusercontent.com/gnaprs/scviz/refs/heads/main/docs/assets/logo.png"
  align="right" width="256"/>
+ [![DOI](https://zenodo.org/badge/762480088.svg)](https://doi.org/10.5281/zenodo.17362532)
 
 **Build & Tests:**  
 [![Build Status](https://github.com/gnaprs/scviz/actions/workflows/python-package.yml/badge.svg)](https://github.com/gnaprs/scviz/actions/workflows/python-package.yml)
@@ -42,9 +43,9 @@ scviz requires Python 3.9 or later.
 For the most up-to-date version of scviz, clone the repository and
 install the package using pip:
 
-    git clone https://github.com/gnaprs/scviz.git
-    cd scviz
-    python3 -m pip install -e .
+    conda create -n scviz python=3.11 numpy pandas pip
+    conda activate scviz
+    pip install git+https://github.com/gnaprs/scviz.git@development
 
 Alternatively, scviz is available on Conda:
 

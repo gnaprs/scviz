@@ -161,7 +161,7 @@ def import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optiona
 def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Optional[str] = None, obs_columns: Optional[List[str]] = ['sample'], **kwargs):
     if not prot_file and not pep_file:
         raise ValueError(f"{format_log_prefix('error')} At least one of prot_file or pep_file must be provided to function. Try prot_file='proteome_discoverer_prot.txt' or pep_file='proteome_discoverer_pep.txt'.")
-    print("--------------------------\nStarting import [Proteome Discoverer]\n--------------------------")
+    print("--------------------------\nStarting import [Proteome Discoverer]\n")
 
     if prot_file:
         # -----------------------------
@@ -180,8 +180,12 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
         # prot_var_names: protein names
         prot_var_names = prot_all['Accession'].values
         # prot_var: protein metadata
-        prot_var = prot_all.loc[:, 'Protein FDR Confidence: Combined':'# Razor Peptides']
-        prot_var.rename(columns={'Gene Symbol': 'Genes'}, inplace=True)
+        prot_var = prot_all.loc[:, 'Protein FDR Confidence: Combined':'# Razor Peptides'].copy()
+        prot_var['Exp. q-value: Combined'] = prot_all['Exp. q-value: Combined']
+        prot_var.rename(columns={
+            'Gene Symbol': 'Genes',
+            'Exp. q-value: Combined': 'Global_Q_value'
+        }, inplace=True)
         # prot_obs_names: file names
         prot_obs_names = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract(r'Abundance: (F\d+):')[0].values
         # prot_obs: sample typing from the column name, drop column if all 'n/a'
@@ -314,7 +318,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
 def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, obs: Optional[pd.DataFrame] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Normalised', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes'], **kwargs):
     if not report_file:
         raise ValueError(f"{format_log_prefix('error')} Importing from DIA-NN: report.tsv or report.parquet must be provided to function. Try report_file='report.tsv' or report_file='report.parquet'")
-    print("--------------------------\nStarting import [DIA-NN]\n--------------------------")
+    print("--------------------------\nStarting import [DIA-NN]\n")
 
     print(f"Source file: {report_file}")
     # if csv, then use pd.read_csv, if parquet then use pd.read_parquet('example_pa.parquet', engine='pyarrow')
@@ -356,7 +360,7 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
             f"{format_log_prefix('warn')} The following columns are missing: {', '.join(missing_columns)}. "
         )
 
-    prot_var = report_all.loc[:, existing_prot_var_columns].drop_duplicates(subset='Master.Protein').drop(columns='Master.Protein')
+    prot_var = report_all.loc[:, existing_prot_var_columns].drop_duplicates(subset='Master.Protein').drop(columns='Master.Protein').rename(columns={'Global.PG.Q.Value': 'Global_Q_value'})
     # prot_obs: sample typing from the column name
     if obs is not None:
         prot_obs = obs
@@ -386,6 +390,9 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
     # pep_var: peptide sequence with modifications (default: Genes, Protein.Group, Precursor.Charge, Modified.Sequence, Stripped.Sequence, Precursor.Id, All Mapped Proteins, All Mapped Genes)
     existing_pep_var_columns = [col for col in pep_var_columns if col in report_all.columns]
     missing_columns = set(pep_var_columns) - set(existing_pep_var_columns)
+    # if missing columns are ['All Mapped Proteins'] and ['All Mapped Genes'], then it is likely that the DIA-NN version is <1.8.1, so we can skip the warning
+    if missing_columns == {'All Mapped Proteins', 'All Mapped Genes'}:
+        missing_columns = set()
 
     # Precursor.Quantity layer (if using directLFQ for nomalization)
     if 'Precursor.Quantity' in report_all.columns:
@@ -513,6 +520,8 @@ def _create_pAnnData_from_parts(
 
     # --- PROTEIN ---
     if prot_X is not None:
+        prot_var.index = prot_var.index.astype(str)
+
         pdata.prot.obs = pd.DataFrame(prot_obs) # type: ignore[attr-defined]
         pdata.prot.var = pd.DataFrame(prot_var) # type: ignore[attr-defined]
         pdata.prot.obs_names = list(prot_obs_names) # type: ignore[attr-defined]
@@ -529,6 +538,8 @@ def _create_pAnnData_from_parts(
 
     # --- PEPTIDE ---
     if pep_X is not None:
+        pep_var.index = pep_var.index.astype(str)
+
         pdata.pep.obs = pd.DataFrame(pep_obs) # type: ignore[attr-defined]
         pdata.pep.var = pd.DataFrame(pep_var) # type: ignore[attr-defined]
         pdata.pep.obs_names = list(pep_obs_names) # type: ignore[attr-defined]
@@ -563,8 +574,8 @@ def _create_pAnnData_from_parts(
     if history_msg:
         pdata._append_history(history_msg)
 
-    print("--------------------------")
     print(f"{format_log_prefix('result')} Import complete. Use `print(pdata)` to view the object.")
+    print("--------------------------")
 
     return pdata
 

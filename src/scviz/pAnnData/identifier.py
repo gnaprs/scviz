@@ -110,9 +110,9 @@ class IdentifierMixin:
         Raises:
             ValueError: If `on` is not `'protein'` or `'peptide'`.
         """
-        if on == 'protein':
+        if on in ('protein','prot'):
             return self._cached_identifier_maps_protein
-        elif on == 'peptide':
+        elif on in ('peptide','pep'):
             return self._cached_identifier_maps_peptide
         else:
             raise ValueError(f"Invalid value for 'on': {on}. Must be 'protein' or 'peptide'.")
@@ -297,18 +297,24 @@ class IdentifierMixin:
 
         accessions = var.index[missing_mask].tolist()
         if verbose:
-            print(f"{format_log_prefix('search')} {len(accessions)} proteins with missing gene names. Querying UniProt...")
+            print(f"{format_log_prefix('info_only')} {len(accessions)} proteins with missing gene names.")
 
         try:
             df = utils.get_uniprot_fields(
                 accessions,
-                search_fields=["accession", "gene_primary"]
+                search_fields=["accession", "gene_primary"],
+                standardize=True
             )
         except Exception as e:
             print(f"{format_log_prefix('error')} UniProt query failed: {e}")
             return
+        df = utils.standardize_uniprot_columns(df)
 
-        gene_map = dict(zip(df["Entry"], df["Gene Names (primary)"]))
+        if df.empty or "accession" not in df.columns or "gene_primary" not in df.columns:
+            print(f"{format_log_prefix('warn')} UniProt returned no usable gene mapping columns.")
+            return
+
+        gene_map = dict(zip(df["accession"], df["gene_primary"]))
         filled = self.prot.var.loc[missing_mask].index.map(lambda acc: gene_map.get(acc))
         final_genes = [
             gene if pd.notna(gene) else f"UNKNOWN_{acc}"

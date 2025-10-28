@@ -1,4 +1,5 @@
 import pytest
+import pandas as pd
 from scviz import pAnnData
 from pathlib import Path
 
@@ -38,6 +39,24 @@ def test_import_diann_new():
     assert pdata.prot is not None
     assert pdata.pep is not None
     assert pdata.rs is not None
+
+def test_import_no_obs_uniform():
+    test_dir = Path(__file__).parent
+    prot_file = str(test_dir / 'test_pd_prot.txt')
+
+    no_obs_return = pAnnData.import_data(source_type='pd', prot_file=prot_file)
+    
+    assert no_obs_return is None
+
+def test_import_no_obs_nonuniform():
+    test_dir = Path(__file__).parent
+    diann_file = str(test_dir / 'test_diann_nonuniform.tsv')
+
+    pdata = pAnnData.import_data(source_type='diann', report_file=diann_file)
+    summary = pdata.summary
+
+    assert pdata is not None
+    assert 'parsingType' in summary.columns
 
 @pytest.mark.parametrize("on,direction,overwrite", [
     ('protein', 'forward', False),
@@ -122,3 +141,87 @@ def test_update_identifier_maps_var_column_sync(pdata):
         acc in h.get("updated_var_column", {}).get("accessions", [])
         for h in history
     )
+
+# ----------------------------------------------------------------------
+# _build_identifier_maps coverage
+def test_build_identifier_maps_protein(pdata):
+    """Covers protein mapping branch in _build_identifier_maps."""
+    fwd, rev = pdata._build_identifier_maps(pdata.prot, gene_col="Genes")
+    # pick a known gene from the dummy file
+    gene = list(fwd.keys())[0]
+    acc = fwd[gene]
+    assert rev[acc] == gene
+
+def test_build_identifier_maps_peptide_warn(monkeypatch, pdata):
+    """Forces warning path in _build_identifier_maps (peptide branch exception)."""
+    def bad_mapping(_): raise RuntimeError("mock failure")
+    monkeypatch.setattr("scviz.utils.get_pep_prot_mapping", bad_mapping)
+
+    with pytest.warns(UserWarning, match="Could not build peptide-to-protein map"):
+        fwd, rev = pdata._build_identifier_maps(pdata.pep)
+        assert fwd == {} and rev == {}
+
+# ----------------------------------------------------------------------
+# update_missing_genes coverage
+def test_update_missing_genes_missing_column(pdata, capsys):
+    """Covers branch where gene_col not found."""
+    pdata.prot.var.rename(columns={"Genes": "WrongName"}, inplace=True)
+    pdata.update_missing_genes(gene_col="Genes", verbose=True)
+    out = capsys.readouterr().out
+    assert "Column 'Genes' not found" in out
+
+def test_update_missing_genes_no_missing(monkeypatch, pdata, capsys):
+    """Covers branch when no missing entries."""
+    monkeypatch.setattr("scviz.utils.get_uniprot_fields", lambda *a, **k: pd.DataFrame())
+    # fill all Genes → no missing mask
+    pdata.prot.var["Genes"].fillna("TESTGENE", inplace=True)
+    pdata.update_missing_genes(verbose=True)
+    out = capsys.readouterr().out
+    assert "No missing gene names" in out
+
+# ----------------------------------------------------------------------
+# search_annotations coverage
+def test_search_annotations_case_and_all_matches(pdata):
+    """Covers return_all_matches=False branch and case=True logic."""
+    df = pdata.search_annotations("some_term", on="protein", return_all_matches=False, case=True)
+    assert isinstance(df, pd.DataFrame)
+    assert "Matched" in df.columns
+
+def test_validate_passes_on_valid_pdata(pdata, capsys):
+    """Ensure validate() returns True and prints success for valid objects."""
+    result = pdata.validate(verbose=True)
+    captured = capsys.readouterr().out
+
+    assert result is True
+    assert "is valid" in captured
+
+def test_validate_detects_obs_var_shape_mismatch(pdata, capsys):
+    # Introduce duplicated var index to simulate structural inconsistency
+    pdata.prot.var.index = pdata.prot.var.index.to_series().replace(pdata.prot.var.index[0], pdata.prot.var.index[1])
+    
+    result = pdata.validate(verbose=True)
+    captured = capsys.readouterr().out
+
+    assert result is False
+    assert "prot.var has duplicated index" in captured
+
+def test_validate_detects_obs_name_mismatch(pdata, capsys):
+    pdata.pep.obs.index = [f"s{i}" for i in range(len(pdata.pep))]
+    result = pdata.validate(verbose=True)
+    captured = capsys.readouterr().out
+
+    assert result is False
+    assert "obs_names do not match" in captured
+
+def test_validate_detects_rs_shape_mismatch(pdata, capsys):
+    from scipy import sparse
+    import numpy as np
+    
+    bad_rs = sparse.csr_matrix(np.zeros((pdata.prot.shape[1] - 1, pdata.pep.shape[1])))
+    pdata._set_RS(bad_rs, validate=False)  # ⬅️ bypass shape check
+
+    result = pdata.validate(verbose=True)
+    captured = capsys.readouterr().out
+
+    assert result is False
+    assert "RS shape mismatch" in captured

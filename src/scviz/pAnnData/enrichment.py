@@ -69,32 +69,24 @@ class EnrichmentMixin:
             found_ids = {}
 
         print(f"{format_log_prefix('info_only',2)} Found {len(found_ids)} cached STRING IDs. {len(missing)} need lookup.")
-
         print(missing) if debug else None
 
         # -----------------------------
         # Step 1: UniProt stream (fast)         # Use UniProt xref_string field to fill cache quickly
         # -----------------------------
 
-        uni_results = []  # <- collect for merge into out_df later
-        uni_count = 0
+        uni_results = [] 
         species_map = {}
 
         if missing:
             try:
-                dfu = get_uniprot_fields(missing, search_fields=['xref_string', 'organism_id'], batch_size=100)
-
+                dfu = get_uniprot_fields(missing, search_fields=['xref_string', 'organism_id'], batch_size=100, standardize=True, verbose=debug)
                 print(dfu) if debug else None
 
                 if dfu is not None and not dfu.empty:
-                    # Column names can be either of these, depending on API:
-                    entry_col_candidates = ['Entry', 'accession']
-                    xref_col_candidates  = ['Cross-reference (STRING)', 'xref_string', 'STRING_id', 'STRING']
-                    org_col_candidates   = ['Organism (ID)', 'organism_id']
-
-                    entry_col = next((c for c in entry_col_candidates if c in dfu.columns), None)
-                    xref_col  = next((c for c in xref_col_candidates  if c in dfu.columns), None)
-                    org_col   = next((c for c in org_col_candidates   if c in dfu.columns), None)
+                    entry_col = "accession" if "accession" in dfu.columns else None
+                    xref_col  = "xref_string" if "xref_string" in dfu.columns else None
+                    org_col   = "organism_id" if "organism_id" in dfu.columns else None
 
                     if entry_col and xref_col:
                         # Parse first STRING ID if multiple are returned
@@ -128,10 +120,9 @@ class EnrichmentMixin:
                                     prot_var.at[acc, "ncbi_taxon_id"] = str(species_map.get(acc, np.nan)) if pd.notna(species_map.get(acc, np.nan)) else np.nan
                                     found_ids[acc] = sid
                                     uni_results.append({"input_identifier": acc, "string_identifier": sid})
-                                    uni_count += 1
-                print(f"{format_log_prefix('info_only',3)} Cached {uni_count} STRING IDs from UniProt API xref_string.")
+
+                print(f"{format_log_prefix('info_only',3)} Cached {len(uni_results)} STRING IDs from UniProt API xref_string.")
             except Exception as e:
-                # if debug:
                 print(f"[WARN] UniProt stream step failed: {e}")
 
         # Recompute missing after UniProt step

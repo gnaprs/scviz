@@ -80,7 +80,6 @@ import matplotlib.colors as mcolors
 import matplotlib.collections as clt
 import matplotlib.cm as cm
 import matplotlib.patheffects as PathEffects
-from matplotlib_venn import venn2_unweighted, venn2_circles, venn3_unweighted, venn3_circles
 import upsetplot
 from adjustText import adjust_text
 import umap.umap_ as umap
@@ -305,7 +304,6 @@ def plot_cv(ax, pdata, classes=None, layer='X', on='protein', order=None, return
     pdata.cv(classes = classes, on = on, layer = layer)
     adata = utils.get_adata(pdata, on)    
     classes_list = utils.get_classlist(adata, classes = classes, order = order)
-
     cv_data = []
     for class_value in classes_list:
         cv_col = f'CV: {class_value}'
@@ -313,6 +311,10 @@ def plot_cv(ax, pdata, classes=None, layer='X', on='protein', order=None, return
             cv_values = adata.var[cv_col].values
             cv_data.append(pd.DataFrame({'Class': class_value, 'CV': cv_values}))
 
+    if not cv_data:
+        warnings.warn("[plot_cv] No valid subsets found — skipping plot.")
+        return ax if ax is not None else None
+    
     cv_df = pd.concat(cv_data, ignore_index=True)
 
     # return cv_df for user to plot themselves
@@ -371,7 +373,7 @@ def plot_summary(ax, pdata, value='protein_count', classes=None, plot_mean=True,
         if classes is None:
             raise ValueError("Classes must be specified when plot_mean is True.")
         elif isinstance(classes, str):
-            sns.barplot(x=classes, y=value, hue=classes, data=summary_data, ci='sd', ax=ax, **kwargs)
+            sns.barplot(x=classes, y=value, hue=classes, data=summary_data, errorbar='sd', ax=ax, **kwargs)
             ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
         elif isinstance(classes, list) and len(classes) > 0:
             if len(classes) == 1:
@@ -497,7 +499,6 @@ def plot_abundance_housekeeping(ax, pdata, classes=None, loading_control='all', 
         palette = get_color('colors', n=len(loading_controls[loading_control]))
         plot_abundance(ax, pdata, namelist=loading_controls[loading_control], classes=classes, layer='X', palette=palette, **kwargs)
         ax.set_title(loading_control.title())
-
 
 def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
                    classes=None, return_df=False, order=None, palette=None,
@@ -666,9 +667,9 @@ def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
 
 def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
              cmap='default', s=20, alpha=.8, plot_pc=[1, 2],
-             pca_params=None, force=False,
+             pca_params=None, force=False, basis='X_pca',
              show_labels=False, label_column=None,
-             add_ellipses=False, ellipse_kwargs=None):
+             add_ellipses=False, ellipse_kwargs=None, return_fit=False):
     """
     Plot principal component analysis (PCA) of protein or peptide abundance.
 
@@ -702,6 +703,7 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
         plot_pc (list of int): Principal components to plot, e.g. `[1, 2]` or `[1, 2, 3]`.
         pca_params (dict, optional): Additional parameters for `sklearn.decomposition.PCA`.
         force (bool): If True, recompute PCA even if it is already cached.
+        basis (str): PCA basis to use. Defaults to `X_pca`, alternatives include `X_pca_harmony` after running pdata.harmony(batch="<key>").
         show_labels (bool or list): Whether to label points.
             
             - False: no labels.
@@ -715,6 +717,7 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
         add_ellipses (bool): If True, overlay confidence ellipses per class (2D only).
             Ellipses represent a 95% confidence region under a bivariate Gaussian assumption.
         ellipse_kwargs (dict, optional): Additional keyword arguments for the ellipse patch.
+        return_fit (bool): If True, also return the fitted PCA object.
 
     Returns:
         ax (matplotlib.axes.Axes): Axis containing the PCA scatter plot.
@@ -800,13 +803,21 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
     default_pca_params = {'n_comps': min(len(adata.obs_names), len(adata.var_names)) - 1, 'random_state': 42}
     pca_param = {**default_pca_params, **(pca_params or {})}
 
-    if 'X_pca' in adata.obsm and not force:
-        print(f'{utils.format_log_prefix("warn")} PCA already exists in {on} data — using existing. Run with `force=True` to recompute.')
+    if basis != "X_pca":
+        # User-specified alternative basis (e.g. Harmony, ICA)
+        if basis not in adata.obsm:
+            raise KeyError(f"{utils.format_log_prefix('error',2)} Custom PCA basis '{basis}' not found in adata.obsm.")
     else:
-        pdata.pca(on=on, layer=layer, **pca_param)
+        # Standard PCA case
+        if "X_pca" not in adata.obsm or force:
+            print(f"{utils.format_log_prefix('info')} Computing PCA (force={force})...")
+            pdata.pca(on=on, layer=layer, **pca_param)
+        else:
+            print(f"{utils.format_log_prefix('info')} Using existing PCA embedding.")
 
-    X_pca = adata.obsm['X_pca']
-    pca = adata.uns['pca']
+    # --- Select PCA basis for plotting ---
+    X_pca = adata.obsm[basis] if basis in adata.obsm else adata.obsm["X_pca"]
+    pca = adata.uns["pca"]
 
     # Get colors
     color_mapped, cmap_resolved, legend_elements = resolve_plot_colors(adata, classes, cmap, layer=layer)
@@ -883,7 +894,10 @@ def plot_pca(ax, pdata, classes=None, layer="X", on='protein',
                 loc='best',
                 frameon=False)
 
-    return ax, pca
+    if return_fit:
+        return ax, pca
+    else:
+        return ax
 
 def resolve_plot_colors(adata, classes, cmap, layer="X"):
     """
@@ -1023,7 +1037,7 @@ def plot_enrichment_svg(*args, **kwargs):
     from .enrichment import plot_enrichment_svg as actual_plot
     return actual_plot(*args, **kwargs)
 
-def plot_umap(ax, pdata, classes = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False):
+def plot_umap(ax, pdata, classes = None, layer = "X", on = 'protein', cmap='default', s=20, alpha=.8, umap_params={}, text_size = 10, force = False, return_fit=False):
     """
     Plot UMAP projection of protein or peptide abundance data.
 
@@ -1050,6 +1064,7 @@ def plot_umap(ax, pdata, classes = None, layer = "X", on = 'protein', cmap='defa
         umap_params (dict): Parameters to pass to UMAP (e.g., 'min_dist', 'metric').
         text_size (int): Font size for axis labels and legend (default: 10).
         force (bool): If True, re-compute UMAP even if results already exist.
+        return_fit (bool): If True, return the fitted UMAP object along with the axis.
 
     Returns:
         ax (matplotlib.axes.Axes): The axis with the UMAP plot.
@@ -1116,10 +1131,18 @@ def plot_umap(ax, pdata, classes = None, layer = "X", on = 'protein', cmap='defa
         ax.set_zlabel('UMAP 3', fontsize=text_size)
 
     if legend_elements:
-        legend_title = "/".join(c.capitalize() for c in classes) if isinstance(classes, list) else classes.capitalize()
+        if classes is None:
+            legend_title = None
+        elif isinstance(classes, list):
+            legend_title = "/".join(c.capitalize() for c in classes)
+        else:
+            legend_title = str(classes).capitalize()
         ax.legend(handles=legend_elements, title=legend_title, loc='upper right', bbox_to_anchor=(1.3, 1), fontsize=text_size)
 
-    return ax, umap
+    if return_fit:
+        return ax, umap
+    else:
+        return ax
 
 def plot_pca_scree(ax, pca):
     """
@@ -2075,12 +2098,30 @@ def plot_venn(ax, pdata, classes, set_colors = 'default', return_contents = Fals
         set_labels = list(upset_contents.keys())
         set_list = [set(value) for value in upset_contents.values()]
 
-    venn_functions = {
-        2: lambda: (venn2_unweighted(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, **kwargs),
-                    venn2_circles(subsets=(1, 1, 1), ax = ax,  linewidth=1)),
-        3: lambda: (venn3_unweighted(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, **kwargs),
-                    venn3_circles(subsets=(1, 1, 1, 1, 1, 1, 1), ax = ax, linewidth=1))
-    }
+    try:
+        # New API (matplotlib-venn ≥ 0.12)
+        from matplotlib_venn.layout.venn2 import DefaultLayoutAlgorithm as Venn2Layout
+        from matplotlib_venn.layout.venn3 import DefaultLayoutAlgorithm as Venn3Layout
+        from matplotlib_venn import venn2, venn2_circles, venn3, venn3_circles
+        USE_LAYOUT = True
+    except ImportError:
+        # Older API (no layout subpackage)
+        from matplotlib_venn import venn2_unweighted, venn3_unweighted, venn2_circles, venn3_circles
+        USE_LAYOUT = False
+
+    if USE_LAYOUT:
+        venn_functions = {
+            2: lambda: (venn2(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, layout_algorithm=Venn2Layout(fixed_subset_sizes=(1,1,1)), **kwargs),
+                        venn2_circles(subsets=(1, 1, 1), ax = ax,  linewidth=1)),
+            3: lambda: (venn3(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, layout_algorithm=Venn3Layout(fixed_subset_sizes=(1,1,1,1,1,1,1)), **kwargs),
+                        venn3_circles(subsets=(1, 1, 1, 1, 1, 1, 1), ax = ax, linewidth=1))
+        }
+    else:
+        venn_functions = { 
+            2: lambda: (venn2_unweighted(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, **kwargs), 
+                        venn2_circles(subsets=(1, 1, 1), ax = ax, linewidth=1)), 
+            3: lambda: (venn3_unweighted(set_list, ax = ax, set_labels=set_labels, set_colors=tuple(set_colors), alpha=0.5, **kwargs), 
+                        venn3_circles(subsets=(1, 1, 1, 1, 1, 1, 1), ax = ax, linewidth=1)) }        
 
     if num_keys in venn_functions:
         ax = venn_functions[num_keys]()
