@@ -1,0 +1,40 @@
+name: Generate Release Changelog
+
+on:
+  push:
+    tags:
+      - 'v*'  # triggers when a new tag like v0.4.0 is pushed
+
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history needed for git-cliff
+
+      - name: Generate changelog
+        id: git-cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: .git-cliff.toml
+          args: -a --verbose
+        env:
+          OUTPUT: CHANGELOG.md
+
+      - name: Print changelog (for debugging)
+        run: cat "${{ steps.git-cliff.outputs.changelog }}"
+
+      - name: Commit and push changelog
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --exit-code CHANGELOG.md > /dev/null; then
+            echo "✅ No changes to commit"
+          else
+            git add CHANGELOG.md
+            git commit -m "chore: update changelog for ${GITHUB_REF_NAME}"
+            git push
+          fi

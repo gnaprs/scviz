@@ -11,7 +11,6 @@
 [![Docs CI](https://github.com/gnaprs/scviz/actions/workflows/ci.yml/badge.svg)](https://github.com/gnaprs/scviz/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-v0.3.0-brightgreen.svg)](https://gnaprs.github.io/scviz)
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.13308642.svg)](https://doi.org/10.5281/zenodo.13308642)
 
 `scviz` is a Python library designed for scientific visualization of single cell proteomics data, with plans to support more data types in the future.
 

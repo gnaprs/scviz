@@ -1,0 +1,35 @@
+name: Generate Changelog Preview
+
+on:
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  preview-changelog:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need full history for changelog context
+
+      - name: Generate Unreleased Changelog
+        id: git-cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: .git-cliff.toml
+          args: --unreleased --verbose
+        env:
+          OUTPUT: CHANGELOG-preview.md
+
+      - name: Upload Changelog Preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog-preview
+          path: CHANGELOG-preview.md
+
+      - name: Post changelog summary as PR comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: CHANGELOG-preview.md
