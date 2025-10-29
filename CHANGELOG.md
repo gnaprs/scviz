@@ -44,6 +44,10 @@ All notable changes to this project are documented here.
 
 - Build and deploy runs after changelog is finished (97491c3…)
 
+- Update changelogs [skip ci] (9910211…)
+
+- Update deploy workflow to use committed changelog (9fa1705…)
+
 
 
 </details>
