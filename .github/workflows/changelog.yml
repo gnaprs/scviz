@@ -27,14 +27,24 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OUTPUT: CHANGELOG.md
 
-      - name: Commit and push changelog
+      - name: Create docs changelog (without unreleased)
+        run: |
+          mkdir -p docs
+          # strip unreleased section but keep everything else
+          awk '/## \[Unreleased\]/,/^## /{next} {print}' CHANGELOG.md > docs/CHANGELOG.md
+          echo "# Full Changelog\n" | cat - docs/CHANGELOG.md > temp && mv temp docs/CHANGELOG.md
+
+      - name: Commit and push changelogs
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --exit-code CHANGELOG.md > /dev/null; then
-            echo "✅ No changes to commit"
+          git switch -C main
+
+          if ! git diff --quiet CHANGELOG.md docs/CHANGELOG.md; then
+            echo "📜 Changes detected, committing..."
+            git add CHANGELOG.md docs/CHANGELOG.md
+            git commit -m "chore: update changelogs [skip ci]" || echo "No new commit needed."
+            git push origin main
           else
-            git add CHANGELOG.md
-            git commit -m "chore: update full changelog [skip ci]"
-            git push
+            echo "✅ No changes detected in changelogs"
           fi
