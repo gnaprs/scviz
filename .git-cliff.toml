@@ -1,9 +1,8 @@
 # .git-cliff.toml
-# Clean changelog configuration (no emojis)
+# Clean changelog configuration
 
 [changelog]
 header = """
-# Changelog
 All notable changes to this project are documented here.
 """
 

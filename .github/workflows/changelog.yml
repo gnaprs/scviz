@@ -1,4 +1,4 @@
-name: Generate Release Changelog
+name: Generate Full and Docs Changelog
 
 on:
   push:
@@ -27,12 +27,27 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OUTPUT: CHANGELOG.md
 
-      - name: Create docs changelog (without unreleased)
+      - name: Generate docs changelog (without unreleased)
         run: |
           mkdir -p docs
-          # strip unreleased section but keep everything else
-          awk '/## \[Unreleased\]/,/^## /{next} {print}' CHANGELOG.md > docs/CHANGELOG.md
-          echo "# Full Changelog\n" | cat - docs/CHANGELOG.md > temp && mv temp docs/CHANGELOG.md
+
+          # Universal filter: handles both Markdown and <details> formats
+          awk '
+            /## \[Unreleased\]/ || /<summary><b>Unreleased<\/b><\/summary>/ {in_unreleased=1}
+            /^## / || /<\/details>/ && in_unreleased {in_unreleased=0; next}
+            !in_unreleased {print}
+          ' CHANGELOG.md > docs/CHANGELOG.md
+
+          # Add header for MkDocs rendering
+          {
+            echo "---"
+            echo "title: Changelog"
+            echo "---"
+            echo
+            echo "# Full Changelog"
+            echo
+            cat docs/CHANGELOG.md
+          } > temp && mv temp docs/CHANGELOG.md
 
       - name: Commit and push changelogs
         run: |
