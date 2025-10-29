@@ -40,6 +40,10 @@ All notable changes to this project are documented here.
 
 - Final updates (6b94c5b…)
 
+- Update changelogs [skip ci] (2356fff…)
+
+- Build and deploy runs after changelog is finished (97491c3…)
+
 
 
 </details>
