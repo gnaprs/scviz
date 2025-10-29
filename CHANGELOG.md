@@ -1,4 +1,3 @@
-# Changelog
 All notable changes to this project are documented here.
 
 
@@ -36,6 +35,10 @@ All notable changes to this project are documented here.
 - Changelog sync to docs (84e991d…)
 
 - Update full changelog [skip ci] (b8b5634…)
+
+- Update changelogs [skip ci] (c3a8704…)
+
+- Final updates (6b94c5b…)
 
 
 

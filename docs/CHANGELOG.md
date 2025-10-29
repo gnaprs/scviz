@@ -1,46 +1,13 @@
-# Full Changelog\n
-# Changelog
+---
+title: Changelog
+---
+
+# Full Changelog
+
 All notable changes to this project are documented here.
 
 
 <details open>
-<summary><b>Unreleased</b></summary>
-
-
-#### CI
-
-- Upload changelog.md (2be787e…)
-
-
-#### Other
-
-- Fix github workflow bugs (1ef2b00…)
-
-- (auto) Paper PDF Draft (6aee1de…)
-
-- (auto) Paper PDF Draft (2894f44…)
-
-- Fix workflow yml (cc2544f…)
-
-- Update pyproject.toml (18af439…)
-
-- Update pyproject.toml and workflow bug (19f4c7a…)
-
-- Fix changelog yml tag fetch error (5b20d69…)
-
-- Fix changelog yml workflow (cb956b1…)
-
-- Fix changelog toml format (7c5dcc8…)
-
-- Fix attempt for workflow (506109b…)
-
-- Changelog sync to docs (84e991d…)
-
-- Update full changelog [skip ci] (b8b5634…)
-
-
-
-</details>
 
 
 <details open>
