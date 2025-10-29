@@ -7,7 +7,6 @@ src/scviz/__pycache__/
 tests/__pycache__/
 docs/inspiration
 docs/unfinished
-CHANGELOG.md
 .vscode/
 dev/*.csv
 dev/*.tsv

@@ -2,8 +2,7 @@ name: Generate Release Changelog
 
 on:
   push:
-    tags:
-      - 'v*'  # triggers when a new tag like v0.4.0 is pushed
+    branches: [ "main" ]
 
 jobs:
   changelog:
@@ -18,12 +17,12 @@ jobs:
       - name: Fetch all tags
         run: git fetch --tags --force
 
-      - name: Generate changelog
+      - name: Generate full changelog (including unreleased)
         id: git-cliff
         uses: orhun/git-cliff-action@v4
         with:
           config: .git-cliff.toml
-          args: --verbose --latest -o CHANGELOG.md
+          args: --verbose -o CHANGELOG.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OUTPUT: CHANGELOG.md
@@ -36,9 +35,6 @@ jobs:
             echo "✅ No changes to commit"
           else
             git add CHANGELOG.md
-            git commit -m "chore: update changelog for ${GITHUB_REF_NAME}"
+            git commit -m "chore: update full changelog [skip ci]"
             git push
           fi
-
-      - name: Copy changelog to docs
-        run: cp CHANGELOG.md docs/CHANGELOG.md

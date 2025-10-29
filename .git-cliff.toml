@@ -64,7 +64,7 @@ commit_parsers = [
   { message = "(?i)^(update|change|modify|adjust|tweak|improve|enhance|overhaul|rewrite|refactor|edit|editing)", group = "Changed" },
   { message = "(?i)^(test|pytest|unit)", group = "Tests" },
   { message = "(?i)^(doc|readme|mkdocs|comment)", group = "Documentation" },
-  { message = "(?i)^(ci|workflow|action|github)", group = "CI" },
+  { message = "(?i)^(ci|workflow|action|github|auto)", group = "CI" },
 
   # fallback
   { message = ".*", group = "Other" }
