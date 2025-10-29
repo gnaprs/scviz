@@ -1,9 +1,8 @@
-name: Generate Release Changelog
+name: Generate Full and Docs Changelog
 
 on:
   push:
-    tags:
-      - 'v*'  # triggers when a new tag like v0.4.0 is pushed
+    branches: [ "main" ]
 
 jobs:
   changelog:
@@ -15,26 +14,52 @@ jobs:
         with:
           fetch-depth: 0  # full history needed for git-cliff
 
-      - name: Generate changelog
+      - name: Fetch all tags
+        run: git fetch --tags --force
+
+      - name: Generate full changelog (including unreleased)
         id: git-cliff
         uses: orhun/git-cliff-action@v4
         with:
           config: .git-cliff.toml
-          args: -a --verbose
+          args: --verbose -o CHANGELOG.md
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OUTPUT: CHANGELOG.md
 
-      - name: Print changelog (for debugging)
-        run: cat "${{ steps.git-cliff.outputs.changelog }}"
+      - name: Generate docs changelog (without unreleased)
+        run: |
+          mkdir -p docs
 
-      - name: Commit and push changelog
+          # Universal filter: handles both Markdown and <details> formats
+          awk '
+            /## \[Unreleased\]/ || /<summary><b>Unreleased<\/b><\/summary>/ {in_unreleased=1}
+            /^## / || /<\/details>/ && in_unreleased {in_unreleased=0; next}
+            !in_unreleased {print}
+          ' CHANGELOG.md > docs/CHANGELOG.md
+
+          # Add header for MkDocs rendering
+          {
+            echo "---"
+            echo "title: Changelog"
+            echo "---"
+            echo
+            echo "# Full Changelog"
+            echo
+            cat docs/CHANGELOG.md
+          } > temp && mv temp docs/CHANGELOG.md
+
+      - name: Commit and push changelogs
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --exit-code CHANGELOG.md > /dev/null; then
-            echo "✅ No changes to commit"
+          git switch -C main
+
+          if ! git diff --quiet CHANGELOG.md docs/CHANGELOG.md; then
+            echo "📜 Changes detected, committing..."
+            git add CHANGELOG.md docs/CHANGELOG.md
+            git commit -m "chore: update changelogs [skip ci]" || echo "No new commit needed."
+            git push origin main
           else
-            git add CHANGELOG.md
-            git commit -m "chore: update changelog for ${GITHUB_REF_NAME}"
-            git push
+            echo "✅ No changes detected in changelogs"
           fi

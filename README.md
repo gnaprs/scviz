@@ -37,7 +37,7 @@ Helper functions for etc
 ## Getting started
 ### Installation
 
-scviz requires Python 3.9 or later.
+scviz requires Python 3.8 or later.
 
 For the most up-to-date version of scviz, clone the repository and
 install the package using pip:
