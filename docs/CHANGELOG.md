@@ -54,6 +54,10 @@ All notable changes to this project are documented here.
 
 - Update deploy workflow to use committed changelog (9fa1705…)
 
+- Update changelogs [skip ci] (b5d04c7…)
+
+- Add plot_abundnace wrapper from pdata (8e2a01c…)
+
 
 
 
