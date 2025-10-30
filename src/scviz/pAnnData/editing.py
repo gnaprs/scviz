@@ -260,7 +260,7 @@ class EditingMixin:
         Export a specified layer from the protein or peptide data to CSV with labeled rows and columns.
 
         Args:
-            layer_name (str): Name of the layer to export (e.g., "X_raw").
+            layer_name (str): Name of the layer to export (e.g., "X_raw"). If "X" is provided, exports `pdata.X`
             filename (str, optional): Output file name. Defaults to "<layer_name>.csv".
             on (str): One of 'protein' or 'peptide' to specify which data to use.
             obs_names (str or None): If a string, the column name in .obs to use for row labels.
@@ -272,7 +272,10 @@ class EditingMixin:
         """
         # Select the appropriate AnnData object
         adata = self.prot if on == 'protein' else self.pep
-        layer = adata.layers[layer_name]
+        if layer_name == "X":
+            layer=adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X
+        else:
+            layer = adata.layers[layer_name]
 
         # Convert to dense array if needed
         if not isinstance(layer, pd.DataFrame):
