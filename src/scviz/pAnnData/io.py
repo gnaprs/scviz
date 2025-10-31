@@ -181,7 +181,13 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
         prot_var_names = prot_all['Accession'].values
         # prot_var: protein metadata
         prot_var = prot_all.loc[:, 'Protein FDR Confidence: Combined':'# Razor Peptides'].copy()
-        prot_var['Exp. q-value: Combined'] = prot_all['Exp. q-value: Combined']
+        if 'Exp. q-value: Combined' in prot_all.columns:
+            prot_var['Exp. q-value: Combined'] = prot_all['Exp. q-value: Combined']
+        elif 'Exp. Protein Group q-value: Combined' in prot_all.columns:
+            prot_var['Exp. q-value: Combined'] = prot_all['Exp. Protein Group q-value: Combined']
+        else:
+            warnings.warn("⚠️ Neither 'Exp. q-value: Combined' nor 'Exp. Protein Group q-value: Combined' found in input file.")
+
         prot_var.rename(columns={
             'Gene Symbol': 'Genes',
             'Exp. q-value: Combined': 'Global_Q_value'
@@ -528,6 +534,8 @@ def _create_pAnnData_from_parts(
         pdata.prot.var_names = list(prot_var_names) # type: ignore[attr-defined]
         pdata.prot.obs.columns = obs_columns if obs_columns else list(range(pdata.prot.obs.shape[1])) # type: ignore[attr-defined]
         pdata.prot.layers['X_raw'] = prot_X # type: ignore[attr-defined]
+        pdata.prot.uns['X_raw_obs_names'] = list(prot_obs_names) # type: ignore[attr-defined]
+        pdata.prot.uns['X_raw_var_names'] = list(prot_var_names)
         if X_mbr_prot is not None:
             pdata.prot.layers['X_mbr'] = X_mbr_prot # type: ignore[attr-defined]
         if X_qval_prot is not None:
@@ -546,6 +554,8 @@ def _create_pAnnData_from_parts(
         pdata.pep.var_names = list(pep_var_names) # type: ignore[attr-defined]
         pdata.pep.obs.columns = obs_columns if obs_columns else list(range(pdata.pep.obs.shape[1])) # type: ignore[attr-defined]
         pdata.pep.layers['X_raw'] = pep_X # type: ignore[attr-defined]
+        pdata.pep.uns['X_raw_obs_names'] = list(pep_obs_names) # type: ignore[attr-defined]
+        pdata.pep.uns['X_raw_var_names'] = list(pep_var_names)
         if X_mbr_pep is not None:
             pdata.pep.layers['X_mbr'] = X_mbr_pep # type: ignore[attr-defined]
         if X_qval_pep is not None:
@@ -563,7 +573,8 @@ def _create_pAnnData_from_parts(
         pdata.pep.uns['metadata'] = metadata
 
     # --- Summary + Validation ---
-    pdata.update_summary(recompute=True)
+    pdata._cleanup_proteins_after_sample_filter(printout=True)
+    pdata.update_summary(recompute=True, verbose=False)
     pdata._annotate_found_samples(threshold=found_threshold)
     pdata._annotate_significant_samples(fdr_threshold=fdr_threshold)
 
