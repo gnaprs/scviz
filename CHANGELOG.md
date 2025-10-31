@@ -10,6 +10,11 @@ All notable changes to this project are documented here.
 - Upload changelog.md (2be787e…)
 
 
+#### Documentation
+
+- Add contributor covenant code of conduct (72fd27e…)
+
+
 #### Fixed
 
 - Handle export of .X (a3028bd…)
@@ -58,6 +63,8 @@ All notable changes to this project are documented here.
 - Add plot_abundnace wrapper from pdata (8e2a01c…)
 
 - Update changelogs [skip ci] (7e5d8b6…)
+
+- Update changelogs [skip ci] (a688e34…)
 
 
 
