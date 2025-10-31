@@ -1567,7 +1567,9 @@ def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold
         else:
             volcano_df = pdata.de(class_type=classes, values=values, method=method, pval=pval, log2fc=log2fc, fold_change_mode=fold_change_mode)
 
+    df = volcano_df.copy()
     volcano_df = volcano_df.dropna(subset=['p_value']).copy()
+    volcano_df = volcano_df[volcano_df["significance"] != "not comparable"]
 
     default_color = {'not significant': 'grey', 'upregulated': 'red', 'downregulated': 'blue'}
     if color:
@@ -1659,7 +1661,7 @@ def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold
                 ha='left', va='bottom', fontsize=fontsize, color=default_color.get('downregulated', 'blue'))
 
     if return_df:
-        return ax, volcano_df
+        return ax, df
     else:
         return ax
 
