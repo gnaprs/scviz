@@ -40,11 +40,7 @@ jobs:
 
           # Add header for MkDocs rendering
           {
-            echo "---"
-            echo "title: Changelog"
-            echo "---"
-            echo
-            echo "# Full Changelog"
+            echo "# Changelog"
             echo
             cat docs/CHANGELOG.md
           } > temp && mv temp docs/CHANGELOG.md
