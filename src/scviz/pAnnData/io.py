@@ -573,8 +573,8 @@ def _create_pAnnData_from_parts(
         pdata.pep.uns['metadata'] = metadata
 
     # --- Summary + Validation ---
-    pdata._cleanup_proteins_after_sample_filter(printout=True)
     pdata.update_summary(recompute=True, verbose=False)
+    pdata._cleanup_proteins_after_sample_filter(printout=True)
     pdata._annotate_found_samples(threshold=found_threshold)
     pdata._annotate_significant_samples(fdr_threshold=fdr_threshold)
 
