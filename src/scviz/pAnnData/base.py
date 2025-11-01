@@ -1,5 +1,7 @@
 import copy
 
+from scviz.utils import format_log_prefix
+
 class BaseMixin:
     """
     Core base methods for pAnnData.
@@ -61,3 +63,55 @@ class BaseMixin:
 
         return new_obj
 
+    def compare_current_to_raw(self, on="protein"):
+        """
+        Compare current pdata object to original raw data, showing how many samples and features were dropped.
+        Compares current obs/var names to the original raw data (stored in .uns).
+
+        Args:
+            on (str): Dataset to compare ('protein' or 'peptide').
+
+        Returns:
+            dict: Dictionary summarizing dropped samples and features.
+        """
+        print(f"{format_log_prefix('user', 1)} Comparing current pdata to X_raw [{on}]:")
+
+        adata = getattr(self, "prot" if on == "protein" else "pep", None)
+        if adata is None:
+            print(f"{format_log_prefix('warning', 2)} No {on} data found.")
+            return None
+
+        orig_obs = set(adata.uns.get("X_raw_obs_names", []))
+        orig_var = set(adata.uns.get("X_raw_var_names", []))
+        current_obs = set(adata.obs_names)
+        current_var = set(adata.var_names)
+
+        dropped_obs = sorted(list(orig_obs - current_obs))
+        dropped_var = sorted(list(orig_var - current_var))
+
+        print(f"   → Samples dropped: {len(dropped_obs)}")
+        print(f"   → Features dropped: {len(dropped_var)}")
+
+        return {"dropped_samples": dropped_obs, "dropped_features": dropped_var}
+
+    def get_X_raw_aligned(self, on="protein"):
+        """
+        Return X_raw subset aligned to current obs/var order.
+
+        Returns:
+            np.ndarray: Subset of X_raw matching current AnnData.
+        """
+        import numpy as np
+        print(f"{format_log_prefix('user_only', 1)} Returning X_raw subset aligned to current obs/var order [{on}]:")
+        adata = getattr(self, "prot" if on == "protein" else "pep", None)
+        if adata is None or "X_raw" not in adata.layers:
+            raise ValueError(f"No raw layer found for {on} data.")
+
+        X_raw = adata.layers["X_raw"]
+        orig_obs = adata.uns["X_raw_obs_names"]
+        orig_var = adata.uns["X_raw_var_names"]
+
+        obs_idx = [orig_obs.index(o) for o in adata.obs_names if o in orig_obs]
+        var_idx = [orig_var.index(v) for v in adata.var_names if v in orig_var]
+
+        return X_raw[np.ix_(obs_idx, var_idx)]

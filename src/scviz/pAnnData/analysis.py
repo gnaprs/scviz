@@ -152,8 +152,8 @@ class AnalysisMixin:
 
 
         # --- Sample filtering ---
-        pdata_case1 = self._filter_sample_values(values=group1_dict, exact_cases=True, return_copy=True, verbose=False) # type: ignore[attr-defined], FilteringMixin
-        pdata_case2 = self._filter_sample_values(values=group2_dict, exact_cases=True, return_copy=True, verbose=False) # type: ignore[attr-defined], FilteringMixin
+        pdata_case1 = self._filter_sample_values(values=group1_dict, exact_cases=True, return_copy=True, verbose=False, cleanup=False) # type: ignore[attr-defined], FilteringMixin
+        pdata_case2 = self._filter_sample_values(values=group2_dict, exact_cases=True, return_copy=True, verbose=False, cleanup=False) # type: ignore[attr-defined], FilteringMixin
 
         def _label(d):
             if isinstance(d, dict):

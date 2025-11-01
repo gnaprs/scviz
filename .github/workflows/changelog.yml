@@ -40,11 +40,7 @@ jobs:
       - name: Add MkDocs header
         run: |
           {
-            echo "---"
-            echo "title: Changelog"
-            echo "---"
-            echo
-            echo "# Full Changelog"
+            echo "# Changelog"
             echo
             cat docs/CHANGELOG.md
           } > docs/CHANGELOG.tmp && mv docs/CHANGELOG.tmp docs/CHANGELOG.md

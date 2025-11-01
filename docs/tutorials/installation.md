@@ -8,6 +8,15 @@ pip install scviz
 
 This will install all required dependencies, including `scanpy`, `anndata`, `pandas`, and plotting libraries.
 
+Import and create a `pAnnData` object:
+
+```python
+import scviz as scv
+
+pdata = scv.pAnnData.from_file("example_report.txt", source="diann")
+pdata
+```
+
 ## Development installation
 
 If you want the most up-to-date features, you can install from the GitHub repository:
