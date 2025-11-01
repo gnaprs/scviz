@@ -27,23 +27,23 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OUTPUT: CHANGELOG.md
 
-      - name: Generate docs changelog (without unreleased)
+      - name: Generate docs changelog
+        id: docs
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: .git-cliff-docs.toml
+          args: --verbose -o docs/CHANGELOG.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OUTPUT: docs/CHANGELOG.md
+
+      - name: Add MkDocs header
         run: |
-          mkdir -p docs
-
-          # Universal filter: handles both Markdown and <details> formats
-          awk '
-            /## \[Unreleased\]/ || /<summary><b>Unreleased<\/b><\/summary>/ {in_unreleased=1}
-            /^## / || /<\/details>/ && in_unreleased {in_unreleased=0; next}
-            !in_unreleased {print}
-          ' CHANGELOG.md > docs/CHANGELOG.md
-
-          # Add header for MkDocs rendering
           {
             echo "# Changelog"
             echo
             cat docs/CHANGELOG.md
-          } > temp && mv temp docs/CHANGELOG.md
+          } > docs/CHANGELOG.tmp && mv docs/CHANGELOG.tmp docs/CHANGELOG.md
 
       - name: Commit and push changelogs
         run: |

@@ -10,6 +10,16 @@ All notable changes to this project are documented here.
 - Upload changelog.md (2be787e…)
 
 
+#### Documentation
+
+- Add contributor covenant code of conduct (72fd27e…)
+
+
+#### Fixed
+
+- Handle export of .X (a3028bd…)
+
+
 #### Other
 
 - Fix github workflow bugs (1ef2b00…)
@@ -39,6 +49,22 @@ All notable changes to this project are documented here.
 - Update changelogs [skip ci] (c3a8704…)
 
 - Final updates (6b94c5b…)
+
+- Update changelogs [skip ci] (2356fff…)
+
+- Build and deploy runs after changelog is finished (97491c3…)
+
+- Update changelogs [skip ci] (9910211…)
+
+- Update deploy workflow to use committed changelog (9fa1705…)
+
+- Update changelogs [skip ci] (b5d04c7…)
+
+- Add plot_abundnace wrapper from pdata (8e2a01c…)
+
+- Update changelogs [skip ci] (7e5d8b6…)
+
+- Update changelogs [skip ci] (a688e34…)
 
 
 
