@@ -1,6 +1,7 @@
 import pytest
 import copy
 from datetime import datetime
+import numpy as np
 
 def test_has_data_true(pdata):
     """Ensure _has_data returns True when .prot or .pep is populated."""
@@ -134,3 +135,34 @@ def test_plot_rs_handles_missing_rs(pdata_nopep, capsys):
 
     assert "No RS matrix" in captured
     assert not plt.get_fignums(), "No figure should be created when RS is None"
+
+def test_compare_current_to_raw_detects_drops(pdata, capsys):
+    """Ensure compare_current_to_raw correctly detects dropped samples/features."""
+    adata = pdata.prot
+
+    # Simulate stored raw names (before filtering)
+    adata.uns["X_raw_obs_names"] = list(adata.obs_names) + ["ExtraSample"]
+    adata.uns["X_raw_var_names"] = list(adata.var_names) + ["ExtraProtein"]
+
+    result = pdata.compare_current_to_raw(on="protein")
+
+    # Capture printed output for confirmation
+    out = capsys.readouterr().out
+    assert "Samples dropped: 1" in out
+    assert "Features dropped: 1" in out
+
+    # Verify dictionary output
+    assert isinstance(result, dict)
+    assert result["dropped_samples"] == ["ExtraSample"]
+    assert result["dropped_features"] == ["ExtraProtein"]
+
+def test_compare_current_to_raw_no_data(pdata, capsys):
+    """Ensure compare_current_to_raw handles missing data gracefully."""
+    # Temporarily remove protein data
+    pdata.prot = None
+
+    result = pdata.compare_current_to_raw(on="protein")
+
+    out = capsys.readouterr().out
+    assert "No protein data found" in out
+    assert result is None
