@@ -55,7 +55,18 @@ commit_parsers = [
   { message = "(?i)merge (pull request|branch|development)", skip = true },
   { message = "(?i)update to v[0-9]", skip = true },
 
-  # main groups (no emojis)
+  # Conventional Commit types
+  { message = "^(feat)(\\(.+\\))?:", group = "Added" },
+  { message = "^(fix)(\\(.+\\))?:", group = "Fixed" },
+  { message = "^(refactor)(\\(.+\\))?:", group = "Changed" },
+  { message = "^(perf)(\\(.+\\))?:", group = "Performance" },
+  { message = "^(style)(\\(.+\\))?:", group = "Style" },
+  { message = "^(build)(\\(.+\\))?:", group = "Build System" },
+  { message = "^(ci)(\\(.+\\))?:", group = "CI" },
+  { message = "^(test)(\\(.+\\))?:", group = "Tests" },
+  { message = "^(chore)(\\(.+\\))?:", group = "Chores" },
+
+  # Legacy keyword groups (for older commits)
   { message = "(?i)^(add|added|implement|introduce|create|upload)", group = "Added" },
   { message = "(?i)^(fix|bug|bugfix|resolve|patch)", group = "Fixed" },
   { message = "(?i)^(update|change|modify|adjust|tweak|improve|enhance|overhaul|rewrite|refactor|edit|editing)", group = "Changed" },
