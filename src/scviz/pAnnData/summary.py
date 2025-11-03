@@ -40,13 +40,13 @@ class SummaryMixin:
             verbose (bool): If True, print action messages.
 
         ??? example "Typical Usage Scenarios"
-            | Scenario                        | Call                         | recompute | sync_back | _summary_is_stale | Effect                                                           |
-            |---------------------------------|------------------------------|-----------|-----------|-------------------|------------------------------------------------------------------|
-            | Filtering `.prot` or `.pep`     | `.update_summary(True)`      | ✅        | ❌        | ❌                | Recalculate protein/peptide stats and merge into `.summary`.     |
-            | Filtering samples               | `.update_summary(False)`     | ❌        | ❌        | ❌                | Refresh `.summary` view of `.obs` without recomputation.         |
-            | Manual `.summary[...] = ...`    | `.update_summary()`          | ✅/❌     | ✅        | ✅                | Push edited `.summary` values back to `.obs`.                    |
-            | After setting `.summary = ...`  | `.update_summary()`          | ✅        | ✅        | ✅                | Sync back and recompute stats from new `.summary`.               |
-            | No changes                      | `.update_summary()`          | ❌        | ❌        | ❌                | No-op other than passive re-merge.                               |
+            | Scenario                        | Call                                | recompute | sync_back | _summary_is_stale | Effect                                                           |
+            |---------------------------------|-------------------------------------|-----------|-----------|-------------------|------------------------------------------------------------------|
+            | Filtering `.prot` or `.pep`     | `.update_summary(recompute=True)`   | ✅        | ❌        | ❌                | Recalculate protein/peptide stats and merge into `.summary`.     |
+            | Filtering samples               | `.update_summary(recompute=False)`  | ❌        | ❌        | ❌                | Refresh `.summary` view of `.obs` without recomputation.         |
+            | Manual `.summary[...] = ...`    | `.update_summary()`                 | ✅/❌     | ✅        | ✅                | Push edited `.summary` values back to `.obs`.                    |
+            | After setting `.summary = ...`  | `.update_summary()`                 | ✅        | ✅        | ✅                | Sync back and recompute stats from new `.summary`.               |
+            | No changes                      | `.update_summary()`                 | ❌        | ❌        | ❌                | No-op other than passive re-merge.                               |
 
         Note:
             - For most typical use cases, we auto-detect which flags need to be applied.
