@@ -212,18 +212,54 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
         if pep_file.endswith('.txt') or pep_file.endswith('.tsv'):
             pep_all = pd.read_csv(pep_file, sep='\t')
         elif pep_file.endswith('.xlsx'):
-            print("💡 Tip: The read_excel function is slower compared to reading .tsv or .txt files. For improved performance, consider converting your data to .tsv or .txt format.")
+            print(f"{format_log_prefix('warn')} The read_excel function is slower compared to reading .tsv or .txt files. For improved performance, consider converting your data to .tsv or .txt format.")
             pep_all = pd.read_excel(pep_file)
         # pep_X: sparse data matrix
         pep_X = sparse.csr_matrix(pep_all.filter(regex='Abundance: F', axis=1).values).transpose()
         # pep_layers['mbr']: peptide MBR identification
         pep_layers_mbr = pep_all.filter(regex='Found in Sample', axis=1).values.transpose()
         # pep_var_names: peptide sequence with modifications
-        pep_var_names = (pep_all['Annotated Sequence'] + np.where(pep_all['Modifications'].isna(), '', ' MOD:' + pep_all['Modifications'])).values
+        if 'Modifications' in pep_all.columns: # old PD version
+            mod_col = 'Modifications'
+        elif 'Modifications in Master Proteins' in pep_all.columns: # new PD version
+            mod_col = 'Modifications in Master Proteins'
+        else:
+            mod_col = None # handle fallback if user didn't import?
+
+        if mod_col is not None:
+            pep_all[mod_col] = pep_all[mod_col].astype(str)
+            pep_var_names = (
+                pep_all['Annotated Sequence'] +
+                np.where(pep_all[mod_col].isin(['nan', 'None', 'NaN']), '', ' MOD:' + pep_all[mod_col])
+            ).values
+        else:
+            pep_var_names = pep_all['Annotated Sequence'].values
         # pep_obs_names: file names
         pep_obs_names = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract(r'Abundance: (F\d+):')[0].values
         # pep_var: peptide metadata
-        pep_var = pep_all.loc[:, 'Modifications':'Theo. MH+ [Da]']
+        pep_all.rename(columns={
+            'Qvality q-value': 'Global_Q_Value',
+            'q-Value': 'Global_Q_Value',
+            'q-Value (Best File Local)': 'Global_Q_Value',
+            'Qvality PEP': 'PEP',
+            'PEP (Best File Local)': 'PEP',
+        }, inplace=True)
+
+        used_patterns = ['^Abundance: F', '^Found in Sample', '^Abundances \\(Grouped', '^Abundances \\(Grouped\\) CV']
+        exclude_cols = pep_all.filter(regex='|'.join(used_patterns), axis=1).columns
+        pep_var = pep_all.drop(columns=exclude_cols, errors='ignore')
+
+        # ensure pep_var has only 1D columns
+        for col in pep_var.columns:
+            if isinstance(pep_var[col].iloc[0], (pd.Series, pd.DataFrame, np.ndarray, list, tuple)):
+                print(f"{format_log_prefix('warn')} Dropping nested column '{col}' from peptide metadata.")
+                pep_var = pep_var.drop(columns=[col])
+
+        pep_var = pep_var.copy()
+        for c in pep_var.columns:
+            if not np.issubdtype(pep_var[c].dtype, np.number):
+                pep_var[c] = pep_var[c].astype(str)
+
         # prot_obs: sample typing from the column name, drop column if all 'n/a'
         pep_obs = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract(r'Abundance: F\d+: (.+)$')[0].values
         pep_obs = pd.DataFrame(pep_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).applymap(str.strip).astype('category')
@@ -232,6 +268,12 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
             pep_obs = pep_obs.loc[:, ~(pep_obs == "n/a").all()]
 
         print(f"Peptides: {len(pep_var)}")
+        if mod_col == 'Modifications in Master Proteins':
+            print(f"\n{format_log_prefix('warn')} Column 'Modifications' not found. "
+                f"Using 'Modifications in Master Proteins' instead for modification annotation.")
+        elif mod_col is None:
+            print(f"\n{format_log_prefix('warn')} No modification column found. Peptide modifications were not annotated. Please check if 'Modifications' or 'Modifications in Master Protein' columns were exported from PD.")
+
     else:
         pep_X = pep_layers_mbr = pep_var_names = pep_var = pep_obs_names = pep_obs = None
 
@@ -258,10 +300,10 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
         prot_var_set = set(prot_var_names)
 
         if mlb_classes_set != prot_var_set:
-            print(f"{format_log_prefix('warn')} Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.")
-            print(f"Overlap: {len(mlb_classes_set & prot_var_set)}")
-            print(f"Unique to peptide data: {mlb_classes_set - prot_var_set}")
-            print(f"Unique to protein data: {prot_var_set - mlb_classes_set}")
+            print(
+                f"{format_log_prefix('warn')} Master proteins in the peptide matrix do not match proteins in the protein data, please check if files correspond to the same data.\n"
+                f"{format_log_prefix('info')} If using PD3.2, this is a known issue due to changed protein grouping rules."
+            )
 
     pdata = _create_pAnnData_from_parts(
         prot_X, pep_X, rs,
@@ -407,12 +449,6 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
     else:
         precursor_q_layer = None
 
-    if missing_columns:
-        print(
-            f"{format_log_prefix('warn')} The following columns are missing: {', '.join(missing_columns)}. "
-            "Consider running analysis in the newer version of DIA-NN (1.8.1). "
-            "Peptide-protein mapping may differ."
-        )
     
     pep_var = report_all.loc[:, existing_pep_var_columns].drop_duplicates(subset='Precursor.Id').drop(columns='Precursor.Id')
     # pep_obs: sample typing from the column name, same as prot_obs
@@ -426,6 +462,12 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
         pep_q_layer = None
 
     print(f"Peptides: {len(pep_var)}")
+    if missing_columns:
+        print(
+            f"{format_log_prefix('warn')} The following columns are missing: {', '.join(missing_columns)}. "
+            "Consider running analysis in the newer version of DIA-NN (1.8.1). "
+            "Peptide-protein mapping may differ."
+        )
 
     # -----------------------------
     # RS DATA
