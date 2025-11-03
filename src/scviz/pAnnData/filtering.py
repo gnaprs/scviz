@@ -84,7 +84,7 @@ class FilterMixin:
                 - Standard comparisons, e.g. `"Protein FDR Confidence: Combined == 'High'"`
                 - Substring queries using `includes`, e.g. `"Description includes 'p97'"`
             accessions (list of str, optional): List of accession numbers (var_names) to keep.
-            valid_genes (bool): If True, remove rows with missing gene names.
+            valid_genes (bool): If True, removes rows with missing gene names and resolves duplicate gene names by appending numeric suffixes.
             unique_profiles (bool): If True, remove rows with duplicate abundance profiles across samples.
             return_copy (bool): If True, returns a filtered copy. If False, modifies in place.
             debug (bool): If True, prints debugging information.
@@ -123,6 +123,11 @@ class FilterMixin:
                 pdata.filter_prot(valid_genes=True)
                 ```
 
+            !!! tip
+                Multiple filters can be combined in a single call. For example, to filger by condition and valid genes:
+                ```python
+                condition = "Score > 0.75"
+                pdata.filter_prot(condition=condition, valid_genes=True)
         """
         from scipy.sparse import issparse
 
@@ -172,8 +177,9 @@ class FilterMixin:
                 pdata.prot = pdata.prot[:, pdata.prot.var_names.isin(resolved)]
                 message_parts.append(f"accessions: {len(resolved)} matched / {len(accessions)} requested")
 
-        # 3. Remove invalid gene entries
+        # 3. Valid genes
         if valid_genes:
+            # A. Remove invalid gene entries
             var = pdata.prot.var
 
             mask_missing_gene = var["Genes"].isna() | (var["Genes"].astype(str).str.strip() == "")
@@ -186,6 +192,34 @@ class FilterMixin:
 
             pdata.prot = pdata.prot[:, keep_mask].copy()
             message_parts.append(f"valid_genes: removed {int(mask_missing_gene.sum())} proteins with invalid gene names")            
+
+            # B. Resolve duplicate gene names
+            var = pdata.prot.var  # refresh after filtering
+            var_genes = var["Genes"].astype(str).str.strip()
+            gene_counts = var_genes.value_counts()
+            duplicates = gene_counts[gene_counts > 1].index.tolist()
+
+            if len(duplicates) > 0:
+                if debug:
+                    print(f"Found {len(duplicates)} duplicate gene names.")
+
+                # Track how many times each duplicate has appeared
+                seen = {}
+                new_names = []
+                for gene in var["Genes"]:
+                    if gene in duplicates:
+                        seen[gene] = seen.get(gene, 0) + 1
+                        if seen[gene] > 1:
+                            gene = f"{gene}-{seen[gene]}"
+                    new_names.append(gene)
+
+                # Assign back to var
+                pdata.prot.var["Genes"] = new_names
+
+                message_parts.append(f"valid_genes: resolved {len(duplicates)} duplicate gene names by appending numeric suffixes")
+                if debug:
+                    example_dupes = [d for d in duplicates[:5]]
+                    print(f"Examples of duplicate genes resolved: {example_dupes}")
 
         # 4. Remove duplicate profiles
         if unique_profiles:
@@ -223,27 +257,27 @@ class FilterMixin:
                 f"({n_total} total)"
             )
 
-        # PEPTIDES: also filter out peptides that belonged only to the filtered proteins
-        if pdata.pep is not None and pdata.rs is not None: # type: ignore[attr-defined]
-            proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names = pdata._filter_sync_peptides_to_proteins(
-                original=self, 
-                updated_prot=pdata.prot, 
-                debug=debug)
-
-            # Apply filtered RS and update .prot and .pep using the helper
-            pdata._apply_rs_filter(
-                keep_proteins=proteins_to_keep,
-                keep_peptides=peptides_to_keep,
-                orig_prot_names=orig_prot_names,
-                orig_pep_names=orig_pep_names,
-                debug=debug
-            )
-
-            message_parts.append(f"peptides filtered based on remaining protein linkage ({len(peptides_to_keep)} peptides kept)")
-
         if not message_parts:
+            # no filters were applied
             message = f"{format_log_prefix('user')} Filtering proteins [failed]: {action} protein data.\n    → No filters applied."
         else:
+            # at least 1 filter applied
+            # PEPTIDES: also filter out peptides that belonged only to the filtered proteins
+            if pdata.pep is not None and pdata.rs is not None: # type: ignore[attr-defined]
+                proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names = pdata._filter_sync_peptides_to_proteins(
+                    original=self, 
+                    updated_prot=pdata.prot, 
+                    debug=debug)
+
+                # Apply filtered RS and update .prot and .pep using the helper
+                pdata._apply_rs_filter(
+                    keep_proteins=proteins_to_keep,
+                    keep_peptides=peptides_to_keep,
+                    orig_prot_names=orig_prot_names,
+                    orig_pep_names=orig_pep_names,
+                    debug=debug
+                )
+
             # detect which filters were applied
             active_filters = []
             if condition is not None:
@@ -901,7 +935,7 @@ class FilterMixin:
                 cleanup=cleanup
             )
 
-        if condition is not None or file_list is not None and not query_mode:
+        if (condition is not None or file_list is not None) and not query_mode:
             return self._filter_sample_condition(
                 condition=condition,
                 file_list=file_list,
