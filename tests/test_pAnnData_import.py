@@ -32,7 +32,6 @@ def test_import_pd_noQ():
 def test_import_pd32():
     test_dir = Path(__file__).parent
     prot_file = str(test_dir / 'test_pd32_Proteins.txt')
-    pep_file = str(test_dir / 'test_pd32_PeptideSequenceGroups.txt')
 
     obs_columns = ['Sample','cellline','ko','condition','duration']
     pdata = pAnnData.import_data(source_type='pd', prot_file=prot_file, obs_columns=obs_columns)
@@ -40,6 +39,19 @@ def test_import_pd32():
     assert pdata.prot is not None
     assert pdata.pep is None
     assert pdata.rs is None
+
+@pytest.mark.slow
+def test_import_pd32_with_pep():
+    test_dir = Path(__file__).parent
+    prot_file = str(test_dir / 'test_pd32_Proteins.txt')
+    pep_file = str(test_dir / 'test_pd32_PeptideSequenceGroups.txt')
+
+    obs_columns = ['Sample','cellline','ko','condition','duration']
+    pdata = pAnnData.import_data(source_type='pd', prot_file=prot_file, pep_file=pep_file, obs_columns=obs_columns)
+    assert pdata is not None
+    assert pdata.prot is not None
+    assert pdata.pep is not None
+    assert pdata.rs is not None
 
 def test_import_diann_old():
     # pre diann v1.8.1
