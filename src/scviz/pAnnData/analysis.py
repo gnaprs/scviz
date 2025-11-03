@@ -1251,7 +1251,7 @@ class AnalysisMixin:
 
             with np.errstate(divide='ignore', invalid='ignore'):
                 scale = np.nanmax(row_vals) / row_vals
-            scale = np.where(np.isnan(scale), 1.0, scale)
+            scale = np.where(np.isnan(scale), 1.0, scale) # metaboanalyst: scale = 1.0 / row_vals
             data_norm = data * scale[:, None]
 
         elif method == 'reference_feature':
