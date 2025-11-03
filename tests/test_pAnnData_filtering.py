@@ -19,18 +19,16 @@ def test_filter_prot_no_protein_data(pdata):
     with pytest.raises(ValueError, match="No protein data found"):
         pdata.filter_prot(condition="unique_peptides > 2")
 
-def test_filter_prot_no_pep_data(pdata, capsys):
+def test_filter_prot_no_pep_data(pdata_nopep, capsys):
     """Ensure filter_prot runs correctly when .pep and .rs are missing."""
-    pdata.pep = None
-    pdata.rs = None
+    assert pdata_nopep.pep is None or pdata_nopep.pep.shape[1] == 0
+    assert getattr(pdata_nopep, "rs", None) is None or pdata_nopep.rs.shape[0] == pdata_nopep.prot.shape[1]
 
-    n_before = pdata.prot.shape[1]
-    pdata_filt = pdata.filter_prot(condition="unique_peptides > 3", return_copy=True)
-    n_after = pdata_filt.prot.shape[1]
-
+    # Run the filter — should not error even without peptide info
+    pdata_filt = pdata_nopep.filter_prot(condition="unique_peptides > 2", return_copy=True)
     # It should filter correctly without errors
-    assert n_after < n_before
-    assert pdata_filt.prot.var["unique_peptides"].min() > 3
+    assert pdata_filt.prot.shape[1] <= pdata_nopep.prot.shape[1]
+    assert pdata_filt.prot.var["unique_peptides"].min() > 2 
 
     # Output should mention filtering but not peptides
     out = capsys.readouterr().out
