@@ -15,6 +15,32 @@ def test_import_pd():
     assert pdata.pep is not None
     assert pdata.rs is not None
 
+def test_import_pd_noQ():
+    test_dir = Path(__file__).parent
+    prot_file = str(test_dir / 'test_pd_prot-noQ.txt')
+
+    obs_columns = ['sample', 'cellline', 'treatment']    
+    with pytest.warns(UserWarning, match="Neither 'Exp. q-value: Combined' nor 'Exp. Protein Group q-value: Combined'"):
+        pdata = pAnnData.import_data(source_type='pd', prot_file=prot_file, obs_columns=obs_columns)
+
+    # Object should still be valid
+    assert pdata is not None
+    assert pdata.prot is not None
+    assert pdata.pep is None
+    assert pdata.rs is None
+
+def test_import_pd32():
+    test_dir = Path(__file__).parent
+    prot_file = str(test_dir / 'test_pd32_Proteins.txt')
+    pep_file = str(test_dir / 'test_pd32_PeptideSequenceGroups.txt')
+
+    obs_columns = ['Sample','cellline','ko','condition','duration']
+    pdata = pAnnData.import_data(source_type='pd', prot_file=prot_file, obs_columns=obs_columns)
+    assert pdata is not None
+    assert pdata.prot is not None
+    assert pdata.pep is None
+    assert pdata.rs is None
+
 def test_import_diann_old():
     # pre diann v1.8.1
     test_dir = Path(__file__).parent
