@@ -180,7 +180,17 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
         # prot_var_names: protein names
         prot_var_names = prot_all['Accession'].values
         # prot_var: protein metadata
-        prot_var = prot_all.loc[:, 'Protein FDR Confidence: Combined':'# Razor Peptides'].copy()
+        used_patterns = [
+            r'^Abundance: F',           # sample abundance columns (if any)
+            r'^Found In',               # found-in sample flags
+            r'^Significant In',         # significance flags
+            r'^Ratio:',                 # ratio columns (if PD quant ratios exist)
+            r'^Abundances \(Grouped\)', # grouped abundance or CV fields
+        ]
+
+        exclude_cols = prot_all.filter(regex='|'.join(used_patterns), axis=1).columns
+        prot_var = prot_all.drop(columns=exclude_cols, errors='ignore').copy()        
+
         if 'Exp. q-value: Combined' in prot_all.columns:
             prot_var['Exp. q-value: Combined'] = prot_all['Exp. q-value: Combined']
         elif 'Exp. Protein Group q-value: Combined' in prot_all.columns:
@@ -190,7 +200,8 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
 
         prot_var.rename(columns={
             'Gene Symbol': 'Genes',
-            'Exp. q-value: Combined': 'Global_Q_value'
+            'Exp. q-value: Combined': 'Global_Q_value',
+            '# Unique Peptides': 'unique_peptides'
         }, inplace=True)
         # prot_obs_names: file names
         prot_obs_names = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract(r'Abundance: (F\d+):')[0].values
