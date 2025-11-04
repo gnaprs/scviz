@@ -10,7 +10,7 @@ import numpy as np
 from scipy import sparse
 from sklearn.preprocessing import MultiLabelBinarizer
 
-from scviz.utils import format_log_prefix
+from scpviz.utils import format_log_prefix
 
 """
 Data import utilities for building `pAnnData` objects from supported proteomics tools.
@@ -707,14 +707,13 @@ def suggest_obs_columns(source=None, source_type=None, filenames=None, delimiter
         if match:
             _, meta = match.groups()
             raw_tokens = [t.strip() for t in meta.split(',') if t.strip().lower() != 'n/a']
-            fname = meta
+            fname = ', '.join(raw_tokens)  # for clean display later
             tokens = raw_tokens
             delimiter = ','
         else:
             raise ValueError(f"Could not parse metadata from PD filename: {fname}")
 
     # --- Classify tokens ---
-    tokens = fname.split(delimiter)
     suggestion = {}
     obs_columns = []
     token_label_map = []

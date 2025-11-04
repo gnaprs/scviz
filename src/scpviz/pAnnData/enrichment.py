@@ -7,7 +7,7 @@ from IPython.display import SVG, display
 import tempfile
 import os
 
-from scviz.utils import format_log_prefix, get_uniprot_fields
+from scpviz.utils import format_log_prefix, get_uniprot_fields
 
 class EnrichmentMixin:
     """
@@ -150,7 +150,7 @@ class EnrichmentMixin:
                     "identifiers": "\r".join(batch),
                     "limit": 1,
                     "echo_query": 1,
-                    "caller_identity": "scviz"
+                    "caller_identity": "scpviz"
                 }
 
                 try:
@@ -313,7 +313,7 @@ class EnrichmentMixin:
             payload = {
                 "identifiers": "%0d".join(query_ids),
                 "species": species_id,
-                "caller_identity": "scviz"
+                "caller_identity": "scpviz"
             }
             if background_ids is not None:
                 print(f"{format_log_prefix('info_only')} Using background of {len(background_ids)} STRING IDs.")
@@ -510,7 +510,7 @@ class EnrichmentMixin:
             payload = {
                 "identifiers": "%0d".join(string_ids),
                 "species": species,
-                "caller_identity": "scviz"
+                "caller_identity": "scpviz"
             }
 
             response = requests.post(url, data=payload)
@@ -762,7 +762,7 @@ class EnrichmentMixin:
         base_url = "https://string-db.org/cgi/network"
         params = [
             f"identifiers={'%0d'.join(string_ids)}",
-            f"caller_identity=scviz"
+            f"caller_identity=scpviz"
         ]
         if species:
             params.append(f"species={species}")

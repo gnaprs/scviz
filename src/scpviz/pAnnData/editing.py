@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 import warnings
 from scipy import sparse
-from scviz import utils
-from scviz.utils import format_log_prefix
+from scpviz import utils
+from scpviz.utils import format_log_prefix
 
 class EditingMixin:
     """

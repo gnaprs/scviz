@@ -3,14 +3,14 @@
 
 # ignore all files in these directories
 dist/
-src/scviz/__pycache__/
+src/scpviz/__pycache__/
 tests/__pycache__/
 docs/inspiration
 docs/unfinished
 .vscode/
 dev/*.csv
 dev/*.tsv
-dev/scviz_planning.docx
+dev/scpviz_planning.docx
 dev/peptide_params
 dev/*.png
 dev/*.xlsx

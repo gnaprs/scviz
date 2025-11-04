@@ -1,5 +1,5 @@
 from itertools import accumulate
-from scviz import pAnnData
+from scpviz import pAnnData
 import pandas as pd
 import numpy as np
 import pytest

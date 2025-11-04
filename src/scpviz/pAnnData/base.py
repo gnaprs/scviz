@@ -1,6 +1,6 @@
 import copy
 
-from scviz.utils import format_log_prefix
+from scpviz.utils import format_log_prefix
 
 class BaseMixin:
     """

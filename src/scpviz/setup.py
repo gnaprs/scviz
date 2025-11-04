@@ -3,7 +3,7 @@
 
 # From HRTAtlas (https://housekeeping.unicamp.br/?homePageGlobal), Hounkpe et al. 2020 https://doi.org/10.1093/nar/gkaa609
 # Housekeeping genes for human and mouse in __assets__/MostStable_Human.csv and __assets__/MostStable_Mouse.csv
-# These are the most stable genes in the human and mouse genome, respectively, and are used for normalization in scViz
+# These are the most stable genes in the human and mouse genome, respectively, and are used for normalization in scpviz
 
 import os
 import pandas as pd
@@ -26,13 +26,13 @@ def get_datetime():
     now = datetime.datetime.now()
     return now.strftime("%Y-%m-%d %H:%M:%S")
 
-# print versions of all dependencies of scviz
+# print versions of all dependencies of scpviz
 def print_versions():
     dependencies = ["numpy","pandas","matplotlib","seaborn",
                     "upsetplot","sklearn","scipy","umap",
                     "adjustText","anndata","requests","matplotlib_venn","pyarrow"]
 
-    print("scViz version: 0.1.0")
+    print("scpviz version: 0.1.0")
     print("Date and time: ", get_datetime())
     print("Dependencies:")
     for package in dependencies:

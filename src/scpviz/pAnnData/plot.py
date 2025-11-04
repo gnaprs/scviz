@@ -1,5 +1,5 @@
 
-from scviz import plotting
+from scpviz import plotting
 
 class PlotMixin:
     def plot_counts(self, classes=None, y='protein_count', **kwargs):
@@ -62,7 +62,7 @@ class PlotMixin:
         palette=None, log=True, facet=None, height=4,
         aspect=0.5, plot_points=True, x_label="gene", kind="auto", **kwargs,):
         """
-        Wrapper for `scviz.plotting.plot_abundance`.
+        Wrapper for `scpviz.plotting.plot_abundance`.
 
         Plot abundance of proteins or peptides across samples.
 

@@ -1,7 +1,7 @@
-from scviz.utils import format_log_prefix
+from scpviz.utils import format_log_prefix
 import warnings
 import pandas as pd
-from scviz import utils
+from scpviz import utils
 
 class IdentifierMixin:
     """

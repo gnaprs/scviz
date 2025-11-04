@@ -4,7 +4,7 @@ protein and peptide abundance data, quality control metrics, and results of
 statistical analyses. Functions are organized into categories based on their
 purpose, with paired "plot" and "mark" functions where applicable.
 
-Functions are written to work seamlessly with the `pAnnData` object structure and metadata conventions in scviz.
+Functions are written to work seamlessly with the `pAnnData` object structure and metadata conventions in scpviz.
 
 ## Distribution and Abundance Plots
 
@@ -86,7 +86,7 @@ import umap.umap_ as umap
 import scanpy as sc
 import warnings
 
-from scviz import utils
+from scpviz import utils
 
 sns.set_theme(context='paper', style='ticks')
 
@@ -466,7 +466,7 @@ def plot_abundance_housekeeping(ax, pdata, classes=None, loading_control='all', 
     !!! example
         Plot housekeeping protein abundance for whole cell controls:
             ```python
-            from scviz import plotting as scplt
+            from scpviz import plotting as scplt
             fig, ax = plt.subplots(figsize=(6,4))
             scplt.plot_abundance_housekeeping(ax, pdata, loading_control='whole cell', classes='condition')
             ```
@@ -547,7 +547,7 @@ def plot_abundance(ax, pdata, namelist=None, layer='X', on='protein',
     !!! example
         Plot abundance of two selected proteins:
             ```python
-            from scviz import plotting as scplt
+            from scpviz import plotting as scplt
             scplt.plot_abundance(ax, pdata, namelist=['Slc12a2','Septin6'])
             ```
 
@@ -1025,14 +1025,14 @@ def plot_enrichment_svg(*args, **kwargs):
     for convenience and discoverability.
 
     Args:
-        *args: Positional arguments passed to `scviz.enrichment.plot_enrichment_svg`.
-        **kwargs: Keyword arguments passed to `scviz.enrichment.plot_enrichment_svg`.
+        *args: Positional arguments passed to `scpviz.enrichment.plot_enrichment_svg`.
+        **kwargs: Keyword arguments passed to `scpviz.enrichment.plot_enrichment_svg`.
 
     Returns:
         svg (SVG): SVG figure object.
 
     See Also:
-        scviz.enrichment.plot_enrichment_svg
+        scpviz.enrichment.plot_enrichment_svg
     """
     from .enrichment import plot_enrichment_svg as actual_plot
     return actual_plot(*args, **kwargs)
@@ -1047,7 +1047,7 @@ def plot_umap(ax, pdata, classes = None, layer = "X", on = 'protein', cmap='defa
 
     Args:
         ax (matplotlib.axes.Axes): The axis to plot on (must be 3D if n_components=3).
-        pdata (scviz.pAnnData): The pAnnData object containing .prot, .pep, and .summary.
+        pdata (scpviz.pAnnData): The pAnnData object containing .prot, .pep, and .summary.
         classes (str or list of str or None): 
             - None: all samples plotted in grey
             - str: column in `.obs` or a gene/protein to color by
@@ -1165,7 +1165,7 @@ def plot_pca_scree(ax, pca):
         Basic usage with fitted PCA, first run PCA:
             ```python
             import matplotlib.pyplot as plt
-            from scviz import plotting as scplt
+            from scpviz import plotting as scplt
             fig, ax = plt.subplots()
             ax, pca = scplt.plot_pca(ax, pdata, classes=["cellline", "treatment"], plot_pc=[1, 2])  # run PCA and plot
             ax = scplt.plot_pca_scree(ax, pca)  # scree plot
@@ -1428,7 +1428,7 @@ def plot_clustermap(ax, pdata, on='prot', classes=None, layer="X", x_label='acce
 
 #     Parameters:
 #     ax (matplotlib.axes.Axes): The axes on which to plot the heatmap.
-#     pdata (scviz.pdata): The input pdata object.
+#     pdata (scpviz.pdata): The input pdata object.
 #     classes (str or list of str, optional): Class column(s) to group samples. If None, all samples are included.
 #     cmap (matplotlib.colors.Colormap): The colormap to use for the heatmap.
 #     norm_values (list): The low, mid, and high values used to set colorbar scale. Can be assymetric.

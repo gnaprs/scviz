@@ -1,8 +1,8 @@
 """
-Utility functions for scviz.
+Utility functions for scpviz.
 
 This module provides a collection of helper and processing functions used
-throughout the scviz package. They fall into four main categories:
+throughout the scpviz package. They fall into four main categories:
 
 ## Text Utility Functions
 
@@ -46,7 +46,7 @@ Functions:
 Example:
     To use this module, import it and call functions from your code as follows:
         ```python
-        from scviz import utils as scutils
+        from scpviz import utils as scutils
         ```
     
 Todo:
@@ -72,7 +72,7 @@ from sklearn.impute import SimpleImputer, KNNImputer
 
 import upsetplot
 import anndata as ad
-from scviz import pAnnData
+from scpviz import pAnnData
 
 # Thoughts: functions that act on panndata and return only panndata should be panndata methods, utility functions should be in utils
 
@@ -83,7 +83,7 @@ def format_log_prefix(level: str, indent=None) -> str:
     """
     Return a standardized log prefix with emoji and label.
 
-    This helper formats log message prefixes consistently across scviz,
+    This helper formats log message prefixes consistently across scpviz,
     with optional indentation for nested output. Used internally for
     user-facing messages, warnings, errors, and updates.
 
@@ -123,7 +123,7 @@ def format_log_prefix(level: str, indent=None) -> str:
     Example:
         Format an info prefix with default spacing:
         ```python
-        from scviz.utils import format_log_prefix
+        from scpviz.utils import format_log_prefix
         format_log_prefix("info")
         ```
 
@@ -913,7 +913,7 @@ def resolve_class_filter(adata, classes, class_value, debug=False, *, filter_fun
         - pAnnData.filter_sample_values: Recommended user-facing filter method.
     """
 
-    from scviz import utils  # safe to do here in case of circular import
+    from scpviz import utils  # safe to do here in case of circular import
 
     if isinstance(classes, str):
         values = class_value
@@ -1371,7 +1371,7 @@ def get_pca_importance(model: Union[dict, 'sklearn.decomposition.PCA'], initial_
     Example:
         Retrieve the top 5 features contributing to each PC:
             ```python
-            from scviz import utils as scutils
+            from scpviz import utils as scutils
             pdata.pca(n_components=5)
             df = scutils.get_pca_importance(
                 pdata.prot.uns['pca'],

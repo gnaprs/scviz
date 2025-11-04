@@ -3,7 +3,7 @@ import pandas as pd
 from unittest.mock import patch, Mock
 from io import BytesIO
 
-from scviz.enrichment import enrichment_functional, _resolve_de_key, enrichment_ppi, _pretty_vs_key
+from scpviz.enrichment import enrichment_functional, _resolve_de_key, enrichment_ppi, _pretty_vs_key
 
 # Dummy gene list for user input test
 genelist = ['P55072', 'NPLOC4', 'UFD1', 'STX5A', 'NSFL1C', 'UBXN2A', 'UBXN4', 'UBE4B', 'YOD1']
@@ -143,7 +143,7 @@ def mock_string_responses(mock_post, mapping_text, enrichment_json, total_pairs=
 
     mock_post.side_effect = smart_string_side_effect
 
-@patch("scviz.enrichment.requests.post")
+@patch("scpviz.enrichment.requests.post")
 def test_user_supplied_functional(mock_post, pdata):
     # Set up mocks using the shared helper
     mock_string_responses(mock_post, mock_mapping_response, mock_enrichment_response, total_pairs=1)
@@ -162,7 +162,7 @@ def test_user_supplied_functional(mock_post, pdata):
 
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
 @pytest.mark.filterwarnings("ignore::UserWarning")
-@patch("scviz.enrichment.requests.post")
+@patch("scpviz.enrichment.requests.post")
 def test_de_based_functional(mock_post, pdata_with_de):
     de_key = "[{'cellline': 'BE', 'treatment': 'kd'}] vs [{'cellline': 'BE', 'treatment': 'sc'}]"
     resolved_key = _resolve_de_key(pdata_with_de.stats, de_key)
@@ -178,7 +178,7 @@ def test_de_based_functional(mock_post, pdata_with_de):
         assert "result" in pdata_with_de.stats["functional"][pretty_key]
         assert isinstance(pdata_with_de.stats["functional"][pretty_key]["result"], pd.DataFrame)
 
-@patch("scviz.enrichment.requests.post")
+@patch("scpviz.enrichment.requests.post")
 def test_user_supplied_ppi(mock_post, pdata):
     mock_string_responses(mock_post, mock_mapping_response, mock_ppi_response, total_pairs=1)
 
@@ -211,7 +211,7 @@ def test_get_string_mappings_uniprot_failure(monkeypatch, pdata):
     def fail_uniprot(*args, **kwargs):
         raise RuntimeError("Simulated UniProt failure")
     
-    import scviz.utils as utils_mod
+    import scpviz.utils as utils_mod
     monkeypatch.setattr(utils_mod, "get_uniprot_fields", fail_uniprot)
     pdata.prot.var["STRING_id"] = pd.NA
     # Should print warning and still return empty df
@@ -269,21 +269,21 @@ def test_list_enrichments_print(capsys, pdata):
 
 # ----------------------------------------------------------------------
 # plot_enrichment_svg coverage
-@patch("scviz.enrichment.requests.get")
+@patch("scpviz.enrichment.requests.get")
 def test_plot_enrichment_svg_missing_key(mock_get, pdata, tmp_path):
     """Covers error branch for missing functional key."""
     pdata.stats["functional"] = {}
     with pytest.raises(ValueError, match="Could not find enrichment results for"):
         pdata.plot_enrichment_svg("Nonexistent")
 
-@patch("scviz.enrichment.requests.get")
+@patch("scpviz.enrichment.requests.get")
 def test_plot_enrichment_svg_direction_error(mock_get, pdata):
     """Covers direction missing for DE key."""
     pdata.stats["functional"] = {"A_vs_B_up": {"string_ids": ["S1"], "species": "9606"}}
     with pytest.raises(ValueError, match="You must specify direction"):
         pdata.plot_enrichment_svg("A_vs_B")
 
-@patch("scviz.enrichment.requests.get")
+@patch("scpviz.enrichment.requests.get")
 def test_plot_enrichment_svg_fetch_and_save(mock_get, pdata, tmp_path):
     """Covers normal flow including saving SVG."""
     pdata.stats["functional"] = {"UserSearch1": {"string_ids": ["S1"], "species": "9606"}}

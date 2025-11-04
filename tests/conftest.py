@@ -1,5 +1,5 @@
 import pytest
-from scviz.pAnnData import pAnnData
+from scpviz.pAnnData import pAnnData
 from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np

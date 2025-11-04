@@ -1,6 +1,6 @@
 import pytest
 import pandas as pd
-from scviz import pAnnData
+from scpviz import pAnnData
 from pathlib import Path
 
 def test_import_pd():
@@ -193,7 +193,7 @@ def test_build_identifier_maps_protein(pdata):
 def test_build_identifier_maps_peptide_warn(monkeypatch, pdata):
     """Forces warning path in _build_identifier_maps (peptide branch exception)."""
     def bad_mapping(_): raise RuntimeError("mock failure")
-    monkeypatch.setattr("scviz.utils.get_pep_prot_mapping", bad_mapping)
+    monkeypatch.setattr("scpviz.utils.get_pep_prot_mapping", bad_mapping)
 
     with pytest.warns(UserWarning, match="Could not build peptide-to-protein map"):
         fwd, rev = pdata._build_identifier_maps(pdata.pep)
@@ -210,7 +210,7 @@ def test_update_missing_genes_missing_column(pdata, capsys):
 
 def test_update_missing_genes_no_missing(monkeypatch, pdata, capsys):
     """Covers branch when no missing entries."""
-    monkeypatch.setattr("scviz.utils.get_uniprot_fields", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr("scpviz.utils.get_uniprot_fields", lambda *a, **k: pd.DataFrame())
     # fill all Genes → no missing mask
     pdata.prot.var["Genes"].fillna("TESTGENE", inplace=True)
     pdata.update_missing_genes(verbose=True)

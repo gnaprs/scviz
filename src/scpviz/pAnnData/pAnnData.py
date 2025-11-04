@@ -1,4 +1,4 @@
-from scviz.pAnnData.plot import PlotMixin
+from scpviz.pAnnData.plot import PlotMixin
 from .base import BaseMixin
 from .validation import ValidationMixin
 from .summary import SummaryMixin
@@ -13,7 +13,7 @@ from .io import IOMixin
 
 import pandas as pd
 import anndata as ad
-from scviz.TrackedDataFrame import TrackedDataFrame 
+from scpviz.TrackedDataFrame import TrackedDataFrame 
 
 class pAnnData(BaseMixin, ValidationMixin, SummaryMixin, MetricsMixin,
                IdentifierMixin, HistoryMixin, EditingMixin, FilterMixin,

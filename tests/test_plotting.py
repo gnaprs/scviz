@@ -1,5 +1,5 @@
-from scviz import utils as scutils
-from scviz import plotting as scplt
+from scpviz import utils as scutils
+from scpviz import plotting as scplt
 
 import pandas as pd
 import numpy as np
@@ -593,7 +593,7 @@ def test_plot_volcano_with_label_list():
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-import scviz.plotting as scplt
+import scpviz.plotting as scplt
 
 # test scplt.plot_rankquant() and related functions
 
@@ -713,7 +713,7 @@ def test_plot_venn_invalid_number_of_sets(monkeypatch):
 # test plot_upset
 # mock utilities
 class DummyUtils:
-    """Mock subset of scviz.utils used by these plotting functions."""
+    """Mock subset of scpviz.utils used by these plotting functions."""
     @staticmethod
     def get_upset_contents(pdata, classes, upsetForm=True):
         # Return simple dummy content mimicking protein sets

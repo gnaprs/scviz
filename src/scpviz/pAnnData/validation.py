@@ -1,4 +1,4 @@
-from scviz.utils import format_log_prefix
+from scpviz.utils import format_log_prefix
 from scipy import sparse
 import numpy as np
 

@@ -1,10 +1,10 @@
 from tkinter import N
 import numpy as np
 import pandas as pd
-from scviz import utils
+from scpviz import utils
 import re
 
-from scviz.utils import format_log_prefix
+from scpviz.utils import format_log_prefix
 import warnings
 
 def _detect_ambiguous_input(group, var, group_metrics=None):

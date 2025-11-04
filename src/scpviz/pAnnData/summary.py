@@ -1,8 +1,8 @@
-from scviz.TrackedDataFrame import TrackedDataFrame 
+from scpviz.TrackedDataFrame import TrackedDataFrame 
 import pandas as pd
 import anndata as ad
 
-from scviz.utils import format_log_prefix
+from scpviz.utils import format_log_prefix
 
 class SummaryMixin:
     """

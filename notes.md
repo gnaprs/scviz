@@ -9,21 +9,26 @@
 
 # run coverage tests
 1. open powershell
-2. pytest --cov=src/scviz --cov-branch --cov-report=xml:htmlcov/coverage.xml --cov-report=html:htmlcov --cov-report=term-missing tests/
+2. pytest --cov=src/scpviz --cov-branch --cov-report=xml:htmlcov/coverage.xml --cov-report=html:htmlcov --cov-report=term-missing tests/
 
 # for commits
 Use format:
-fix(parser): handle empty commit messages gracefully
-feat(cli): add support for --dry-run flag
-refactor(core)!: change internal API to use async/await
-chore():
-build():
-ci():
-style():
-perf():
-test():
+## core
+* feat: introduce a new feature for the user or API [`feat(cli): add support for --dry-run flag`]
+* fix: Resolve a bug in existing code [`fix(parser): handle empty commit messages gracefully`]
+* refactor: Modify code structure without changing behavior [`refactor(core)!: change internal API to use async/await`]
+* perf: Improve performance (speed, efficiency, memory) [`perf(loop): reduce time complexity from O(n²) to O(n)`]
+
+## support
+* chore: Routine maintenance, tooling, dependencies [`chore(deps): bump numpy to 1.26.4`]
+* build: Changes to build system, packaging, or dependencies [`build(setup): add scpviz to pyproject.toml dependencies`]
+* ci: Continuous integration / deployment configurations [`ci(github): add test coverage badge update to workflow`]
+* style: Code style, formatting, or linting only [`style(core): apply black autoformatter`]
+* test: Add, update, or fix tests [`test(filtering): add test for duplicate gene handling`]
 
 # for tag (in git bash)
+Final tag commit message: (tag: v1.0.0) chore(release): would be good!
+
 git tag "v$(grep -m1 version pyproject.toml | cut -d'"' -f2)" -m "Release v$(grep -m1 version pyproject.toml | cut -d'"' -f2)"
 git push origin "v$(grep -m1 version pyproject.toml | cut -d'"' -f2)"
 

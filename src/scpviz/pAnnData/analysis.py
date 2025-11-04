@@ -3,8 +3,8 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 from scipy.stats import variation, ttest_ind, mannwhitneyu, wilcoxon
-from scviz import utils
-from scviz.utils import format_log_prefix
+from scpviz import utils
+from scpviz.utils import format_log_prefix
 import warnings
 from scipy import sparse
 
@@ -439,7 +439,7 @@ class AnalysisMixin:
         """
         from sklearn.impute import SimpleImputer, KNNImputer
         from scipy import sparse
-        from scviz import utils
+        from scpviz import utils
 
 
         if not self._check_data(on): # type: ignore[attr-defined], ValidationMixin
@@ -744,7 +744,7 @@ class AnalysisMixin:
         Args:
             on (str): Whether to use "protein" or "peptide" data.
             layer (str): Data layer to use for UMAP (default is "X").
-            **kwargs: Additional keyword arguments passed to `scanpy.tl.umap()`, `scanpy.tl.neighbor()` or the scviz `pca` function.
+            **kwargs: Additional keyword arguments passed to `scanpy.tl.umap()`, `scanpy.tl.neighbor()` or the scpviz `pca` function.
                 Example:
                     "n_neighbors": neighbor argument
                     "min_dist": umap argument
@@ -975,8 +975,8 @@ class AnalysisMixin:
 
         !!! warning "Deprecation Notice"
             This function may be deprecated in future releases.  
-            Use [`annotate_found`](reference/pAnnData/editing_mixins/#src.scviz.pAnnData.editing_mixins.annotate_found)  
-            and [`filter_prot_found`](reference/pAnnData/editing_mixins/#src.scviz.pAnnData.editing_mixins.filter_prot_found)  
+            Use [`annotate_found`](reference/pAnnData/editing_mixins/#src.scpviz.pAnnData.editing_mixins.annotate_found)  
+            and [`filter_prot_found`](reference/pAnnData/editing_mixins/#src.scpviz.pAnnData.editing_mixins.filter_prot_found)  
             for more robust and configurable detection-based filtering.
             
         Example:
