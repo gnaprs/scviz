@@ -82,3 +82,17 @@ def _count_artists(ax):
     if isinstance(ax, (list, np.ndarray)):
         return sum(len(a.collections) + len(a.patches) + len(a.lines) for a in ax)
     return len(ax.collections) + len(ax.patches) + len(ax.lines)
+
+# skip logic for slow tests
+def pytest_addoption(parser):
+    parser.addoption(
+        "--runslow", action="store_true", default=False,
+        help="run tests marked as slow"
+    )
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "slow: mark test as slow")
+
+def pytest_runtest_setup(item):
+    if "slow" in item.keywords and not item.config.getoption("--runslow"):
+        pytest.skip("need --runslow option to run this test")

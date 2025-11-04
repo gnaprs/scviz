@@ -336,7 +336,7 @@ class IdentifierMixin:
                 missing_ids = self.prot.var.loc[missing_mask].index[pd.isna(filled)]
                 print(f"{format_log_prefix('warn')} {unknown} gene name(s) still missing. Assigned as 'UNKNOWN_<accession>' for:")
                 print("        ", ", ".join(missing_ids[:5]) + ("..." if unknown > 10 else ""))
-                print("💡 Tip: You can update these using `pdata.update_identifier_maps({'GENE': 'ACCESSION'}, on='protein', direction='reverse', overwrite=True)`")
+                print("     💡 Tip: You can update these using `pdata.update_identifier_maps({'GENE': 'ACCESSION'}, on='protein', direction='reverse', overwrite=True)`\n")
 
     def search_annotations(self, query, on='protein', search_columns=None, case=False, return_all_matches=True):
         """

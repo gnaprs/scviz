@@ -1,5 +1,7 @@
 import copy
 
+from scviz.utils import format_log_prefix
+
 class BaseMixin:
     """
     Core base methods for pAnnData.
@@ -61,3 +63,33 @@ class BaseMixin:
 
         return new_obj
 
+    def compare_current_to_raw(self, on="protein"):
+        """
+        Compare current pdata object to original raw data, showing how many samples and features were dropped.
+        Compares current obs/var names to the original raw data (stored in .uns).
+
+        Args:
+            on (str): Dataset to compare ('protein' or 'peptide').
+
+        Returns:
+            dict: Dictionary summarizing dropped samples and features.
+        """
+        print(f"{format_log_prefix('user', 1)} Comparing current pdata to X_raw [{on}]:")
+
+        adata = getattr(self, "prot" if on == "protein" else "pep", None)
+        if adata is None:
+            print(f"{format_log_prefix('warn', 2)} No {on} data found.")
+            return None
+
+        orig_obs = set(adata.uns.get("X_raw_obs_names", []))
+        orig_var = set(adata.uns.get("X_raw_var_names", []))
+        current_obs = set(adata.obs_names)
+        current_var = set(adata.var_names)
+
+        dropped_obs = sorted(list(orig_obs - current_obs))
+        dropped_var = sorted(list(orig_var - current_var))
+
+        print(f"   → Samples dropped: {len(dropped_obs)}")
+        print(f"   → Features dropped: {len(dropped_var)}")
+
+        return {"dropped_samples": dropped_obs, "dropped_features": dropped_var}

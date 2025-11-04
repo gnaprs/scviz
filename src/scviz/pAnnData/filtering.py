@@ -70,7 +70,7 @@ class FilterMixin:
         _annotate_found_samples: Computes per-sample detection flags for use by `annotate_found()`.
     """
     
-    def filter_prot(self, condition = None, accessions=None, return_copy = 'True', debug=False):
+    def filter_prot(self, condition = None, accessions=None, valid_genes=False, unique_profiles=False, return_copy = True, debug=False):
         """
         Filter protein data based on metadata conditions or accession list (protein name and gene name).
 
@@ -84,6 +84,8 @@ class FilterMixin:
                 - Standard comparisons, e.g. `"Protein FDR Confidence: Combined == 'High'"`
                 - Substring queries using `includes`, e.g. `"Description includes 'p97'"`
             accessions (list of str, optional): List of accession numbers (var_names) to keep.
+            valid_genes (bool): If True, removes rows with missing gene names and resolves duplicate gene names by appending numeric suffixes.
+            unique_profiles (bool): If True, remove rows with duplicate abundance profiles across samples.
             return_copy (bool): If True, returns a filtered copy. If False, modifies in place.
             debug (bool): If True, prints debugging information.
 
@@ -115,7 +117,19 @@ class FilterMixin:
                 accessions = ['GAPDH', 'P53']
                 pdata.filter_prot(accessions=accessions)
                 ```
+
+            Filter out all that have no valid genes (potentially artefacts):
+                ```python
+                pdata.filter_prot(valid_genes=True)
+                ```
+
+            !!! tip
+                Multiple filters can be combined in a single call. For example, to filger by condition and valid genes:
+                ```python
+                condition = "Score > 0.75"
+                pdata.filter_prot(condition=condition, valid_genes=True)
         """
+        from scipy.sparse import issparse
 
         if not self._check_data('protein'): # type: ignore[attr-defined]
             raise ValueError(f"No protein data found. Check that protein data was imported.")
@@ -125,7 +139,7 @@ class FilterMixin:
 
         message_parts = []
 
-        # 1. Filter by condition OR
+        # 1. Filter by condition
         if condition is not None:
             formatted_condition = self._format_filter_query(condition, pdata.prot.var)
             if debug:
@@ -163,42 +177,126 @@ class FilterMixin:
                 pdata.prot = pdata.prot[:, pdata.prot.var_names.isin(resolved)]
                 message_parts.append(f"accessions: {len(resolved)} matched / {len(accessions)} requested")
 
-        # PEPTIDES: also filter out peptides that belonged only to the filtered proteins
-        if pdata.pep is not None and pdata.rs is not None: # type: ignore[attr-defined]
-            proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names = pdata._filter_sync_peptides_to_proteins(
-                original=self, 
-                updated_prot=pdata.prot, 
-                debug=debug)
+        # 3. Valid genes
+        if valid_genes:
+            # A. Remove invalid gene entries
+            var = pdata.prot.var
 
-            # Apply filtered RS and update .prot and .pep using the helper
-            pdata._apply_rs_filter(
-                keep_proteins=proteins_to_keep,
-                keep_peptides=peptides_to_keep,
-                orig_prot_names=orig_prot_names,
-                orig_pep_names=orig_pep_names,
-                debug=debug
+            mask_missing_gene = var["Genes"].isna() | (var["Genes"].astype(str).str.strip() == "")
+            keep_mask = ~mask_missing_gene
+
+            if debug:
+                print(f"Missing genes: {mask_missing_gene.sum()}")
+                missing_names = pdata.prot.var_names[mask_missing_gene]
+                print(f"Examples of proteins missing names: {missing_names[:5].tolist()}")
+
+            pdata.prot = pdata.prot[:, keep_mask].copy()
+            message_parts.append(f"valid_genes: removed {int(mask_missing_gene.sum())} proteins with invalid gene names")            
+
+            # B. Resolve duplicate gene names
+            var = pdata.prot.var  # refresh after filtering
+            var_genes = var["Genes"].astype(str).str.strip()
+            gene_counts = var_genes.value_counts()
+            duplicates = gene_counts[gene_counts > 1].index.tolist()
+
+            if len(duplicates) > 0:
+                if debug:
+                    print(f"Found {len(duplicates)} duplicate gene names.")
+
+                # Track how many times each duplicate has appeared
+                seen = {}
+                new_names = []
+                for gene in var["Genes"]:
+                    if gene in duplicates:
+                        seen[gene] = seen.get(gene, 0) + 1
+                        if seen[gene] > 1:
+                            gene = f"{gene}-{seen[gene]}"
+                    new_names.append(gene)
+
+                # Assign back to var
+                pdata.prot.var["Genes"] = new_names
+
+                message_parts.append(f"valid_genes: resolved {len(duplicates)} duplicate gene names by appending numeric suffixes")
+                if debug:
+                    example_dupes = [d for d in duplicates[:5]]
+                    print(f"Examples of duplicate genes resolved: {example_dupes}")
+
+        # 4. Remove duplicate profiles
+        if unique_profiles:
+            X = pdata.prot.X.toarray() if issparse(pdata.prot.X) else pdata.prot.X
+            df_X = pd.DataFrame(X.T, index=pdata.prot.var_names)
+
+            all_nan = np.all(np.isnan(X), axis=0)
+            all_zero = np.all(X == 0, axis=0)
+            empty_mask = all_nan | all_zero
+
+            duplicated_mask = df_X.duplicated(keep="first").values  # mark duplicates
+            
+            # Combine removal conditions
+            remove_mask = duplicated_mask | empty_mask
+            keep_mask = ~remove_mask
+
+            # Counts for each type
+            n_dup = int(duplicated_mask.sum())
+            n_empty = int(empty_mask.sum())
+            n_total = int(remove_mask.sum())
+
+            if debug:
+                dup_names = pdata.prot.var_names[duplicated_mask]
+                print(f"Duplicate abundance profiles detected: {n_dup} proteins")
+                if len(dup_names) > 0:
+                    print(f"Examples of duplicates: {dup_names[:5].tolist()}")
+                print(f"Empty (all-zero or all-NaN) proteins detected: {n_empty}")
+
+            # Apply filter
+            pdata.prot = pdata.prot[:, keep_mask].copy()
+
+            # Add summary message
+            message_parts.append(
+                f"unique_profiles: removed {n_dup} duplicate and {n_empty} empty abundance profiles "
+                f"({n_total} total)"
             )
 
-            message_parts.append(f"peptides filtered based on remaining protein linkage ({len(peptides_to_keep)} peptides kept)")
-
         if not message_parts:
+            # no filters were applied
             message = f"{format_log_prefix('user')} Filtering proteins [failed]: {action} protein data.\n    → No filters applied."
         else:
-            filter_type = "condition" if condition else "accession"
+            # at least 1 filter applied
+            # PEPTIDES: also filter out peptides that belonged only to the filtered proteins
+            if pdata.pep is not None and pdata.rs is not None: # type: ignore[attr-defined]
+                proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names = pdata._filter_sync_peptides_to_proteins(
+                    original=self, 
+                    updated_prot=pdata.prot, 
+                    debug=debug)
+
+                # Apply filtered RS and update .prot and .pep using the helper
+                pdata._apply_rs_filter(
+                    keep_proteins=proteins_to_keep,
+                    keep_peptides=peptides_to_keep,
+                    orig_prot_names=orig_prot_names,
+                    orig_pep_names=orig_pep_names,
+                    debug=debug
+                )
+
+            # detect which filters were applied
+            active_filters = []
+            if condition is not None:
+                active_filters.append("condition")
+            if accessions is not None:
+                active_filters.append("accession")
+            if valid_genes:
+                active_filters.append("valid genes")
+            if unique_profiles:
+                active_filters.append("unique profiles")
+
+            # build the header, joining multiple filters nicely
+            joined_filters = ", ".join(active_filters) if active_filters else "unspecified"
             message = (
-                f"{format_log_prefix('user')} Filtering proteins [{filter_type}]:\n"
-                f"    {action} protein data based on {filter_type}:"
+                f"{format_log_prefix('user')} Filtering proteins [{joined_filters}]:\n"
+                f"    {action} protein data based on {joined_filters}:"
             )
 
             for part in message_parts:
-                if part.startswith("condition:"):
-                    message += f"\n    → {part}"
-                elif part.startswith("accessions:"):
-                    message += f"\n    → {part}"
-                elif part.startswith("peptides filtered"):
-                    # we'll append peptide count separately in summary below
-                    peptides_kept = int(part.split("(")[-1].split()[0])
-                else:
                     message += f"\n    → {part}"
 
             # Protein and peptide counts summary
@@ -380,7 +478,7 @@ class FilterMixin:
                     else:
                         this_mask = count_series >= min_count
 
-                    mask |= this_mask  # [ADDED]
+                    mask |= this_mask
                 if verbose:
                     print(f"{format_log_prefix('user')} Filtering proteins [Found|Group-mode|ANY]: keeping {mask.sum()} / {len(mask)} features passing threshold in ANY of groups: {group}")
 
@@ -736,7 +834,7 @@ class FilterMixin:
 
         return proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names
 
-    def filter_sample(self, values=None, exact_cases=False, condition=None, file_list=None, min_prot=None, return_copy=True, debug=False, query_mode=False):
+    def filter_sample(self, values=None, exact_cases=False, condition=None, file_list=None, min_prot=None, cleanup=True, return_copy=True, debug=False, query_mode=False):
         """
         Filter samples in a pAnnData object based on categorical, numeric, or identifier-based criteria.
 
@@ -754,6 +852,7 @@ class FilterMixin:
                 Examples: `"protein_count > 1000"`.
             file_list (list of str, optional): List of sample names or file identifiers to keep. Filters to only those samples (must match obs_names).
             min_prot (int, optional): Minimum number of proteins required in a sample to retain it.
+            cleanup (bool): If True (default), remove proteins that become all-NaN or all-zero after sample filtering and synchronize RS/peptide matrices. Set to False to retain all proteins for consistent feature alignment (e.g. during DE analysis).
             return_copy (bool): If True, returns a filtered pAnnData object; otherwise modifies in place.
             debug (bool): If True, prints query strings and filter summaries.
             query_mode (bool): If True, interprets `values` or `condition` as a raw pandas-style `.query()` string and evaluates it directly on `.obs` or `.summary` respectively.
@@ -832,24 +931,26 @@ class FilterMixin:
                 values=values,
                 exact_cases=exact_cases,
                 debug=debug,
-                return_copy=return_copy
+                return_copy=return_copy, 
+                cleanup=cleanup
             )
 
-        if condition is not None or file_list is not None and not query_mode:
+        if (condition is not None or file_list is not None) and not query_mode:
             return self._filter_sample_condition(
                 condition=condition,
                 file_list=file_list,
                 return_copy=return_copy,
-                debug=debug
+                debug=debug, 
+                cleanup=cleanup
             )
         
         if values is not None and query_mode:
-            return self._filter_sample_query(query_string=values, source='obs', return_copy=return_copy, debug=debug)
+            return self._filter_sample_query(query_string=values, source='obs', return_copy=return_copy, debug=debug, cleanup=cleanup)
 
         if condition is not None and query_mode:
-            return self._filter_sample_query(query_string=condition, source='summary', return_copy=return_copy, debug=debug)
+            return self._filter_sample_query(query_string=condition, source='summary', return_copy=return_copy, debug=debug, cleanup=cleanup)
 
-    def _filter_sample_condition(self, condition = None, return_copy = True, file_list=None, debug=False):
+    def _filter_sample_condition(self, condition = None, return_copy = True, file_list=None, cleanup=True, debug=False):
         """
         Filter samples based on numeric metadata conditions or a list of sample identifiers.
 
@@ -861,6 +962,9 @@ class FilterMixin:
         Args:
             condition (str, optional): Logical condition string referencing columns in `.summary`.
             file_list (list of str, optional): List of sample identifiers to keep.
+            cleanup (bool): If True (default), remove proteins that become all-NaN or all-zero
+                after sample filtering and synchronize RS/peptide matrices. Set to False to
+                retain all proteins for consistent feature alignment (e.g. during DE analysis).
             return_copy (bool): If True, returns a filtered pAnnData object. If False, modifies in place.
             debug (bool): If True, prints the query string or filtering summary.
 
@@ -930,7 +1034,11 @@ class FilterMixin:
         if pdata.pep is not None:
             pdata.pep = pdata.pep[pdata.pep.obs.index.isin(index_filter)]
 
-        pdata.update_summary(recompute=False) # type: ignore[attr-defined], SummaryMixin
+        if cleanup:
+            cleanup_message = pdata._cleanup_proteins_after_sample_filter(verbose=True)
+        else:
+            cleanup_message = None
+        pdata.update_summary(recompute=False, verbose=False) # type: ignore[attr-defined], SummaryMixin
 
         print(f"Length of pdata.prot.obs_names after filter: {len(pdata.prot.obs_names)}") if debug else None
 
@@ -950,6 +1058,7 @@ class FilterMixin:
                 if missing:
                     message += f"{format_log_prefix('filter_conditions')}Missing samples ignored: {len(missing)}\n"
 
+            message += cleanup_message + "\n" if cleanup_message else ""
             message += f"    → Samples kept: {len(pdata.prot.obs)}, Samples dropped: {orig_sample_count - len(pdata.prot.obs)}"
             message += f"\n    → Proteins kept: {len(pdata.prot.var)}\n"
 
@@ -959,7 +1068,7 @@ class FilterMixin:
 
         return pdata if return_copy else None
 
-    def _filter_sample_values(self, values, exact_cases, verbose=True, debug=False, return_copy=True):
+    def _filter_sample_values(self, values, exact_cases, cleanup=True, verbose=True, debug=False, return_copy=True):
         """
         Filter samples using dictionary-style categorical matching.
 
@@ -976,6 +1085,9 @@ class FilterMixin:
                 Applies OR logic within fields and AND logic across fields.
                 - If `exact_cases=True`: A list of dictionaries, each representing an exact combination of field values.
             exact_cases (bool): If True, performs exact match filtering using the provided list of dictionaries.
+            cleanup (bool): If True (default), remove proteins that become all-NaN or all-zero
+                after sample filtering and synchronize RS/peptide matrices. Set to False to
+                retain all proteins for consistent feature alignment (e.g. during DE analysis).
             verbose (bool): If True, prints a summary of the filtering result.
             debug (bool): If True, prints internal queries and matching logic.
             return_copy (bool): If True, returns a filtered copy. Otherwise modifies in place.
@@ -1050,7 +1162,12 @@ class FilterMixin:
         if pdata.pep is not None:
             adata = pdata.pep
             pdata.pep = adata[eval(query)]
-        pdata.update_summary(recompute=False, verbose=verbose) # type: ignore[attr-defined], SummaryMixin
+        
+        if cleanup:
+            cleanup_message = pdata._cleanup_proteins_after_sample_filter(verbose=True)
+        else:
+            cleanup_message = None
+        pdata.update_summary(recompute=False, verbose=False) # type: ignore[attr-defined], SummaryMixin
 
         n_samples = len(pdata.prot)
         log_prefix = format_log_prefix("user")
@@ -1077,6 +1194,7 @@ class FilterMixin:
                     valstr = v if isinstance(v, str) else ", ".join(map(str, v))
                     message += f"      - {k}: {valstr}\n"
 
+            message += cleanup_message + "\n" if cleanup_message else ""
             message += f"    → Samples kept: {n_samples}, Samples dropped: {orig_sample_count - n_samples}"
             message += f"\n    → Proteins kept: {len(pdata.prot.var)}\n"
 
@@ -1085,7 +1203,7 @@ class FilterMixin:
 
         return pdata
 
-    def _filter_sample_query(self, query_string, source='obs', return_copy=True, debug=False):
+    def _filter_sample_query(self, query_string, source='obs', cleanup=True, return_copy=True, debug=False):
         """
         Filter samples using a raw pandas-style query string on `.obs` or `.summary`.
 
@@ -1096,6 +1214,9 @@ class FilterMixin:
             query_string (str): A pandas-style query string. 
                 Examples: `"cellline == 'AS' and treatment in ['kd', 'sc']"`.
             source (str): The metadata source to query — either `"obs"` or `"summary"`.
+            cleanup (bool): If True (default), remove proteins that become all-NaN or all-zero
+                after sample filtering and synchronize RS/peptide matrices. Set to False to
+                retain all proteins for consistent feature alignment (e.g. during DE analysis).
             return_copy (bool): If True, returns a filtered pAnnData object; otherwise modifies in place.
             debug (bool): If True, prints the parsed query and debug messages.
 
@@ -1128,7 +1249,12 @@ class FilterMixin:
             pdata.prot = pdata.prot[pdata.prot.obs_names.isin(index_filter)]
         if pdata.pep is not None:
             pdata.pep = pdata.pep[pdata.pep.obs_names.isin(index_filter)]
-        pdata.update_summary(recompute=False) # type: ignore[attr-defined], SummaryMixin
+        
+        if cleanup:
+            cleanup_message = pdata._cleanup_proteins_after_sample_filter(verbose=True)
+        else:
+            cleanup_message = None
+        pdata.update_summary(recompute=False, verbose=False) # type: ignore[attr-defined], SummaryMixin
 
         n_samples = len(pdata.prot)
         log_prefix = format_log_prefix("user")
@@ -1138,6 +1264,12 @@ class FilterMixin:
             f"{log_prefix} Filtering samples [query]:\n"
             f"    {action} sample data based on query string:\n"
             f"   🔸 Query: {query_string}\n"
+        )
+
+        if cleanup_message:
+            message += f"{cleanup_message}\n"
+        
+        message += (
             f"    → Samples kept: {n_samples}, Samples dropped: {orig_sample_count - n_samples}\n"
             f"    → Proteins kept: {len(pdata.prot.var)}\n"
         )
@@ -1148,6 +1280,85 @@ class FilterMixin:
         pdata._append_history(history_message) # type: ignore[attr-defined], HistoryMixin
 
         return pdata if return_copy else None
+
+    def _cleanup_proteins_after_sample_filter(self, verbose=True, printout=False):
+        """
+        Internal helper to remove proteins that became all-NaN or all-zero
+        after sample filtering. Called silently by `filter_sample()`.
+
+        Ensures the RS matrix and peptide table are synchronized after cleanup.
+        Called automatically by `filter_sample()` and during import.        
+
+        Args:
+            verbose (bool): If True, returns a cleanup summary message.
+                            If False, runs silently.
+            printout (bool): If True and verbose=True, directly prints the cleanup mesage.
+
+        Returns:
+            str or None: Cleanup message if verbose=True and any proteins removed,
+                        otherwise None.
+        """
+        from scipy.sparse import issparse
+        
+        if not self._check_data("protein"):  # type: ignore[attr-defined]
+            return
+
+        X = self.prot.X.toarray() if issparse(self.prot.X) else self.prot.X
+        original_var_names = self.prot.var_names.copy()
+        all_nan = np.all(np.isnan(X), axis=0)
+        all_zero = np.all(X == 0, axis=0)
+        remove_mask = all_nan | all_zero
+
+        if not remove_mask.any():
+            return None
+
+        n_remove = int(remove_mask.sum())
+        keep_mask = ~remove_mask
+
+        # skip cleanup entirely if no samples or no protein data remain
+        if self.prot is None or self.prot.n_obs == 0 or self.prot.n_vars == 0:
+            if verbose:
+                print(f"{format_log_prefix('warn_only',2)} No samples or proteins to clean up. Skipping RS sync.")
+            return None
+
+        # Backup original for RS/peptide syncing, ensure summary and obs are aligned before making copy
+        if self._summary is not None and not self.prot.obs.index.equals(self._summary.index):
+            self._summary = self._summary.loc[self.prot.obs.index].copy()
+        original = self.copy()
+        # Filter protein data
+        self.prot = self.prot[:, keep_mask].copy()
+
+        if self.pep is not None and self.rs is not None:
+            proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names = self._filter_sync_peptides_to_proteins(
+                original=original,
+                updated_prot=self.prot,
+                debug=False
+            )
+
+            self._apply_rs_filter(
+                keep_proteins=proteins_to_keep,
+                keep_peptides=peptides_to_keep,
+                orig_prot_names=orig_prot_names,
+                orig_pep_names=orig_pep_names,
+                debug=False
+            )
+
+        self.update_summary(recompute=True, verbose=False)
+
+        if verbose:            
+            removed_proteins = list(original_var_names[remove_mask])
+            preview = ", ".join(removed_proteins[:10])
+            if n_remove > 10:
+                preview += ", ..."
+
+            if printout and n_remove>0:
+                # for startup
+                print(f"{format_log_prefix('info_only',1)} Removed {n_remove} empty proteins (all-NaN or all-zero). Proteins: {preview}")
+            else:
+                # for filter
+                return(f"{format_log_prefix('info_only',2)} Auto-cleanup: Removed {n_remove} empty proteins (all-NaN or all-zero). Proteins: {preview}")
+        
+        return None
 
     def filter_rs(
         self,
@@ -1675,7 +1886,7 @@ class FilterMixin:
             sig_layer = 'X_qval'
             if sig_layer not in adata.layers:
                 # Fallback to global q-values if available
-                print(f"{format_log_prefix('info', 2)} Using global q-values for '{level}' significance annotation.")
+                print(f"{format_log_prefix('info', 2)} Sample-specific q-values not found. Using global q-values for '{level}' significance annotation.")
                 continue  # Skip if significance data not available
 
             data = pd.DataFrame(

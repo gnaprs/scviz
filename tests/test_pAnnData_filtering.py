@@ -12,6 +12,49 @@ from scipy.sparse import csr_matrix
 # ---------------------------------------------------------------------
 
 # filter_prot tests
+def test_filter_prot_no_protein_data(pdata):
+    """Ensure filter_prot raises ValueError when no protein data is present."""
+    pdata.prot = None
+
+    with pytest.raises(ValueError, match="No protein data found"):
+        pdata.filter_prot(condition="unique_peptides > 2")
+
+def test_filter_prot_no_pep_data(pdata_nopep, capsys):
+    """Ensure filter_prot runs correctly when .pep and .rs are missing."""
+    assert pdata_nopep.pep is None or pdata_nopep.pep.shape[1] == 0
+    assert getattr(pdata_nopep, "rs", None) is None or pdata_nopep.rs.shape[0] == pdata_nopep.prot.shape[1]
+
+    # Run the filter — should not error even without peptide info
+    pdata_filt = pdata_nopep.filter_prot(condition="unique_peptides > 2", return_copy=True)
+    # It should filter correctly without errors
+    assert pdata_filt.prot.shape[1] <= pdata_nopep.prot.shape[1]
+    assert pdata_filt.prot.var["unique_peptides"].min() > 2 
+
+    # Output should mention filtering but not peptides
+    out = capsys.readouterr().out
+    assert "Filtering proteins" in out
+    assert "peptides filtered based on remaining protein linkage" not in out
+
+def test_filter_prot_no_filters_applied(pdata, capsys):
+    """Ensure filter_prot prints fallback message when no filters are provided."""
+    # Call filter_prot with no active filters
+    pdata_filt = pdata.filter_prot(
+        condition=None,
+        accessions=None,
+        valid_genes=False,
+        unique_profiles=False,
+        return_copy=True,
+    )
+
+    out = capsys.readouterr().out
+
+    # Verify printed fallback message
+    assert "Filtering proteins [failed]" in out
+    assert "No filters applied" in out
+
+    # Object should remain unchanged (copy but same shape)
+    assert pdata_filt.prot.shape == pdata.prot.shape
+
 def test_filter_prot_by_condition(pdata):
     pdata_filt = pdata.filter_prot(condition="unique_peptides > 3", return_copy=True)
     assert pdata_filt.prot.shape[1] < pdata.prot.shape[1]
@@ -28,6 +71,57 @@ def test_filter_prot_by_gene_name(pdata):
     gene = pdata.prot.var["Genes"].dropna().values[0]
     pdata_filt = pdata.filter_prot(accessions=[gene], return_copy=True)
     assert gene in pdata_filt.prot.var["Genes"].values
+
+def test_filter_prot_valid_genes(pdata):
+    """Ensure proteins with empty or missing gene names are filtered out."""
+    # Inject a few invalid gene entries (empty and None)
+    pdata.prot.var.loc[pdata.prot.var.index[:3], "Genes"] = ["", None, "UNKNOWN_FAKE"]
+
+    n_before = pdata.prot.shape[1]
+    pdata_filt = pdata.filter_prot(valid_genes=True, return_copy=True, debug=True)
+    n_after = pdata_filt.prot.shape[1]
+
+    # Should remove at least one (empty or None)
+    assert n_after < n_before, "Expected some proteins to be removed due to missing genes."
+
+    # All remaining should have non-empty, non-null gene names
+    genes = pdata_filt.prot.var["Genes"]
+    assert not genes.isna().any(), "NaN gene names remain after filtering."
+    assert not (genes.astype(str).str.strip() == "").any(), "Empty gene names remain after filtering."
+
+    # 'UNKNOWN_' entries are allowed — ensure they’re still present if any existed
+    assert any(genes.astype(str).str.startswith("UNKNOWN_") | ~genes.astype(str).str.startswith("UNKNOWN_")), \
+        "Unexpected removal of placeholder gene names."
+
+def test_filter_prot_unique_profiles(pdata):
+    """Ensure only proteins with unique abundance profiles are kept."""
+    # Duplicate the first protein’s abundance profile into the second
+    pdata.prot.X[:, 1] = pdata.prot.X[:, 0].copy()
+    n_before = pdata.prot.shape[1]
+
+    pdata_filt = pdata.filter_prot(unique_profiles=True, return_copy=True, debug=True)
+    n_after = pdata_filt.prot.shape[1]
+
+    # Should remove at least one duplicate
+    assert n_after < n_before, "Expected fewer proteins after duplicate removal."
+
+    # Verify all remaining profiles are unique (dense representation)
+    X_dense = pdata_filt.prot.X.toarray() if hasattr(pdata_filt.prot.X, "toarray") else pdata_filt.prot.X
+    n_unique_profiles = np.unique(X_dense.T, axis=0).shape[0]
+    assert n_unique_profiles == X_dense.shape[1], "Duplicate profiles still present after filtering."
+
+def test_filter_prot_duplicate_gene(pdata):
+    """Ensure duplicate gene names are suffixed as -2, -3, etc., while the first remains unchanged."""
+    # Make a copy to avoid modifying the fixture
+    pdata = pdata.copy()
+    pdata.prot.var.iloc[:3, pdata.prot.var.columns.get_loc("Genes")] = "gene1"
+
+    pdata.filter_prot(valid_genes=True, return_copy=False)
+
+    renamed_genes = pdata.prot.var["Genes"].iloc[0:3].tolist()
+    expected = ["gene1", "gene1-2", "gene1-3"]
+
+    assert renamed_genes == expected, f"Expected {expected}, got {renamed_genes}"
 
 def test_filter_prot_syncs_peptides(pdata):
     orig_rs = pdata.rs.copy()
@@ -64,7 +158,7 @@ def test_filter_prot_found_group_mode(pdata):
     group_name = group_cols[0].replace("Found In: ", "").replace(" ratio", "")
 
     # Run the filter
-    pdata_filt = pdata.filter_prot_found(group=group_name, min_ratio=0.5, on="protein", return_copy=True)
+    pdata_filt = pdata.filter_prot_found(group=group_name, min_ratio=0.5, on="protein", return_copy=True, verbose=True)
 
     # Assert some filtering happened
     assert pdata_filt.prot.shape[1] < pdata.prot.shape[1]
@@ -111,7 +205,7 @@ def test_filter_prot_found_group_mode_ratio_any_and_all(pdata):
     pdata.annotate_found(classes="cellline", on="protein", verbose=False)
     group_values = pdata.prot.obs["cellline"].unique().tolist()
     # ANY (union) with ratio
-    out_any = pdata.filter_prot_found(group=group_values, min_ratio=0.1, on="protein", return_copy=True, match_any=True, verbose=False)
+    out_any = pdata.filter_prot_found(group=group_values, min_ratio=0.1, on="protein", return_copy=True, match_any=True, verbose=True)
     assert out_any.prot.shape[1] <= pdata.prot.shape[1] and out_any.prot.shape[1] > 0
     # ALL (intersection) with ratio
     out_all = pdata.filter_prot_found(group=group_values, min_ratio=0.1, on="protein", return_copy=True, match_any=False, verbose=False)

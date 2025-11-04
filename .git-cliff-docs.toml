@@ -3,14 +3,14 @@
 
 [changelog]
 header = """
-All notable changes to this project are documented here.
+## scviz
 """
 
 body = """
 {% if releases is defined and releases | length > 0 %}
 {# --- Multi-release mode (e.g. -a) --- #}
 {% for release in releases %}
-### {{ release.version | trim_start_matches(pat="v") }}{% if release.timestamp %} – {{ release.timestamp | date(format="%Y-%m-%d") }}{% endif %}
+### {{ release.version | trim_start_matches(pat="v") }} <small>{{ release.timestamp | date(format="%B %d, %Y") }}</small> { id="{{ release.version | trim_start_matches(pat="v") }}" }
 
 {% for group, commits in release.commits | group_by(attribute="group") %}
 #### {{ group | upper_first }}
@@ -23,7 +23,7 @@ body = """
 {% endfor %}
 {% else %}
 {# --- Single-release modes (e.g. --latest, --current, --unreleased) --- #}
-### {{ version | default(value="Unreleased") | trim_start_matches(pat="v") }}{% if timestamp %} – {{ timestamp | date(format="%Y-%m-%d") }}{% endif %}
+### {{ version | default(value="Unreleased") | trim_start_matches(pat="v") }} <small>{% if timestamp %}{{ timestamp | date(format="%B %d, %Y") }}{% else %}Unreleased{% endif %}</small> { id="{{ version | default(value="Unreleased") | trim_start_matches(pat="v") }}" }
 
 {% for group, commits in commits | group_by(attribute="group") %}
 #### {{ group | upper_first }}
@@ -55,7 +55,18 @@ commit_parsers = [
   { message = "(?i)merge (pull request|branch|development)", skip = true },
   { message = "(?i)update to v[0-9]", skip = true },
 
-  # main groups (no emojis)
+  # Conventional Commit types
+  { message = "^(feat)(\\(.+\\))?:", group = "Added" },
+  { message = "^(fix)(\\(.+\\))?:", group = "Fixed" },
+  { message = "^(refactor)(\\(.+\\))?:", group = "Changed" },
+  { message = "^(perf)(\\(.+\\))?:", group = "Performance" },
+  { message = "^(style)(\\(.+\\))?:", group = "Style" },
+  { message = "^(build)(\\(.+\\))?:", group = "Build System" },
+  { message = "^(ci)(\\(.+\\))?:", group = "CI" },
+  { message = "^(test)(\\(.+\\))?:", group = "Tests" },
+  { message = "^(chore)(\\(.+\\))?:", group = "Chores" },
+
+  # Legacy keyword groups (for older commits)
   { message = "(?i)^(add|added|implement|introduce|create|upload)", group = "Added" },
   { message = "(?i)^(fix|bug|bugfix|resolve|patch)", group = "Fixed" },
   { message = "(?i)^(update|change|modify|adjust|tweak|improve|enhance|overhaul|rewrite|refactor|edit|editing)", group = "Changed" },
