@@ -1,7 +1,7 @@
-# scviz Contribution Guidelines
+# scpviz Contribution Guidelines
 
-Thank you for your interest in contributing to **scviz**, an open-source Python package for visualizing and analyzing single-cell and bulk proteomics data.  
-We welcome contributions from the community to help improve, expand, and document the functionality of scviz.
+Thank you for your interest in contributing to **scpviz**, an open-source Python package for visualizing and analyzing single-cell and bulk proteomics data.  
+We welcome contributions from the community to help improve, expand, and document the functionality of scpviz.
 
 ---
 
@@ -16,10 +16,10 @@ Please be respectful and considerate in your interactions with others.
 
 To get an overview of the project, read the [README](README.md) file.
 
-There are several ways you can contribute to scviz, including but not limited to:
+There are several ways you can contribute to scpviz, including but not limited to:
 
-* asking and answering questions in [Discussions](https://github.com/gnaprs/scviz/discussions),
-* reporting bugs and requesting features by submitting [new issues](https://github.com/gnaprs/scviz/issues/new),
+* asking and answering questions in [Discussions](https://github.com/gnaprs/scpviz/discussions),
+* reporting bugs and requesting features by submitting [new issues](https://github.com/gnaprs/scpviz/issues/new),
 * adding new features and fixing bugs by creating pull requests (PRs),
 * improving and maintaining consistency in the documentation (including docstrings and tutorials), and
 * providing reproducible examples and workflows in Jupyter notebooks.
@@ -33,7 +33,7 @@ There are several ways you can contribute to scviz, including but not limited to
 #### Open a New Issue
 
 Before reporting a bug or requesting a feature, search to see if a related issue already exists.  
-If not, you can [submit a new issue](https://github.com/gnaprs/scviz/issues/new) — make sure to include:
+If not, you can [submit a new issue](https://github.com/gnaprs/scpviz/issues/new) — make sure to include:
 
 - a clear and descriptive title,
 - relevant environment or dataset information (if applicable), and
@@ -41,7 +41,7 @@ If not, you can [submit a new issue](https://github.com/gnaprs/scviz/issues/new)
 
 #### Solve an Issue
 
-Browse through the existing [issues](https://github.com/gnaprs/scviz/issues) to find one that interests you.  
+Browse through the existing [issues](https://github.com/gnaprs/scpviz/issues) to find one that interests you.  
 You can filter by labels (e.g., *good first issue*, *bug*, *enhancement*).  
 If you find an issue you’d like to work on, comment to let maintainers know and open a PR when ready.
 
@@ -49,19 +49,19 @@ If you find an issue you’d like to work on, comment to let maintainers know an
 
 ### Make Changes
 
-To contribute to scviz, use the **fork and pull request** workflow described below.
+To contribute to scpviz, use the **fork and pull request** workflow described below.
 
-1. [Fork the repository.](https://github.com/gnaprs/scviz/fork)
+1. [Fork the repository.](https://github.com/gnaprs/scpviz/fork)
 2. Clone your fork locally and navigate to it:
 
-       git clone https://github.com/<your-github-username>/scviz.git
-       cd scviz
+       git clone https://github.com/<your-github-username>/scpviz.git
+       cd scpviz
 
 3. Create a new branch for your feature or fix:
 
        git checkout -b <branch-name>
 
-4. Install scviz and its development dependencies:
+4. Install scpviz and its development dependencies:
 
        pip install -e .[dev]
 
@@ -110,7 +110,7 @@ When your changes are ready:
 
 ### Pull Request
 
-To contribute your changes to the main scviz repository, [create a pull request](https://github.com/gnaprs/scviz/compare).  
+To contribute your changes to the main scpviz repository, [create a pull request](https://github.com/gnaprs/scpviz/compare).  
 The project maintainers will review your PR and provide feedback.  
 If your changes align with the project goals and pass all tests, they will be merged into the main branch.
 
@@ -118,7 +118,7 @@ If your changes align with the project goals and pass all tests, they will be me
 
 ## Documentation Contributions
 
-The documentation for scviz is built with [MkDocs Material](https://squidfunk.github.io/mkdocs-material/).
+The documentation for scpviz is built with [MkDocs Material](https://squidfunk.github.io/mkdocs-material/).
 
 To build and preview locally:
 
@@ -129,7 +129,7 @@ mkdocs serve
 Your changes will automatically rebuild the site in your browser.
 
 When merged to `main`, the documentation is automatically deployed to  
-[https://gnaprs.github.io/scviz/](https://gnaprs.github.io/scviz/)  
+[https://gnaprs.github.io/scpviz/](https://gnaprs.github.io/scpviz/)  
 via GitHub Actions (`ci.yml`).
 
 ---
@@ -151,9 +151,9 @@ When ready to publish a new version:
    twine upload dist/*
    ```
 4. Verify:
-   - PyPI: https://pypi.org/project/scviz/
-   - Docs: https://gnaprs.github.io/scviz/
-   - Coverage: https://codecov.io/gh/gnaprs/scviz
+   - PyPI: https://pypi.org/project/scpviz/
+   - Docs: https://gnaprs.github.io/scpviz/
+   - Coverage: https://codecov.io/gh/gnaprs/scpviz
 
 ---
 
@@ -166,4 +166,4 @@ When ready to publish a new version:
 
 ---
 
-Thank you for helping make **scviz** a reliable, open, and community-driven platform for single-cell and spatial proteomics research.
+Thank you for helping make **scpviz** a reliable, open, and community-driven platform for single-cell and spatial proteomics research.

@@ -2,18 +2,16 @@
 
 Mixins for manipulating or reducing the dataset through selection and exports.
 
-### [← Back to pAnnData Overview](pAnnData.md)
-
 ---
 
-## Editing
-::: src.scviz.pAnnData.editing
+::: src.scpviz.pAnnData.editing
     options:
+      show_root_full_path: false
       show_root_heading: false
-      heading_level: 3
+      heading_level: 2
 
-## Filtering
-::: src.scviz.pAnnData.filtering
+::: src.scpviz.pAnnData.filtering
     options:
+      show_root_full_path: false
       show_root_heading: false
-      heading_level: 3
+      heading_level: 2

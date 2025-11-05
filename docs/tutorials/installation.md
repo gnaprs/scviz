@@ -1,9 +1,9 @@
 # Installation
 
-`scviz` is distributed as a Python package and can be installed with `pip`.
+`scpviz` is distributed as a Python package and can be installed with `pip`.
 
 ```bash
-pip install scviz
+pip install scpviz
 ```
 
 This will install all required dependencies, including `scanpy`, `anndata`, `pandas`, and plotting libraries.
@@ -11,7 +11,7 @@ This will install all required dependencies, including `scanpy`, `anndata`, `pan
 Import and create a `pAnnData` object:
 
 ```python
-import scviz as scv
+import scpviz as scv
 
 pdata = scv.pAnnData.from_file("example_report.txt", source="diann")
 pdata
@@ -22,12 +22,12 @@ pdata
 If you want the most up-to-date features, you can install from the GitHub repository:
 
 ```bash
-git clone https://github.com/<your-org-or-username>/scviz.git
-cd scviz
+git clone https://github.com/<your-org-or-username>/scpviz.git
+cd scpviz
 pip install -e .
 ```
 
-This installs `scviz` in “editable mode,” so any changes to the code will be reflected immediately.
+This installs `scpviz` in “editable mode,” so any changes to the code will be reflected immediately.
 
 ## Dependencies
 

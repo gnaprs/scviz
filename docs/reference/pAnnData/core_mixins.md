@@ -2,33 +2,36 @@
 
 Includes foundational methods for validation, copying, and history tracking.
 
-### [← Back to pAnnData Overview](pAnnData.md)
-
 ---
 
-::: src.scviz.pAnnData.base
+::: src.scpviz.pAnnData.base
     options:
+      show_root_full_path: false
       show_root_heading: false
       render_module_header: false
-      heading_level: 3
+      heading_level: 2
 
-::: src.scviz.pAnnData.summary
+::: src.scpviz.pAnnData.summary
     options:
+      show_root_full_path: false
       show_root_heading: false
-      heading_level: 3
+      heading_level: 2
 
-::: src.scviz.pAnnData.validation
+::: src.scpviz.pAnnData.validation
     options:
+      show_root_full_path: false
       show_root_heading: false
       render_module_header: false
-      heading_level: 3
+      heading_level: 2
 
-::: src.scviz.pAnnData.history
+::: src.scpviz.pAnnData.history
     options:
+      show_root_full_path: false
       show_root_heading: false
-      heading_level: 3
+      heading_level: 2
 
-::: src.scviz.pAnnData.identifier
+::: src.scpviz.pAnnData.identifier
     options:
+      show_root_full_path: false
       show_root_heading: false
-      heading_level: 3
+      heading_level: 2

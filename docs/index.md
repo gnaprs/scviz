@@ -1,6 +1,9 @@
-# Welcome to scviz
-**scviz** is a Python package for single-cell and spatial proteomics data analysis, built around a custom `pAnnData` object.  
+# Welcome to scpviz
+**scpviz** is a Python package for single-cell and spatial proteomics data analysis, built around a custom `pAnnData` object.  
 It extends the [AnnData](https://anndata.readthedocs.io/) ecosystem with proteomics-specific functionality, enabling seamless integration of proteins, peptides, and relational data.
+
+![logo](assets/300ppi/logo_with_label@300x.png)
+
 ## Features
 <div class="grid cards" markdown>
 
@@ -8,7 +11,7 @@ It extends the [AnnData](https://anndata.readthedocs.io/) ecosystem with proteom
 
     ---
 
-    Install [`scviz`](#) with [`pip`](#) and get up
+    Install [`scpviz`](#) with [`pip`](#) and get up
     and running in minutes
 
     [:octicons-arrow-right-24: Getting started](tutorials/installation.md)
@@ -51,9 +54,9 @@ It extends the [AnnData](https://anndata.readthedocs.io/) ecosystem with proteom
 Check out the [quickstart](tutorials/quickstart.md) guide.
 For more detailed examples, check out the [Tutorials](tutorials/index.md).
 
-- **[Developer Notes](dev/contributing.md)** – Guidelines for contributing, testing, and extending scviz.  
+- **[Developer Notes](dev/contributing.md)** – Guidelines for contributing, testing, and extending scpviz.  
 
 
 ---
 
-🧪 *scviz is developed for research in single-cell and spatial proteomics, supporting reproducible and scalable analysis.*  
+🧪 *scpviz is developed for research in single-cell and spatial proteomics, supporting reproducible and scalable analysis.*  

@@ -7,7 +7,7 @@ This tutorial shows how to import DIA-NN or Proteome Discoverer (PD) outputs int
 ## Loading DIA-NN Reports
 
 ```python
-import scviz as scv
+import scpviz as scv
 
 # Load DIA-NN report
 pdata = scv.pAnnData.from_file("example_diann_report.txt", source="diann")
@@ -34,7 +34,7 @@ Sample metadata (columns in `.obs`) can be inferred directly from filenames:
 pdata.obs.head()
 ```
 
-💡 *Tip: If filenames follow different formats, scviz will suggest possible `.obs` columns or default to generic labels.*
+💡 *Tip: If filenames follow different formats, scpviz will suggest possible `.obs` columns or default to generic labels.*
 
 ---
 
