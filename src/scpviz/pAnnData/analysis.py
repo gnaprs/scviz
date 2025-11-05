@@ -68,7 +68,7 @@ class AnalysisMixin:
         classes_list = utils.get_classlist(adata, classes)
 
         for j, class_value in enumerate(classes_list):
-            data_filtered = utils.resolve_class_filter(adata, classes, class_value, debug=True)
+            data_filtered = utils.resolve_class_filter(adata, classes, class_value)
 
             cv_data = data_filtered.X.toarray() if layer == "X" else data_filtered.layers[layer].toarray() if layer in data_filtered.layers else None
             if cv_data is None:
@@ -76,7 +76,7 @@ class AnalysisMixin:
 
             adata.var['CV: '+ class_value] = variation(cv_data, axis=0)
 
-        self._history.append(f"{on}: Coefficient of Variation (CV) calculated for {layer} data by {classes}. E.g. CV stored in var['CV: {class_value}'].") # type: ignore[attr-defined]
+        self._history.append(f"{on}: Coefficient of Variation (CV) calculated for {layer} data by {classes}. CV stored in var['CV: {class_value}'].") # type: ignore[attr-defined]
 
     # TODO: implement methods for calculdating fold change, 1. mean, 2. prot pairwise median, or 3. pep pairwise median (will need to refer to RS)
     def de(self, values=None, class_type=None, method='ttest', layer='X', pval=0.05, log2fc=1.0, fold_change_mode='mean'):
