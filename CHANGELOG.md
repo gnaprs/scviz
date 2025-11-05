@@ -5,36 +5,44 @@ All notable changes to this project are documented here.
 <summary><b>Unreleased</b></summary>
 
 
-#### CI
+#### Added
 
-- Upload changelog.md (2be787e…)
+- Add cleanup after import (b290ec8…)
+
+- Add compare_current_to_raw and get_X_raw_aligned functionality (043251b…)
+
+- Add valid_genes, unique_profiles to filter_prot and cleanup (nans) to filter_sample (e251c8a…)
+
+- Add plot_abundnace wrapper from pdata (8e2a01c…)
+
+- Add handling of duplicate gene name in filter_prot (01d750e…)
+
+- Add support for pd3.2 import (592a814…)
 
 
-#### Documentation
-
-- Add contributor covenant code of conduct (72fd27e…)
-
-
-#### Fixed
-
-- Handle export of .X (a3028bd…)
-
-
-#### Other
-
-- Fix github workflow bugs (1ef2b00…)
-
-- (auto) Paper PDF Draft (6aee1de…)
-
-- (auto) Paper PDF Draft (2894f44…)
-
-- Fix workflow yml (cc2544f…)
+#### Build System
 
 - Update pyproject.toml (18af439…)
 
 - Update pyproject.toml and workflow bug (19f4c7a…)
 
 - Fix changelog yml tag fetch error (5b20d69…)
+
+
+#### CI
+
+- Upload changelog.md (2be787e…)
+
+- AUTO Paper PDF Draft (40d3286…)
+
+- Add test "slow" marker (8280133…)
+
+
+#### Chores
+
+- Fix github workflow bugs (1ef2b00…)
+
+- Fix workflow yml (cc2544f…)
 
 - Fix changelog yml workflow (cb956b1…)
 
@@ -52,6 +60,8 @@ All notable changes to this project are documented here.
 
 - Update changelogs [skip ci] (2356fff…)
 
+- Edit changelog workflow (0ec6ab5…)
+
 - Build and deploy runs after changelog is finished (97491c3…)
 
 - Update changelogs [skip ci] (9910211…)
@@ -60,11 +70,62 @@ All notable changes to this project are documented here.
 
 - Update changelogs [skip ci] (b5d04c7…)
 
-- Add plot_abundnace wrapper from pdata (8e2a01c…)
-
 - Update changelogs [skip ci] (7e5d8b6…)
 
 - Update changelogs [skip ci] (a688e34…)
+
+- Update changelogs [skip ci] (265982c…)
+
+
+#### Documentation
+
+- Update contributing.md file (4002003…)
+
+- Update markdown files (d72e6fa…)
+
+- Add contributor covenant code of conduct (72fd27e…)
+
+
+#### Fixed
+
+- Fix bug for volcano_df handling of "not comparable" (1d3d87b…)
+
+- Fix bug on import with non-matching obs/summary after nan protein cleanup (f61c0b5…)
+
+- Handle export of .X (a3028bd…)
+
+- Anndata automatically aligns X_raw, removed function and tests (ce82a52…)
+
+- Renaming scheme for pd prot var (9bcbf44…)
+
+
+#### Other
+
+- (auto) Paper PDF Draft (6aee1de…)
+
+- (auto) Paper PDF Draft (2894f44…)
+
+- Fix indentation on update_identifiers tip (90b7bec…)
+
+
+#### Style
+
+- Edit markdown formatting for docs changelog (ff92df7…)
+
+- Add comment on metaboanalyst median normalization (42c0260…)
+
+- Edit table of usage scenarios for update_summary to be clearer (ffd2a37…)
+
+- Update parsers to match conventional commit format (a870d32…)
+
+
+#### Tests
+
+- Add tests for duplicate gene handling, import pd32 (4cf1b86…)
+
+- Add test for pd3.2 import with prot and pep, upload pd3.2 mock files (3c96c45…)
+
+- Defaut skip slow tests to prevent crashing on actions (70d9150…)
 
 
 
@@ -86,7 +147,7 @@ All notable changes to this project are documented here.
 - Update README.md (c709f2f…)
 
 
-#### Other
+#### Chores
 
 - Add git-cliff config and changelog workflows (0159d05…)
 
