@@ -1349,7 +1349,10 @@ class FilterMixin:
         remove_mask = all_nan | all_zero
 
         if not remove_mask.any():
-            return None
+            if verbose:
+                return f"{format_log_prefix('info_only',2)} Auto-cleanup: No empty proteins found (all-NaN or all-zero)."
+            else:
+                return None
 
         n_remove = int(remove_mask.sum())
         keep_mask = ~remove_mask
