@@ -405,6 +405,39 @@ def test_filter_sample_condition_file_list_basic(pdata):
     out = pdata._filter_sample_condition(file_list=[sample], return_copy=True)
     assert list(out.prot.obs_names) == [sample]
 
+def test_filter_sample_condition_exclude_file_list_basic(pdata):
+    """Ensure exclude_file_list correctly removes specified samples."""
+    all_samples = list(pdata.prot.obs_names)
+    exclude_sample = all_samples[0]
+
+    out = pdata._filter_sample_condition(exclude_file_list=[exclude_sample], return_copy=True)
+
+    # Excluded sample should not be present
+    assert exclude_sample not in out.prot.obs_names
+    # All others should remain
+    expected = [s for s in all_samples if s != exclude_sample]
+    assert list(out.prot.obs_names) == expected
+
+def test_filter_sample_condition_file_and_exclude_both_error(pdata):
+    """Ensure specifying both file_list and exclude_file_list raises ValueError."""
+    sample = pdata.prot.obs_names[0]
+
+    with pytest.raises(ValueError, match="cannot specify both"):
+        pdata._filter_sample_condition(
+            file_list=[sample],
+            exclude_file_list=[sample],
+            return_copy=True
+        )
+
+def test_filter_sample_exclude_file_list_public_api(pdata):
+    """Integration test via filter_sample() for exclude_file_list."""
+    all_samples = list(pdata.prot.obs_names)
+    exclude_sample = all_samples[0]
+
+    out = pdata.filter_sample(exclude_file_list=[exclude_sample], return_copy=True)
+
+    assert exclude_sample not in out.prot.obs_names
+    assert len(out.prot.obs_names) == len(all_samples) - 1
 
 # ---------------------------------------------------------------------
 # Tests for _filter_sample_values

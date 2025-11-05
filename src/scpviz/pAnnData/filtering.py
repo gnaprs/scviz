@@ -834,7 +834,7 @@ class FilterMixin:
 
         return proteins_to_keep, peptides_to_keep, orig_prot_names, orig_pep_names
 
-    def filter_sample(self, values=None, exact_cases=False, condition=None, file_list=None, min_prot=None, cleanup=True, return_copy=True, debug=False, query_mode=False):
+    def filter_sample(self, values=None, exact_cases=False, condition=None, file_list=None, exclude_file_list=None, min_prot=None, cleanup=True, return_copy=True, debug=False, query_mode=False):
         """
         Filter samples in a pAnnData object based on categorical, numeric, or identifier-based criteria.
 
@@ -851,6 +851,7 @@ class FilterMixin:
             condition (str, optional): Logical condition string referencing summary columns. This should reference columns in `pdata.summary`.
                 Examples: `"protein_count > 1000"`.
             file_list (list of str, optional): List of sample names or file identifiers to keep. Filters to only those samples (must match obs_names).
+            exclude_file_list (list of str, optional): Similar to `file_list`, but excludes the specified files/samples instead of keeping them.
             min_prot (int, optional): Minimum number of proteins required in a sample to retain it.
             cleanup (bool): If True (default), remove proteins that become all-NaN or all-zero after sample filtering and synchronize RS/peptide matrices. Set to False to retain all proteins for consistent feature alignment (e.g. during DE analysis).
             return_copy (bool): If True, returns a filtered pAnnData object; otherwise modifies in place.
@@ -895,6 +896,11 @@ class FilterMixin:
                 pdata.filter_sample(file_list=['Sample_001', 'Sample_007'])
                 ```
 
+            Exclude specific files from the dataset:
+                ```python
+                pdata.filter_sample(exclude_file_list=['Sample_001', 'Sample_007'])
+                ```
+
             For advanced usage using query mode, see the note below.
             
             !!! note "Advanced Usage"
@@ -911,14 +917,15 @@ class FilterMixin:
                     ```            
         """
         # Ensure exactly one of the filter modes is specified
-        provided = [values, condition, file_list, min_prot]
+        provided = [values, condition, file_list, min_prot, exclude_file_list]
         if sum(arg is not None for arg in provided) != 1:
             raise ValueError(
                 "Invalid filter input. You must specify exactly one of the following keyword arguments:\n"
                 "- `values=...` for categorical metadata filtering,\n"
                 "- `condition=...` for summary-level condition filtering, or\n"
                 "- `min_prot=...` to filter by minimum protein count.\n"
-                "- `file_list=...` to filter by sample IDs.\n\n"
+                "- `file_list=...` to filter by sample IDs.\n"
+                "- `exclude_file_list=...` to exclude specific sample IDs.\n\n"
                 "Examples:\n"
                 "  pdata.filter_sample(condition='protein_quant > 0.2')"
             )
@@ -935,10 +942,11 @@ class FilterMixin:
                 cleanup=cleanup
             )
 
-        if (condition is not None or file_list is not None) and not query_mode:
+        if (condition is not None or file_list is not None or exclude_file_list is not None) and not query_mode:
             return self._filter_sample_condition(
                 condition=condition,
                 file_list=file_list,
+                exclude_file_list=exclude_file_list,
                 return_copy=return_copy,
                 debug=debug, 
                 cleanup=cleanup
@@ -950,7 +958,7 @@ class FilterMixin:
         if condition is not None and query_mode:
             return self._filter_sample_query(query_string=condition, source='summary', return_copy=return_copy, debug=debug, cleanup=cleanup)
 
-    def _filter_sample_condition(self, condition = None, return_copy = True, file_list=None, cleanup=True, debug=False):
+    def _filter_sample_condition(self, condition = None, return_copy = True, file_list=None, exclude_file_list=None, cleanup=True, debug=False):
         """
         Filter samples based on numeric metadata conditions or a list of sample identifiers.
 
@@ -962,6 +970,7 @@ class FilterMixin:
         Args:
             condition (str, optional): Logical condition string referencing columns in `.summary`.
             file_list (list of str, optional): List of sample identifiers to keep.
+            exclude_file_list (list of str, optional): Same as file_list, but excludes specified sample identifiers.
             cleanup (bool): If True (default), remove proteins that become all-NaN or all-zero
                 after sample filtering and synchronize RS/peptide matrices. Set to False to
                 retain all proteins for consistent feature alignment (e.g. during DE analysis).
@@ -985,6 +994,11 @@ class FilterMixin:
                 ```python
                 pdata.filter_sample_condition(file_list=['fileA', 'fileB'])
                 ```
+
+            Exclude specific files from the dataset:
+                ```python
+                pdata.filter_sample(exclude_file_list=['Sample_001', 'Sample_007'])
+                ```
         """
         if not self._has_data(): # type: ignore[attr-defined], ValidationMixin
             pass
@@ -992,6 +1006,15 @@ class FilterMixin:
         if self._summary is None: # type: ignore[attr-defined]
             self.update_summary(recompute=True) # type: ignore[attr-defined], SummaryMixin
         
+        if file_list is not None and exclude_file_list is not None:
+            raise ValueError(
+                "You cannot specify both `file_list` and `exclude_file_list` simultaneously.\n"
+                "Please use only one mode per call:\n"
+                "  • `file_list=[...]` to keep only these samples, or\n"
+                "  • `exclude_file_list=[...]` to remove these samples.\n"
+                "If you need both operations, call `filter_sample()` twice in sequence."
+            )
+
         # Determine whether to operate on a copy or in-place
         pdata = self.copy() if return_copy else self # type: ignore[attr-defined], EditingMixin
         action = "Returning a copy of" if return_copy else "Filtered and modified"
@@ -1012,11 +1035,26 @@ class FilterMixin:
             if debug:
                 print(formatted_condition)
             index_filter = pdata._summary[pdata._summary.eval(formatted_condition)].index
-        elif file_list is not None:
-            index_filter = file_list
-            missing = [f for f in file_list if f not in pdata.prot.obs_names]
+        elif file_list is not None or exclude_file_list is not None:
+            all_samples = set(pdata.prot.obs_names)
+
+            if file_list is not None:
+                requested = set(file_list)
+                missing = list(requested - all_samples)
+                index_filter = list(all_samples.intersection(requested))
+                mode_str = "including"
+                exclude_mode = False
+
+            else:  # exclude_file_list is not None
+                requested = set(exclude_file_list)
+                missing = list(requested - all_samples)
+                index_filter = list(all_samples - requested)
+                mode_str = "excluding"
+                exclude_mode = True
+
             if missing:
                 warnings.warn(f"Some sample IDs not found: {missing}")
+
         else:
             # No filtering applied
             message = "No filtering applied. Returning original data."
@@ -1053,8 +1091,9 @@ class FilterMixin:
             message += f"    {action} sample data based on {filter_type}:\n"
             if condition:
                 message += f"{format_log_prefix('filter_conditions')}Condition: {condition}\n"
-            elif file_list:
-                message += f"{format_log_prefix('filter_conditions')}Files requested: {len(file_list)}\n"
+            elif file_list or exclude_file_list:
+                flist = file_list if file_list is not None else exclude_file_list
+                message += f"{format_log_prefix('filter_conditions')}Files requested ({mode_str}): {len(flist)}\n"
                 if missing:
                     message += f"{format_log_prefix('filter_conditions')}Missing samples ignored: {len(missing)}\n"
 
