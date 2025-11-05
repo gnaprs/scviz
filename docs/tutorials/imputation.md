@@ -1,6 +1,6 @@
 # Tutorial 3: Imputation and Normalization
 ## Imputation
-Missing values are common in proteomics. scviz provides several imputation methods.
+Missing values are common in proteomics. scpviz provides several imputation methods.
 
 ---
 

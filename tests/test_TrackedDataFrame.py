@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from scviz.TrackedDataFrame import TrackedDataFrame
+from scpviz.TrackedDataFrame import TrackedDataFrame
 
 # ---------------------------------------------------------------------
 # Fixtures

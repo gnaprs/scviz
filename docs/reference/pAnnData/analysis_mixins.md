@@ -2,20 +2,16 @@
 
 Mixins for statistical analysis and biological interpretation.
 
-### [← Back to pAnnData Overview](pAnnData.md)
-
 ---
 
-## AnalysisMixin
-
-::: src.scviz.pAnnData.analysis
+::: src.scpviz.pAnnData.analysis.AnalysisMixin
     options:
+      show_root_full_path: false
       show_root_heading: true
       heading_level: 2
 
-## EnrichmentMixin
-
-::: src.scviz.pAnnData.enrichment
+::: src.scpviz.pAnnData.enrichment.EnrichmentMixin
     options:
+      show_root_full_path: false
       show_root_heading: true
       heading_level: 2

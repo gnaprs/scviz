@@ -1,6 +1,6 @@
 # Tutorials
 
-Welcome to the **scviz tutorials**.
+Welcome to the **scpviz tutorials**.
 These guides walk you through the main steps of a single-cell or spatial proteomics workflow using `pAnnData`.  
 
 ---
@@ -15,7 +15,7 @@ Each tutorial includes:
 - Visual outputs to illustrate the results.  
 - 💡 Tips and notes to explain recommended practices.  
 
-If you’re new to **scviz**, start with [**Importing Data**](importing.md) and work through the sequence.  
+If you’re new to **scpviz**, start with [**Importing Data**](importing.md) and work through the sequence.  
 
 ## Workflow at a Glance
 

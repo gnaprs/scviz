@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from anndata import AnnData
-from scviz import pAnnData
+from scpviz import pAnnData
 import scipy.sparse
 from copy import deepcopy
 

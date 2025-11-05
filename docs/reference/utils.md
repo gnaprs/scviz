@@ -1,3 +1,3 @@
 # Utilities
 
-::: src.scviz.utils
+::: src.scpviz.utils

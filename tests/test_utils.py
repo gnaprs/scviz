@@ -4,7 +4,7 @@ import pytest
 import scipy
 import warnings
 
-from scviz import utils
+from scpviz import utils
 from anndata import AnnData
 
 @pytest.fixture
@@ -375,17 +375,17 @@ def test_get_pep_prot_mapping_unknown_source_raises():
 
 # from setup.py
 def test_get_datetime_format():
-    from scviz.setup import get_datetime
+    from scpviz.setup import get_datetime
     dt = get_datetime()
     # Expect format YYYY-MM-DD HH:MM:SS
     assert len(dt.split()) == 2
     assert len(dt.split()[0].split('-')) == 3
 
 def test_print_versions_runs(capsys):
-    from scviz.setup import print_versions
+    from scpviz.setup import print_versions
     print_versions()
     captured = capsys.readouterr().out
-    assert "scViz version" in captured
+    assert "scpviz version" in captured
     assert "Dependencies:" in captured
 
 # ------------- unprot API tests

@@ -1,6 +1,6 @@
 # Tutorial 4: Plotting
 
-Generate publication-ready plots with scviz.
+Generate publication-ready plots with scpviz.
 — generate abundance plots, PCA/UMAP, clustermaps, raincloud, volcano plots.  
 ---
 
