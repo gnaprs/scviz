@@ -37,6 +37,10 @@ All notable changes to this project are documented here.
 
 - Add test "slow" marker (8280133…)
 
+- AUTO Paper PDF Draft (7f7521e…)
+
+- AUTO Paper PDF Draft (96f24e3…)
+
 
 #### Chores
 
@@ -76,6 +80,8 @@ All notable changes to this project are documented here.
 
 - Update changelogs [skip ci] (265982c…)
 
+- Update changelogs [skip ci] (ca558ad…)
+
 
 #### Documentation
 
@@ -84,6 +90,10 @@ All notable changes to this project are documented here.
 - Update markdown files (d72e6fa…)
 
 - Add contributor covenant code of conduct (72fd27e…)
+
+- Rename all links in docs (cfc8344…)
+
+- Update mkdocs.yml (838fa33…)
 
 
 #### Fixed
@@ -106,6 +116,8 @@ All notable changes to this project are documented here.
 - (auto) Paper PDF Draft (2894f44…)
 
 - Fix indentation on update_identifiers tip (90b7bec…)
+
+- Rename scviz to scpviz (9bc6347…)
 
 
 #### Style
