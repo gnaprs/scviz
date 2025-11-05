@@ -1886,8 +1886,10 @@ class FilterMixin:
             sig_layer = 'X_qval'
             if sig_layer not in adata.layers:
                 # Fallback to global q-values if available
-                print(f"{format_log_prefix('info', 2)} Sample-specific q-values not found. Using global q-values for '{level}' significance annotation.")
+                print(f"{format_log_prefix('info', 2)} Using global q-values for '{level}' significance annotation.")
                 continue  # Skip if significance data not available
+
+            print(f"{format_log_prefix('info', 2)} Using sampl-specific q-values for '{level}' significance annotation.")
 
             data = pd.DataFrame(
                 adata.layers[sig_layer].toarray() if hasattr(adata.layers[sig_layer], 'toarray') else adata.layers[sig_layer],
