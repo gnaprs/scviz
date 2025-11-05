@@ -1,15 +1,15 @@
-site_name: scviz
+site_name: scpviz
 site_description: "Automatic documentation from sources, for MkDocs."
-site_url: https://gnaprs.github.io/scviz/
-repo_url: "https://github.com/gnaprs/scviz"
-repo_name: "gnaprs/scviz"
+site_url: https://gnaprs.github.io/scpviz/
+repo_url: "https://github.com/gnaprs/scpviz"
+repo_name: "gnaprs/scpviz"
 theme:
   name: material
   font:
-    text: Source Sans 3
+    text: Inter
     code: Roboto Mono
-  logo: assets/logo.png
-  favicon: assets/logo.png
+  logo: assets/300ppi/logo_white@300x.png
+  favicon: assets/300ppi/logo_white@300x.png
   features:
     - navigation.footer
     - content.footnote.tooltips
@@ -17,6 +17,10 @@ theme:
     - content.code.select
     - content.code.annotate
     - search.highlight
+    - navigation.sections
+    - navigation.tabs
+    - navigation.path
+    - navigation.indexes
   palette:
     # Dark Mode
     - scheme: slate
@@ -64,7 +68,7 @@ extra:
     - icon: fontawesome/brands/linkedin
       link: https://linkedin.com/in/marionpang
     - icon: fontawesome/brands/python
-      link: https://pypi.org/project/scviz/
+      link: https://pypi.org/project/scpviz/
 plugins:
   - mkdocstrings:
       handlers:
@@ -74,6 +78,9 @@ plugins:
             show_signature_annotations: true
             signature_crossrefs: false
   - search
+
+# extra_css:
+#   - stylesheets/extra.css
 
 copyright: Copyright &copy; 2025 Marion Pang
 
@@ -95,25 +102,30 @@ nav:
           - 5. Differential Expression: tutorials/de.md
           - 6. Enrichment + Networks: tutorials/enrichment.md
   - API reference:
-      - Overview : reference/overview.md
+      - reference/index.md
       - pAnnData:
-          - Base Class + Import: reference/pAnnData/pAnnData.md
+          - Base Class: reference/pAnnData/pAnnData.md
+          - Importing: reference/pAnnData/import_mixin.md
           - Core Utilities: reference/pAnnData/core_mixins.md
           - Metadata + Summary: reference/pAnnData/metadata_mixins.md
           - Editing + Filtering: reference/pAnnData/editing_mixins.md
           - Analysis + Enrichment: reference/pAnnData/analysis_mixins.md
           - Identifiers + STRING: reference/pAnnData/identifier_mixins.md
+          - Visualization: reference/pAnnData/plot_mixin.md
       - Modules:
-        - scviz.utils: reference/utils.md
-        - scviz.plotting: reference/plotting.md
+        - scpviz.utils: reference/utils.md
+        - scpviz.plotting: reference/plotting.md
       - Developer Utilities:
           - TrackedDataFrame: reference/TrackedDataFrame.md
           - Hidden Functions: reference/pAnnData/hidden_functions.md
+  - Development:
+    - Contributing: dev/contributing.md
+    - Code of Conduct: dev/CODE_OF_CONDUCT.md
+    # - Coverage report: dev/coverage.md
   - Others:
       - Admonitions: admonitions.md
       - Content-Tabs: content-tabs.md
       - Diagram: diagram.md
-
 
   - Author's website: https://gnaprs.github.io/
 # nav:

@@ -27,8 +27,9 @@ Use format:
 * test: Add, update, or fix tests [`test(filtering): add test for duplicate gene handling`]
 
 # for tag (in git bash)
-Final tag commit message: (tag: v1.0.0) chore(release): would be good!
+Final tag commit message: "Release candidate for 0.8.0"
 
+Make sure to tag from main!
 git tag "v$(grep -m1 version pyproject.toml | cut -d'"' -f2)" -m "Release v$(grep -m1 version pyproject.toml | cut -d'"' -f2)"
 git push origin "v$(grep -m1 version pyproject.toml | cut -d'"' -f2)"
 
