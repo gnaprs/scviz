@@ -1081,7 +1081,7 @@ class FilterMixin:
         print(f"Length of pdata.prot.obs_names after filter: {len(pdata.prot.obs_names)}") if debug else None
 
         # Construct formatted message
-        filter_type = "condition" if condition else "file list" if file_list else "none"
+        filter_type = "condition" if condition else "file list" if (file_list or exclude_file_list) else "none"
         log_prefix = format_log_prefix("user")
 
         if len(index_filter) == 0:
