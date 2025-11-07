@@ -1931,7 +1931,7 @@ class FilterMixin:
                 print(f"{format_log_prefix('info', 2)} Using global q-values for '{level}' significance annotation.")
                 continue  # Skip if significance data not available
 
-            print(f"{format_log_prefix('info', 2)} Using sampl-specific q-values for '{level}' significance annotation.")
+            print(f"{format_log_prefix('info', 2)} Using sample-specific q-values for '{level}' significance annotation.")
 
             data = pd.DataFrame(
                 adata.layers[sig_layer].toarray() if hasattr(adata.layers[sig_layer], 'toarray') else adata.layers[sig_layer],
