@@ -66,6 +66,8 @@ All notable changes to this project are documented here.
 
 - Update changelogs [skip ci] (dfff921…)
 
+- Update changelogs [skip ci] (6e3f746…)
+
 
 
 #### Documentation
@@ -114,6 +116,10 @@ All notable changes to this project are documented here.
 
 
 - Update readme to proper image (7b82bea…)
+
+- Remove conda installation from readme, update gitignore (0e5e5ac…)
+
+- Update joss paper.md (11151fc…)
 
 
 
