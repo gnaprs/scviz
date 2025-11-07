@@ -93,6 +93,8 @@
 
 - Update changelogs [skip ci] (f0cbb17…)
 
+- Update changelogs [skip ci] (00d4bf8…)
+
 
 
 
@@ -121,6 +123,8 @@
 - Update tutorial files (422ae4f…)
 
 - Upload diann_report.parquet, using git lfs (32501ee…)
+
+- Update download links (22c60d9…)
 
 
 
