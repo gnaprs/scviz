@@ -69,6 +69,8 @@
 
 - Update changelogs [skip ci] (8e09ce2…)
 
+- Update changelogs [skip ci] (dfff921…)
+
 
 
 
@@ -95,6 +97,8 @@
 
 
 - Update readme (b8637fb…)
+
+- Update broken links and logo (8d7b64a…)
 
 
 
