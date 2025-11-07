@@ -61,6 +61,13 @@ All notable changes to this project are documented here.
 
 
 
+##### (Git lfs)
+
+
+- Update .gitattributes for lfs upload of parquet files (ccf0e04…)
+
+
+
 ##### (Todo)
 
 
@@ -78,6 +85,8 @@ All notable changes to this project are documented here.
 - Update changelogs [skip ci] (8a99267…)
 
 - Update changelogs [skip ci] (d6d3633…)
+
+- Update changelogs [skip ci] (f0cbb17…)
 
 
 
@@ -162,6 +171,8 @@ All notable changes to this project are documented here.
 - Update Paper PDF Draft (2fe3401…)
 
 - Update paper.md and bib (f587cb5…)
+
+- Update Paper PDF Draft (8c63425…)
 
 
 
