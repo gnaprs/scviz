@@ -1,3 +1,5 @@
+*This tutorial is still under construction*
+
 # Tutorial 4: Plotting
 
 Generate publication-ready plots with scpviz.
