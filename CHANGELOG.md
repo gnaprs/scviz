@@ -54,6 +54,13 @@ All notable changes to this project are documented here.
 #### Chores
 
 
+##### (Assets)
+
+
+- Move assets out of src (917be4c…)
+
+
+
 ##### (Todo)
 
 
@@ -67,6 +74,8 @@ All notable changes to this project are documented here.
 - Update changelogs [skip ci] (dfff921…)
 
 - Update changelogs [skip ci] (6e3f746…)
+
+- Update changelogs [skip ci] (8a99267…)
 
 
 
@@ -86,6 +95,15 @@ All notable changes to this project are documented here.
 - Rename all links in docs (cfc8344…)
 
 - Update mkdocs.yml (838fa33…)
+
+
+
+##### (Quickstart)
+
+
+- Update tutorial files (422ae4f…)
+
+- Upload diann_report.parquet, using git lfs (32501ee…)
 
 
 
@@ -133,6 +151,16 @@ All notable changes to this project are documented here.
 
 
 
+#### Other
+
+
+##### (Paper)
+
+
+- Update Paper PDF Draft (2fe3401…)
+
+
+
 #### Style
 
 
@@ -151,6 +179,15 @@ All notable changes to this project are documented here.
 - Updated print statements to include exclude_file_list (3efd2c6…)
 
 - Add print for cleanup with no empty prots (b71aab6…)
+
+- Fix typo in print statement of annotate_significant_prot (9445f0a…)
+
+
+
+##### (Readme)
+
+
+- Update version on docs badge (ad74fa6…)
 
 
 
