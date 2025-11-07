@@ -274,7 +274,7 @@ def plot_significance(ax, y, h, x1=0, x2=1, col='k', pval='n.s.', fontsize=12):
     ax.plot([x1, x1, x2, x2], [y, y+h, y+h, y], lw=1, c=col)
     ax.text((x1+x2)*.5, y+h, sig, ha='center', va='bottom', color=col, fontsize=fontsize)
 
-def plot_cv(ax, pdata, classes=None, layer='X', on='protein', order=None, return_df=False, **kwargs):
+def plot_cv(ax, pdata, classes=None, layer='X', on='protein', order=None, palette=None, return_df=False, **kwargs):
     """
     Generate a box-and-whisker plot for the coefficient of variation (CV).
 
@@ -290,6 +290,8 @@ def plot_cv(ax, pdata, classes=None, layer='X', on='protein', order=None, return
         on (str): Data level to compute CV on, either `'protein'` or `'peptide'`.
         order (list, optional): Custom order of classes for plotting.
             If None, defaults to alphabetical order.
+        palette (dict or list, optional): Custom color palette for class groups.
+            If None, defaults to `scviz` package color palette.
         return_df (bool): If True, returns the underlying DataFrame used for plotting.
         **kwargs: Additional keyword arguments passed to seaborn plotting functions.
 
@@ -300,10 +302,11 @@ def plot_cv(ax, pdata, classes=None, layer='X', on='protein', order=None, return
     !!! todo "Examples Pending"
         Add usage examples here.
     """
-
+    # Compute CVs for the selected layer
     pdata.cv(classes = classes, on = on, layer = layer)
     adata = utils.get_adata(pdata, on)    
     classes_list = utils.get_classlist(adata, classes = classes, order = order)
+    
     cv_data = []
     for class_value in classes_list:
         cv_col = f'CV: {class_value}'
@@ -312,7 +315,7 @@ def plot_cv(ax, pdata, classes=None, layer='X', on='protein', order=None, return
             cv_data.append(pd.DataFrame({'Class': class_value, 'CV': cv_values}))
 
     if not cv_data:
-        warnings.warn("[plot_cv] No valid subsets found — skipping plot.")
+        print(f"{utils.format_log_prefix('warn')} No valid CV subsets found — skipping plot.")
         return ax if ax is not None else None
     
     cv_df = pd.concat(cv_data, ignore_index=True)
@@ -321,7 +324,23 @@ def plot_cv(ax, pdata, classes=None, layer='X', on='protein', order=None, return
     if return_df:
         return cv_df
     
-    sns.violinplot(x='Class', y='CV', data=cv_df, ax=ax, **kwargs)
+    if palette is None:
+        palette = get_color('palette')
+
+    # Ensure consistent class ordering
+    if order is not None:
+        cat_type = pd.api.types.CategoricalDtype(order, ordered=True)
+        cv_df['Class'] = cv_df['Class'].astype(cat_type)
+    else:
+        cv_df['Class'] = pd.Categorical(cv_df['Class'],
+                                        categories=sorted(cv_df['Class'].unique()),
+                                        ordered=True)    
+
+    violin_kwargs = dict(inner="box", linewidth=1, cut=0, alpha=0.6, density_norm="width")
+    violin_kwargs.update(kwargs)
+
+    sns.violinplot(x='Class', y='CV', data=cv_df, ax=ax, palette=palette, **violin_kwargs)
+    
     plt.title('Coefficient of Variation (CV) by Class')
     plt.xlabel('Class')
     plt.ylabel('CV')
@@ -1461,9 +1480,9 @@ def plot_clustermap(ax, pdata, on='prot', classes=None, layer="X", x_label='acce
 
 #     return ax
 
-def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold_change_mode='mean', label=5,
+def plot_volcano(ax, pdata=None, values=None, method='ttest', fold_change_mode='mean', label=5,
                  label_type='Gene', color=None, alpha=0.5, pval=0.05, log2fc=1, linewidth=0.5,
-                 fontsize=8, no_marks=False, de_data=None, return_df=False, **kwargs):
+                 fontsize=8, no_marks=False, classes=None, de_data=None, return_df=False, **kwargs):
     """
     Plot a volcano plot of differential expression results.
 
@@ -1475,7 +1494,6 @@ def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold
         ax (matplotlib.axes.Axes): Axis on which to plot.
         pdata (pAnnData, optional): Input pAnnData object. Required if `de_data`
             is not provided.
-        classes (str, optional): Sample class column to use for group comparison.
         values (list or dict, optional): Values to compare between groups.
             
             - Legacy list format: `["group1", "group2"]`
@@ -1511,6 +1529,7 @@ def plot_volcano(ax, pdata=None, classes=None, values=None, method='ttest', fold
         fontsize (int): Font size for feature labels. Default is 8.
         no_marks (bool): If True, suppress coloring of significant points and
             plot all points in grey. Default is False.
+        classes (str, optional): Sample class column to use for group comparison.
         de_data (pandas.DataFrame, optional): Pre-computed DE results. Must contain
             `"log2fc"`, `"p_value"`, and `"significance"` columns.
         return_df (bool): If True, return both the axis and the DataFrame used

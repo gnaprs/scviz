@@ -130,9 +130,6 @@ In addition to the core `pAnnData` class, **scpviz** provides two standalone mod
   These are documented for completeness but should generally not be used directly in analysis workflows.  
 
 !!! warning "Developer utilities"  
-    These tools are included for package maintainers and power users.  
-    Most end-users will not need to interact with them directly.  
+    These tools are included for package maintainers and power users. Most end-users will not need to interact with them directly.  
 
 ---
-
-👉 For hands-on examples of using the core class and modules in practice, see the [Tutorials](../tutorials/index.md).  

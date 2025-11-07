@@ -1,4 +1,4 @@
-# scpviz Contribution Guidelines
+# `scpviz` Contribution Guidelines
 
 Thank you for your interest in contributing to **scpviz**, an open-source Python package for visualizing and analyzing single-cell and bulk proteomics data.  
 We welcome contributions from the community to help improve, expand, and document the functionality of scpviz.
@@ -14,7 +14,7 @@ Please be respectful and considerate in your interactions with others.
 
 ## How to Contribute
 
-To get an overview of the project, read the [README](README.md) file.
+To get an overview of the project, read the [README](https://github.com/gnaprs/scpviz/blob/main/README.md) file.
 
 There are several ways you can contribute to scpviz, including but not limited to:
 
@@ -42,7 +42,7 @@ If not, you can [submit a new issue](https://github.com/gnaprs/scpviz/issues/new
 #### Solve an Issue
 
 Browse through the existing [issues](https://github.com/gnaprs/scpviz/issues) to find one that interests you.  
-You can filter by labels (e.g., *good first issue*, *bug*, *enhancement*).  
+You can filter by labels (e.g., *feature*, *bug*, *enhancement*).  
 If you find an issue you’d like to work on, comment to let maintainers know and open a PR when ready.
 
 ---
@@ -54,7 +54,7 @@ To contribute to scpviz, use the **fork and pull request** workflow described be
 1. [Fork the repository.](https://github.com/gnaprs/scpviz/fork)
 2. Clone your fork locally and navigate to it:
 
-       git clone https://github.com/<your-github-username>/scpviz.git
+       git clone https://github.com/gnaprs/scpviz.git
        cd scpviz
 
 3. Create a new branch for your feature or fix:

@@ -13,7 +13,7 @@ Each tutorial includes:
 
 - Example code blocks you can copy into a Jupyter notebook.  
 - Visual outputs to illustrate the results.  
-- 💡 Tips and notes to explain recommended practices.  
+- Tips and notes to explain recommended practices.  
 
 If you’re new to **scpviz**, start with [**Importing Data**](importing.md) and work through the sequence.  
 
@@ -80,4 +80,4 @@ H .-> I
 
 ---
 
-:books: For in-depth details, see the [API Reference](../reference/overview.md).
+*For in-depth details, see the [API Reference](../reference/index.md).*

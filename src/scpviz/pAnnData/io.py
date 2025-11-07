@@ -280,8 +280,9 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
 
         print(f"Peptides: {len(pep_var)}")
         if mod_col == 'Modifications in Master Proteins':
-            print(f"\n{format_log_prefix('warn')} Column 'Modifications' not found. "
-                f"Using 'Modifications in Master Proteins' instead for modification annotation.")
+            print(f"\n{format_log_prefix('info_only')} Using 'Modifications in Master Proteins' for modification annotation.")
+        elif mod_col == 'Modifications':
+            print(f"\n{format_log_prefix('info_only')} Using 'Modifications' for modification annotation.")
         elif mod_col is None:
             print(f"\n{format_log_prefix('warn')} No modification column found. Peptide modifications were not annotated. Please check if 'Modifications' or 'Modifications in Master Protein' columns were exported from PD.")
 
@@ -712,6 +713,10 @@ def suggest_obs_columns(source=None, source_type=None, filenames=None, delimiter
             delimiter = ','
         else:
             raise ValueError(f"Could not parse metadata from PD filename: {fname}")
+
+    else:
+        # --- Generic tokenization for DIA-NN or other formats ---
+        tokens = [t.strip() for t in fname.split(delimiter) if t.strip()]
 
     # --- Classify tokens ---
     suggestion = {}

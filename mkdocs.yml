@@ -8,8 +8,8 @@ theme:
   font:
     text: Inter
     code: Roboto Mono
-  logo: assets/300ppi/logo_white@300x.png
-  favicon: assets/300ppi/logo_white@300x.png
+  logo: assets/300ppi/logo_no_text@300x.png
+  favicon: assets/300ppi/logo_no_text@300x.png
   features:
     - navigation.footer
     - content.footnote.tooltips
@@ -22,20 +22,28 @@ theme:
     - navigation.path
     - navigation.indexes
   palette:
-    # Dark Mode
-    - scheme: slate
+    # Palette toggle for automatic mode
+    - media: "(prefers-color-scheme)"
       toggle:
-        icon: material/weather-sunny
-        name: Dark mode
+        icon: material/brightness-auto
+        name: Switch to light mode
+
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default 
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
       primary: blue
       accent: deep orange
 
-    # Light Mode
-    - scheme: default
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
       toggle:
-        icon: material/weather-night
-        name: Light mode
-      primary: blue
+        icon: material/brightness-4
+        name: Switch to system preference
+      primary: black
       accent: deep orange
 
 markdown_extensions:
@@ -61,6 +69,7 @@ markdown_extensions:
   - pymdownx.details
   - footnotes
   - md_in_html
+  - tables
 extra:
   social:
     - icon: fontawesome/brands/github
@@ -79,6 +88,9 @@ plugins:
             signature_crossrefs: false
   - search
 
+extra_javascript:
+  - https://unpkg.com/tablesort@5.3.0/dist/tablesort.min.js
+  - javascripts/tablesort.js
 # extra_css:
 #   - stylesheets/extra.css
 
@@ -93,6 +105,7 @@ nav:
   - Getting started:
       - Installation: tutorials/installation.md
       - Quickstart: tutorials/quickstart.md
+      - Single-cell Example: tutorials/single_cell.md
       - In-depth Tutorials:
           - Overview: tutorials/index.md
           - 1. Importing Data: tutorials/importing.md
