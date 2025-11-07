@@ -2,6 +2,10 @@
 ## Imputation
 Missing values are common in proteomics. scpviz provides several imputation methods.
 
+!!! note
+    Pre-processing functions like normalize() and impute() act directly on the pAnnData object rather than returning a copy.
+    By default, the processed data are written to the active .X layer unless a new layer name is specified.
+
 ---
 
 ### KNN Imputation
@@ -31,3 +35,15 @@ pdata.stats["imputation"]
 ## Normalization
 and apply normalization strategies
 — adjust for sample effects (global, reference feature, or directLFQ).  
+
+## Normalization
+
+```python
+# Normalize intensities by global median
+pdata.normalize(method="global")
+
+# Normalize to reference proteins
+pdata.normalize(method="reference_feature", reference_columns=["ACTB", "GAPDH"])
+```
+
+💡 *Note: Normalization choices can affect downstream DE and enrichment.*

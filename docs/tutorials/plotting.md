@@ -2,6 +2,10 @@
 
 Generate publication-ready plots with scpviz.
 — generate abundance plots, PCA/UMAP, clustermaps, raincloud, volcano plots.  
+
+
+Most plotting functions accept a `matplotlib.axes.Axes` object as the first argument, allowing seamless integration into multi-panel figures.
+
 ---
 
 ## Abundance Plots
@@ -13,7 +17,7 @@ pdata.plot_abundance(
     order=["control", "treated"]
 )
 ```
-
+The `plot_abundance()` function automatically selects between barplots and violin plots (with inner points) depending on the number of samples per group.
 ---
 
 ## PCA and UMAP
