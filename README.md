@@ -1,5 +1,5 @@
 # scpviz
-<img src="https://raw.githubusercontent.com/gnaprs/scpviz/refs/heads/main/docs/assets/logo.png"
+<img src="https://raw.githubusercontent.com/gnaprs/scpviz/refs/heads/main/docs/assets/300ppi/logo_black_label.png"
  align="right" width="256"/>
  [![DOI](https://zenodo.org/badge/762480088.svg)](https://doi.org/10.5281/zenodo.17362532)
 
@@ -12,59 +12,47 @@
 [![Docs](https://img.shields.io/badge/docs-v0.3.0-brightgreen.svg)](https://gnaprs.github.io/scpviz)
 
 
-`scpviz` is a Python library designed for scientific visualization of single cell proteomics data, with plans to support more data types in the future.
+**scpviz** is a Python package for single-cell and spatial proteomics data analysis, built around a custom `pAnnData` object.  
+It extends the [AnnData](https://anndata.readthedocs.io/) ecosystem with proteomics-specific functionality, enabling seamless integration of proteins, peptides, and relational data.
 
 * **Documentation**: https://gnaprs.github.io/scpviz/
 * **Conda**: https://anaconda.org/gnaprs/scpviz (FIX)
 * **Python Package Index (PyPI)**: https://pypi.org/project/scpviz/
 
-## Features
-
-* [`pAnnData`](https://github.com/bbye98/mdcraft/tree/main/src/mdcraft/algorithm):
-Object for protein (`.prot`) and peptide (`.pep`) AnnData objects, along with ...
-(Sub bullet points for each mixin?)
-    * [`analysis`](https://github.com/bbye98/mdcraft/tree/main/src/mdcraft/analysis):
-Serial and parallel data analysis tools built on top of the MDAnalysis
-framework.
-    * [`editing`]
-    * [`identifier`]
-    * [`metadata`]
-* [`plotting`](https://github.com/bbye98/mdcraft/tree/main/src/mdcraft/fit):
-Plotting functions Settings and additional functionality for Matplotlib figures.
-* [`utilities`](https://github.com/bbye98/mdcraft/tree/main/src/mdcraft/lammps):
-Helper functions for etc
-
 ## Getting started
 ### Installation
 
-scpviz requires Python 3.8 or later.
+`scpviz` requires Python 3.8 or later. It is distributed as a Python package and can be installed with `pip`.
 
-For the most up-to-date version of scpviz, clone the repository and
-install the package using pip:
+    python3 -m pip install scpviz
 
-    conda create -n scpviz python=3.11 numpy pandas pip
-    conda activate scpviz
-    pip install git+https://github.com/gnaprs/scpviz.git@development
+This will install all required dependencies, including `scanpy`, `anndata`, `pandas`, and common plotting libraries.
 
 Alternatively, scpviz is available on Conda:
 
     conda install gnaprs::scpviz
 
-and PyPI:
+For the most up-to-date version of scpviz, clone the repository and
+install the package using pip:
 
-    python3 -m pip install scpviz
+    conda create -n scpviz python=3.8 numpy pandas pip
+    conda activate scpviz
+    pip install git+https://github.com/gnaprs/scpviz.git@development
 
-### Tutorial
+### Quickstart
 
-link to tutorial ipynb for users.
+Check out the [quickstart](https://github.com/gnaprs/scpviz/tutorials/quickstart/) guide for a run through import, basic preprocessing and quick visualization
 
-### Tests
+### In-depth Tutorials
+For more in-depth guides on importing, filtering, plotting, and running enrichment, see the [tutorials](https://github.com/gnaprs/scpviz/tutorials/).
 
-After installing, to run the scpviz tests locally, use `pytest`:
+### API Reference
 
-    pip install pytest
-    cd scpviz
-    pytest
+Full function documentation for the `pAnnData` class and utility modules can be found on our [documentation page](https://github.com/gnaprs/scpviz/reference/).
+
+## Contributing
+
+If you'll like to contribute to `scpviz`, please see the [contributing guidelines](https://github.com/gnaprs/scpviz/dev/contributing/). We welcome contributions from the community to help improve, expand, and document the functionality of scpviz.
 
 ## License
 `scpviz` was created by Marion Pang. It is licensed under the terms of the MIT license.
