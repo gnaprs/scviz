@@ -16,7 +16,6 @@
 It extends the [AnnData](https://anndata.readthedocs.io/) ecosystem with proteomics-specific functionality, enabling seamless integration of proteins, peptides, and relational data.
 
 * **Documentation**: https://gnaprs.github.io/scpviz/
-* **Conda**: https://anaconda.org/gnaprs/scpviz (FIX)
 * **Python Package Index (PyPI)**: https://pypi.org/project/scpviz/
 
 ## Getting started
@@ -27,10 +26,6 @@ It extends the [AnnData](https://anndata.readthedocs.io/) ecosystem with proteom
     python3 -m pip install scpviz
 
 This will install all required dependencies, including `scanpy`, `anndata`, `pandas`, and common plotting libraries.
-
-Alternatively, scpviz is available on Conda:
-
-    conda install gnaprs::scpviz
 
 For the most up-to-date version of scpviz, clone the repository and
 install the package using pip:

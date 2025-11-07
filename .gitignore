@@ -139,3 +139,11 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+dev/__assets__/Housekeeping_GenesHuman.csv
+dev/__assets__/Housekeeping_GenesMouse.csv
+dev/__assets__/MostStable_Human.csv
+dev/__assets__/MostStable_Mouse.csv
+peptide_matrix.aq_reformat.tsv
+peptide_matrix.aq_reformat.tsv.ion_intensities.tsv
+peptide_matrix.aq_reformat.tsv.protein_intensities.tsv
+peptide_matrix.aq_reformat.tsv.run_config.tsv
