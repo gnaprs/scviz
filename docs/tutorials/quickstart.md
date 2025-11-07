@@ -1,10 +1,15 @@
 # Quickstart
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/gnaprs/scpviz/blob/main/docs/tutorials/quickstart.ipynb)
+[![Download Notebook](https://img.shields.io/badge/download-quickstart__notebook-blue?logo=icloud&style=flat-square)](https://github.com/gnaprs/scpviz/raw/main/docs/tutorials/quickstart.ipynb)
 
 This quickstart tutorial demonstrates a minimal end-to-end workflow using **scpviz**.
 
-First, import the modules:
+First, install `scpviz` and import the modules:
+
+```py
+!pip install scpviz
+```
+
 
 ```py
 from scpviz import pAnnData as pAnnData
@@ -28,7 +33,8 @@ Proteomics data is stored in a `pAnnData` object. `scpviz` currently supports tw
     obs_columns = ['Sample','cellline','treatment','condition','duration']
     pdata = pAnnData.import_data(
         source_type='pd', 
-        prot_file = '../assets/pd_prot.txt', 
+        prot_file = 'pd_prot.txt', 
+        pep_file='pd32_PeptideSequenceGroups.txt',
         obs_columns=obs_columns)
     ```
 
@@ -57,7 +63,7 @@ Proteomics data is stored in a `pAnnData` object. `scpviz` currently supports tw
     obs_columns = ['user', 'date', 'ms', 'acquisition', 'faims', 'column', 'gradient', 'amount', 'region', 'rep']
     pdata = pAnnData.import_data(
         source_type='diann', 
-        report_file = '../assets/diann_report.parquet', 
+        report_file = 'diann_report.parquet', 
         obs_columns=obs_columns)
     ```
 
