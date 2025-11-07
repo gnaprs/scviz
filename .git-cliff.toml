@@ -16,7 +16,12 @@ body = """
 {% for group, commits in release.commits | group_by(attribute="group") %}
 #### {{ group | upper_first }}
 {% for commit in commits %}
-- {{ commit.message | split(pat="\n") | first | upper_first | trim }} ({{ commit.id | truncate(length=7) }})
+{% set msg = commit.message | split(pat="\n") | first | trim %}
+{% if msg matches "^[a-z]+\\(.+\\):" %}
+- ({{ msg | regex_replace(pattern="^[a-z]+\\((.+)\\):.*", replace="\\1") }}) {{ msg | regex_replace(pattern="^[a-z]+\\(.+\\):\\s*", replace="") | upper_first }} ({{ commit.id | truncate(length=7) }})
+{% else %}
+- {{ msg | upper_first }} ({{ commit.id | truncate(length=7) }})
+{% endif %}
 {% endfor %}
 {% endfor %}
 
@@ -30,7 +35,12 @@ body = """
 {% for group, commits in commits | group_by(attribute="group") %}
 #### {{ group | upper_first }}
 {% for commit in commits %}
-- {{ commit.message | split(pat="\n") | first | upper_first | trim }} ({{ commit.id | truncate(length=7) }})
+{% set msg = commit.message | split(pat="\n") | first | trim %}
+{% if msg matches "^[a-z]+\\(.+\\):" %}
+- ({{ msg | regex_replace(pattern="^[a-z]+\\((.+)\\):.*", replace="\\1") }}) {{ msg | regex_replace(pattern="^[a-z]+\\(.+\\):\\s*", replace="") | upper_first }} ({{ commit.id | truncate(length=7) }})
+{% else %}
+- {{ msg | upper_first }} ({{ commit.id | truncate(length=7) }})
+{% endif %}
 {% endfor %}
 {% endfor %}
 
@@ -67,6 +77,7 @@ commit_parsers = [
   { message = "^(ci)(\\(.+\\))?:", group = "CI" },
   { message = "^(test)(\\(.+\\))?:", group = "Tests" },
   { message = "^(chore)(\\(.+\\))?:", group = "Chores" },
+  { message = "^(docs)(\\(.+\\))?:", group = "Documentation" },
 
   # Legacy keyword groups (for older commits)
   { message = "(?i)^(add|added|implement|introduce|create|upload)", group = "Added" },
