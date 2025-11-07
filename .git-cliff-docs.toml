@@ -14,8 +14,13 @@ body = """
 
 {% for group, commits in release.commits | group_by(attribute="group") %}
 #### {{ group | upper_first }}
+{% for scope, commits in commits | group_by(attribute="scope") %}
+{% if scope != "unscoped" %}
+##### ({{ scope | upper_first }})
+{% endif %}
 {% for commit in commits %}
 - {{ commit.message | split(pat="\\n") | first | upper_first | trim }} ({{ commit.id | truncate(length=7) }})
+{% endfor %}
 {% endfor %}
 
 {% endfor %}
@@ -27,8 +32,13 @@ body = """
 
 {% for group, commits in commits | group_by(attribute="group") %}
 #### {{ group | upper_first }}
+{% for scope, commits in commits | group_by(attribute="scope") %}
+{% if scope != "unscoped" %}
+##### ({{ scope | upper_first }})
+{% endif %}
 {% for commit in commits %}
 - {{ commit.message | split(pat="\\n") | first | upper_first | trim }} ({{ commit.id | truncate(length=7) }})
+{% endfor %}
 {% endfor %}
 
 {% endfor %}
@@ -55,16 +65,17 @@ commit_parsers = [
   { message = "(?i)merge (pull request|branch|development)", skip = true },
   { message = "(?i)update to v[0-9]", skip = true },
 
-  # Conventional Commit types
-  { message = "^(feat)(\\(.+\\))?:", group = "Added" },
-  { message = "^(fix)(\\(.+\\))?:", group = "Fixed" },
-  { message = "^(refactor)(\\(.+\\))?:", group = "Changed" },
-  { message = "^(perf)(\\(.+\\))?:", group = "Performance" },
-  { message = "^(style)(\\(.+\\))?:", group = "Style" },
-  { message = "^(build)(\\(.+\\))?:", group = "Build System" },
-  { message = "^(ci)(\\(.+\\))?:", group = "CI" },
-  { message = "^(test)(\\(.+\\))?:", group = "Tests" },
-  { message = "^(chore)(\\(.+\\))?:", group = "Chores" },
+  # Conventional Commit types (scope-aware)
+  { message = "^(feat)(\\(.+\\))?:", group = "Added", default_scope = "unscoped" },
+  { message = "^(fix)(\\(.+\\))?:", group = "Fixed", default_scope = "unscoped" },
+  { message = "^(refactor)(\\(.+\\))?:", group = "Changed", default_scope = "unscoped" },
+  { message = "^(perf)(\\(.+\\))?:", group = "Performance", default_scope = "unscoped" },
+  { message = "^(style)(\\(.+\\))?:", group = "Style", default_scope = "unscoped" },
+  { message = "^(build)(\\(.+\\))?:", group = "Build System", default_scope = "unscoped" },
+  { message = "^(ci)(\\(.+\\))?:", group = "CI", default_scope = "unscoped" },
+  { message = "^(test)(\\(.+\\))?:", group = "Tests", default_scope = "unscoped" },
+  { message = "^(chore)(\\(.+\\))?:", group = "Chores", default_scope = "unscoped" },
+  { message = "^(docs)(\\(.+\\))?:", group = "Documentation", default_scope = "unscoped" },
 
   # Legacy keyword groups (for older commits)
   { message = "(?i)^(add|added|implement|introduce|create|upload)", group = "Added" },
