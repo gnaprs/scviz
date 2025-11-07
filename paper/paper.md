@@ -1,5 +1,5 @@
 ---
-title: 'scpviz: A Python bioinformatics toolkit for Single-cell Proteomics-omics analysis'
+title: 'scpviz: A Python bioinformatics toolkit for Single-cell Proteomics and multi-omics analysis'
 tags:
   - Python
   - single-cell
@@ -35,31 +35,31 @@ Proteomics seeks to characterize protein dynamics by measuring both protein abun
 
 Single-cell proteomics extends these approaches to resolve protein expression at the level of individual cells or microdissected tissue regions. Such data are typically sparse, with many missing values, and are generated within complex experimental designs involving multiple classes of samples (e.g., cell type, treatment, condition). These properties distinguish single-cell proteomics from bulk experiments and create unique challenges in data processing, normalization, and interpretation. The single-cell transcriptomics community has established a mature ecosystem for managing similar challenges, exemplified by the `scanpy` package [@SCANPY:2018] and the broader `scverse` ecosystem. Building on these foundations, scpviz extends the AnnData data structure to the domain of proteomics. `scpviz` is a Python package that streamlines single-cell and spatial proteomics workflows, supporting a complete  analysis pipeline from raw peptide-level data to protein-level summaries and downstream interpretation through differential expression, enrichment analysis, and network analysis. At its core, `scpviz` centers the `pAnnData` class, an `AnnData`-affiliated data structure specialized for proteomics. Together, these components make `scpviz` a comprehensive and extensible framework for single-cell proteomics. By combining flexible data structures, reproducible workflows, and seamless integration with the AnnData/Scanpy ecosystem, the package enables researchers to efficiently connect peptide-level evidence to protein-level interpretation, thereby accelerating methodological development and biological discovery in proteomics.
 
-
 # Statement of need
-Although general-purpose data analysis frameworks such as `scanpy` [@SCANPY:2018] and the broader `scverse` ecosystem have become indispensable for single-cell transcriptomics, comparable tools for proteomics remain limited. Existing proteomics software often focus on specialized tasks (e.g., peptide identification or spectrum assignment) and do not provide a unified framework for downstream analysis of peptide- and protein-level data within single-cell and spatial contexts. `scpviz` is designed to address these gaps by offering an integrated system for the complete proteomics workflow, from raw peptide-level evidence to protein-level summaries and biological interpretation. The package is intended for computational biologists and proteomics researchers working with low-input or single-cell datasets. The package is designed to support the complete analysis pipeline, extending from raw peptide-level data to protein-level summaries, and biological interpretation (e.g., differential expression, enrichment analysis, network analysis). 
+Although general-purpose data analysis frameworks such as `scanpy` [@SCANPY:2018] and the broader `scverse` ecosystem have become indispensable for single-cell transcriptomics, comparable tools for proteomics remain limited. Existing proteomics software often focus on specialized tasks (e.g., peptide identification or spectrum assignment) and do not provide a unified framework for downstream analysis of peptide- and protein-level data within single-cell and spatial contexts. 
 
-At the core of scpviz is the `pAnnData` class, an `AnnData`-affiliated data structure specialized for proteomics. It organizes peptide (`.pep`) and protein (`.prot`) `AnnData` objects together with supporting attributes such as `.summary`, `.metadata`, `.rs` matrices (protein–peptide relationships), and `.stats`. This design allows users to move flexibly between peptide- and protein-level perspectives, while preserving compatibility with established Python libraries for data science and visualization.
+`scpviz` addresses these gaps by offering an integrated system for the complete proteomics workflow, from raw peptide-level evidence to protein-level summaries and biological interpretation. It is designed for computational biologists and proteomics researchers working with low-input or single-cell datasets from data sources such as Proteome Discoverer or DIA-NN[@demichevDIANNNeuralNetworks2020a].
 
-The package extends beyond simple data storage by implementing a wide array of proteomics-specific functions. These include filtering operations (e.g., requiring proteins to be supported by at least two unique peptides), normalization and imputation strategies tailored for sparse datasets, and visualization methods such as PCA, UMAP, clustermaps, and violin or box plots of abundance distributions. For downstream interpretation, scpviz integrates with external resources: UniProt for protein annotation and STRING for functional enrichment and protein–protein interaction network analysis. `scpviz` `pAnnData` objects also integrate seamlessly with the scanpy package [@SCANPY:2018]; for example, the `scpviz.pAnnData.clean_x()` function prepares data matrices in the appropriate format for direct use in Scanpy workflows.
+At the core of scpviz is the `pAnnData` class, an `AnnData`-affiliated data structure specialized for proteomics. It organizes peptide (`.pep`) and protein (`.prot`) `AnnData` objects alongside supporting attributes such as `.summary`, `.metadata`, `.rs` matrices (protein–peptide relationships), and `.stats`. This design allows users to move flexibly between between peptides and proteins while maintaining compatibility with established Python libraries for data science and visualization.
+
+Beyond data organization, `scpviz` implements proteomics-specific operations, including filtering (e.g., requiring proteins supported by at least two unique peptides), normalization and imputation methods tailored for sparse datasets, and visualization tools such as PCA, UMAP, clustermaps, and abundance plots. For downstream interpretation, it integrates with UniProt for annotation and STRING for enrichment and network analysis. The framework also incorporates single-cell proteomics–specific normalization strategies such as directlfq [@ammarAccurateLabelFreeQuantification2023], ensuring robust quantification across heterogeneous samples. Finally, pAnnData objects interface seamlessly with scanpy [@SCANPY:2018] and other ecosystem tools such as harmony [@korsunskyFastSensitiveAccurate2019a], enabling direct incorporation into established single-cell workflows.
 
 The design philosophy of `scpviz` emphasizes both usability and extensibility. General users can rely on its streamlined API to import, process, and visualize single-cell proteomics data without deep programming expertise, while advanced users can extend the framework to accommodate custom analysis pipelines. The package has already been applied in published manuscripts and preprints [@Pang:2025; @DuttaPang:2025; @Uslan:2025] as well as manuscripts in preparation, and it has been incorporated into graduate-level training to illustrate how proteomics workflows parallel to those in single-cell transcriptomics.
 
-The applications of `scpviz` span diverse areas of life sciences research, from studying protein dynamics and signaling pathways in disease models to integrating proteomics with transcriptomics for multi-omics analysis. By bridging the gap between raw mass spectrometry data and systems-level interpretation, scpviz provides a versatile and reproducible platform for advancing single-cell and spatial proteomics.
+The applications of `scpviz` span diverse areas of life sciences research, from studying protein dynamics and signaling pathways to integrating proteomics with transcriptomics for multi-omics analysis. By bridging the gap between raw mass spectrometry data and systems-level interpretation, `scpviz` provides a versatile and reproducible platform for advancing single-cell and spatial proteomics.
 
 # Acknowledgements
 
 We acknowledge contributions from Pierre Walker, and support from the A*STAR Scholarship (BS-PhD) during the genesis of this project.
 
-If you want to cite a software repository URL (e.g. something on GitHub without a preferred
-citation) then you can do it with the example BibTeX entry below for @fidgit.
+<!-- If you want to cite a software repository URL (e.g. something on GitHub without a preferred
+citation) then you can do it with the example BibTeX entry below for @fidgit. -->
 
-Figures can be included like this:
+<!-- Figures can be included like this:
 ![Caption for example figure.\label{fig:example}](figure.png)
 and referenced from text using \autoref{fig:example}.
 
 Figure sizes can be customized by adding an optional second parameter:
-![Caption for example figure.](figure.png){ width=20% }
-
+![Caption for example figure.](figure.png){ width=20% } -->
 
 # References
