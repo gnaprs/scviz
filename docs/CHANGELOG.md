@@ -95,6 +95,8 @@
 
 - Update changelogs [skip ci] (00d4bf8…)
 
+- Update changelogs [skip ci] (f849dd9…)
+
 
 
 
@@ -150,6 +152,13 @@
 - Update quickstart, some tutorials in works (91e10bf…)
 
 - Update tutorial home page (f1a0cb9…)
+
+
+
+##### (Tutorials)
+
+
+- Add pending notice (23b7d0c…)
 
 
 
