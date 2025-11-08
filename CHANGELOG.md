@@ -92,6 +92,8 @@ All notable changes to this project are documented here.
 
 - Update changelogs [skip ci] (f849dd9…)
 
+- Update changelogs [skip ci] (aa84d7c…)
+
 
 
 #### Documentation
@@ -101,6 +103,13 @@ All notable changes to this project are documented here.
 
 
 - Upload logo and test assets (e1ee49b…)
+
+
+
+##### (Filtering)
+
+
+- Finished filtering tutorial, update docstrings (9a3f6a5…)
 
 
 
