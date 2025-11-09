@@ -94,6 +94,8 @@ All notable changes to this project are documented here.
 
 - Update changelogs [skip ci] (aa84d7c…)
 
+- Update changelogs [skip ci] (11a3754…)
+
 
 
 #### Documentation
@@ -195,6 +197,16 @@ All notable changes to this project are documented here.
 - Update paper.md and bib (f587cb5…)
 
 - Update Paper PDF Draft (8c63425…)
+
+
+
+#### Performance
+
+
+##### (Io)
+
+
+- Initialize rs as sparse, memory improvement from 6+ GB usage to ~60MB (da721b6…)
 
 
 
