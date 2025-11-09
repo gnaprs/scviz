@@ -77,6 +77,7 @@ Hidden functions for all MixIns.
         - _import_proteomeDiscoverer
         - _import_diann
         - _create_pAnnData_from_parts
+        - _build_rs_matrix
 
 ::: src.scpviz.pAnnData.metrics
     options:

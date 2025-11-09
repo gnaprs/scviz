@@ -207,7 +207,7 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
         prot_obs_names = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract(r'Abundance: (F\d+):')[0].values
         # prot_obs: sample typing from the column name, drop column if all 'n/a'
         prot_obs = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract(r'Abundance: F\d+: (.+)$')[0].values
-        prot_obs = pd.DataFrame(prot_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).applymap(str.strip).astype('category')
+        prot_obs = pd.DataFrame(prot_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(lambda x: x.strip() if isinstance(x, str) else x).astype('category')
         if (prot_obs == "n/a").all().any():
             print(f"{format_log_prefix('warn')} Found columns with all 'n/a'. Dropping these columns.")
             prot_obs = prot_obs.loc[:, ~(prot_obs == "n/a").all()]
@@ -273,7 +273,7 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
 
         # prot_obs: sample typing from the column name, drop column if all 'n/a'
         pep_obs = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract(r'Abundance: F\d+: (.+)$')[0].values
-        pep_obs = pd.DataFrame(pep_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).applymap(str.strip).astype('category')
+        pep_obs = pd.DataFrame(pep_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(lambda x: x.strip() if isinstance(x, str) else x).astype('category')
         if (pep_obs == "n/a").all().any():
             print(f"{format_log_prefix('warn')} Found columns with all 'n/a'. Dropping these columns.")
             pep_obs = pep_obs.loc[:, ~(pep_obs == "n/a").all()]
@@ -294,13 +294,8 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
         # RS DATA
         # rs is in the form of a binary matrix, protein x peptide
         pep_prot_list = pep_all['Master Protein Accessions'].str.split('; ')
-        mlb = MultiLabelBinarizer()
-        rs = mlb.fit_transform(pep_prot_list)
-        if prot_var_names is not None:
-            index_dict = {protein: index for index, protein in enumerate(mlb.classes_)}           
-            reorder_indices = [index_dict[protein] for protein in prot_var_names]
-            rs = rs[:, reorder_indices]
-        # print("RS matrix successfully computed")
+        rs, mlb = _build_rs_matrix(pep_prot_list, prot_var_names = prot_var_names)
+
     else:
         rs = None
 
@@ -485,11 +480,7 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
     # RS DATA
     # rs: protein x peptide relational data
     pep_prot_list = report_all.drop_duplicates(subset=['Precursor.Id'])['Protein.Group'].str.split(';')
-    mlb = MultiLabelBinarizer()
-    rs = mlb.fit_transform(pep_prot_list)
-    index_dict = {protein: index for index, protein in enumerate(mlb.classes_)}
-    reorder_indices = [index_dict[protein] for protein in prot_var_names]
-    rs = rs[:, reorder_indices]
+    rs, mlb = _build_rs_matrix(pep_prot_list, prot_var_names = prot_var_names)
 
     # -----------------------------
     # ASSERTIONS
@@ -522,6 +513,37 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
     )
 
     return pdata
+
+def _build_rs_matrix(pep_prot_list, prot_var_names=None):
+    """
+    Build a sparse boolean RS (protein × peptide) relational matrix.
+
+    Args:
+        pep_prot_list (list or pd.Series): List/Series where each entry
+            contains one or more protein accessions (as lists or split strings).
+        prot_var_names (list, optional): Ordered list of protein accessions to
+            align RS columns. If None, uses the order returned by MultiLabelBinarizer.
+
+    Returns:
+        scipy.sparse.csr_matrix: Sparse boolean RS matrix (peptides × proteins).
+    """
+    # sparse bool RS matrix to save RAM
+    mlb = MultiLabelBinarizer(sparse_output=True)
+    rs = mlb.fit_transform(pep_prot_list).astype(bool)
+
+    # reorder columns to match protein order
+    if prot_var_names is not None:
+        index_dict = {protein: idx for idx, protein in enumerate(mlb.classes_)}
+        reorder_indices = [
+            index_dict[p] for p in prot_var_names if p in index_dict
+        ]
+        rs = rs[:, reorder_indices]
+
+    # make csr matrix so downstream operations are faster
+    rs = sparse.csr_matrix(rs, dtype=bool)
+    rs.eliminate_zeros()
+
+    return rs, mlb
 
 def _create_pAnnData_from_parts(
     prot_X, pep_X, rs,

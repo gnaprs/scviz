@@ -40,7 +40,6 @@ def test_import_pd32():
     assert pdata.pep is None
     assert pdata.rs is None
 
-@pytest.mark.slow
 def test_import_pd32_with_pep():
     test_dir = Path(__file__).parent
     prot_file = str(test_dir / 'test_pd32_Proteins.txt')
@@ -212,7 +211,7 @@ def test_update_missing_genes_no_missing(monkeypatch, pdata, capsys):
     """Covers branch when no missing entries."""
     monkeypatch.setattr("scpviz.utils.get_uniprot_fields", lambda *a, **k: pd.DataFrame())
     # fill all Genes → no missing mask
-    pdata.prot.var["Genes"].fillna("TESTGENE", inplace=True)
+    pdata.prot.var["Genes"] = pdata.prot.var["Genes"].fillna("TESTGENE")
     pdata.update_missing_genes(verbose=True)
     out = capsys.readouterr().out
     assert "No missing gene names" in out
