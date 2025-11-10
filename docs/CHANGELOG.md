@@ -101,6 +101,8 @@
 
 - Update changelogs [skip ci] (11a3754…)
 
+- Update changelogs [skip ci] (b7f7e72…)
+
 
 
 
@@ -138,6 +140,13 @@
 - Upload diann_report.parquet, using git lfs (32501ee…)
 
 - Update download links (22c60d9…)
+
+
+
+##### (Quicstart)
+
+
+- Add colab link for user ease of use (8fbf44c…)
 
 
 
@@ -190,6 +199,8 @@
 
 
 - Implement handler for diann files when using suggest_obs_columns (93cfac5…)
+
+- Push python version fix for .map() (49be220…)
 
 
 
