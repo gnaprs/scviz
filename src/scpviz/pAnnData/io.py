@@ -207,7 +207,10 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
         prot_obs_names = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract(r'Abundance: (F\d+):')[0].values
         # prot_obs: sample typing from the column name, drop column if all 'n/a'
         prot_obs = prot_all.filter(regex='Abundance: F', axis=1).columns.str.extract(r'Abundance: F\d+: (.+)$')[0].values
-        prot_obs = pd.DataFrame(prot_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(lambda x: x.strip() if isinstance(x, str) else x).astype('category')
+        prot_obs = pd.DataFrame(prot_obs, columns=['metadata'])['metadata'] \
+            .str.split(',', expand=True)
+        prot_obs = _safe_strip(prot_obs).astype('category')
+        
         if (prot_obs == "n/a").all().any():
             print(f"{format_log_prefix('warn')} Found columns with all 'n/a'. Dropping these columns.")
             prot_obs = prot_obs.loc[:, ~(prot_obs == "n/a").all()]
@@ -273,7 +276,10 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
 
         # prot_obs: sample typing from the column name, drop column if all 'n/a'
         pep_obs = pep_all.filter(regex='Abundance: F', axis=1).columns.str.extract(r'Abundance: F\d+: (.+)$')[0].values
-        pep_obs = pd.DataFrame(pep_obs, columns=['metadata'])['metadata'].str.split(',', expand=True).map(lambda x: x.strip() if isinstance(x, str) else x).astype('category')
+        pep_obs = pd.DataFrame(pep_obs, columns=['metadata'])['metadata'] \
+            .str.split(',', expand=True)
+        pep_obs = _safe_strip(pep_obs).astype('category')
+        
         if (pep_obs == "n/a").all().any():
             print(f"{format_log_prefix('warn')} Found columns with all 'n/a'. Dropping these columns.")
             pep_obs = pep_obs.loc[:, ~(pep_obs == "n/a").all()]
@@ -513,6 +519,15 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
     )
 
     return pdata
+
+def _safe_strip(df_like):
+    """Safely strip whitespace from strings in a DataFrame or Series."""
+    import sys
+    if hasattr(df_like, "applymap") and (sys.version_info < (3, 9)):
+        return df_like.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+    else:
+        return df_like.map(lambda x: x.strip() if isinstance(x, str) else x)
+
 
 def _build_rs_matrix(pep_prot_list, prot_var_names=None):
     """
