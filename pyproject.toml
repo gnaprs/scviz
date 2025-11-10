@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scpviz"
-version = "0.5.0-alpha"
+version = "0.5.1-alpha"
 authors = [
   {name="Marion Pang", email="sr_pang@hotmail.com"},
 ]
