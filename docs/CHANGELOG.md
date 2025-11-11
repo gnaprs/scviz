@@ -6,6 +6,31 @@
 ### Unreleased <small>Unreleased</small> { id="Unreleased" }
 
 
+#### Chores
+
+
+
+- Update changelogs [skip ci] (20d06bc…)
+
+
+
+
+#### Tests
+
+
+##### (Io)
+
+
+- Add python check to mapping function to account for function deprecation in pandas (8b6b130…)
+
+
+
+
+
+
+### 0.5.1-alpha <small>November 10, 2025</small> { id="0.5.1-alpha" }
+
+
 #### Added
 
 

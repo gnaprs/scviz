@@ -4,6 +4,31 @@ All notable changes to this project are documented here.
 <summary><b>Unreleased</b></summary>
 
 
+#### Chores
+
+
+
+- Update changelogs [skip ci] (20d06bc…)
+
+
+
+#### Tests
+
+
+##### (Io)
+
+
+- Add python check to mapping function to account for function deprecation in pandas (8b6b130…)
+
+
+
+
+</details>
+
+<details open>
+<summary><b>0.5.1-alpha</b> – 2025-11-10</summary>
+
+
 #### Added
 
 
