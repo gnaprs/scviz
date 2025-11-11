@@ -3,6 +3,36 @@ import pandas as pd
 from scpviz import pAnnData
 from pathlib import Path
 
+from scpviz.pAnnData.io import _safe_strip
+
+def test_safe_strip_dataframe_and_series():
+    # --- DataFrame case ---
+    df = pd.DataFrame({"A": [" a", "b ", None], "B": [" c ", " d", "e "]})
+    out_df = _safe_strip(df)
+
+    # Verify type and values
+    assert isinstance(out_df, pd.DataFrame)
+    assert out_df.iloc[0, 0] == "a"
+    assert out_df.iloc[1, 1] == "d"
+    assert out_df.isna().sum().sum() == 1  # preserves None/NaN
+
+    # --- Series case ---
+    s = pd.Series([" x ", "y", None])
+    out_s = _safe_strip(s)
+
+    assert isinstance(out_s, pd.Series)
+    assert list(out_s) == ["x", "y", None]
+
+    # --- Mixed types should remain unchanged ---
+    s_mixed = pd.Series([" a", 5, None])
+    out_mixed = _safe_strip(s_mixed)
+    assert out_mixed.iloc[1] == 5
+    assert out_mixed.iloc[0] == "a"
+
+    # --- Should not raise on empty input ---
+    empty_df = pd.DataFrame(columns=["A"])
+    _ = _safe_strip(empty_df)
+
 def test_import_pd():
     test_dir = Path(__file__).parent
     prot_file = str(test_dir / 'test_pd_prot.txt')
