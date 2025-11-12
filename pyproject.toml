@@ -36,7 +36,8 @@ dependencies = [
   "igraph",
   "harmonypy",
   "leidenalg",
-  "scikit-misc"
+  "scikit-misc",
+  "directlfq"
 ]
 
 [project.urls]
