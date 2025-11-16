@@ -58,6 +58,8 @@ All notable changes to this project are documented here.
 
 - Update changelogs [skip ci] (d35654a…)
 
+- Update changelogs [skip ci] (1450a6d…)
+
 
 
 #### Fixed
@@ -96,6 +98,8 @@ All notable changes to this project are documented here.
 - Update Paper PDF Draft (74ab75a…)
 
 - Final updates to paper.md (20b500c…)
+
+- Update acknowledgements (0eb8e8b…)
 
 
 
