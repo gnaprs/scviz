@@ -28,6 +28,17 @@
 
 
 
+#### CI
+
+
+##### (Joss)
+
+
+- Update workflow to pull before pushing due to changelog upload (514d580…)
+
+
+
+
 #### Chores
 
 
@@ -49,6 +60,8 @@
 - Update changelogs [skip ci] (5201ba9…)
 
 - Update changelogs [skip ci] (366a05d…)
+
+- Update changelogs [skip ci] (d35654a…)
 
 
 
