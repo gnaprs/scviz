@@ -3,7 +3,7 @@
 ## scpviz
 
 
-### Unreleased <small>Unreleased</small> { id="Unreleased" }
+### 0.5.2-alpha <small>November 16, 2025</small> { id="0.5.2-alpha" }
 
 
 #### Added
@@ -85,6 +85,8 @@
 - Update changelogs [skip ci] (b73cbc1…)
 
 - Update changelogs [skip ci] (2ee80b8…)
+
+- Update changelogs [skip ci] (73f898a…)
 
 
 

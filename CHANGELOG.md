@@ -1,7 +1,7 @@
 All notable changes to this project are documented here.
 
 <details open>
-<summary><b>Unreleased</b></summary>
+<summary><b>0.5.2-alpha</b> – 2025-11-16</summary>
 
 
 #### Added
@@ -80,6 +80,8 @@ All notable changes to this project are documented here.
 - Update changelogs [skip ci] (b73cbc1…)
 
 - Update changelogs [skip ci] (2ee80b8…)
+
+- Update changelogs [skip ci] (73f898a…)
 
 
 
