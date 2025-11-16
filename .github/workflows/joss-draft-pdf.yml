@@ -14,7 +14,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Build draft PDF
         uses: openjournals/openjournals-draft-action@master
@@ -36,5 +35,5 @@ jobs:
           message: 'joss(paper): Update Paper PDF Draft'
           # This should be the path to the paper within your repo.
           add: 'paper/paper.pdf' # 'paper/*.pdf' to commit all PDFs in the paper directory
-          pull: 'true'
-          push: origin ${{ github.head_ref || github.ref_name }}
+          pull: true
+          push: true
