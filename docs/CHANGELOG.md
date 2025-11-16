@@ -48,6 +48,8 @@
 
 - Update changelogs [skip ci] (5201ba9…)
 
+- Update changelogs [skip ci] (366a05d…)
+
 
 
 
@@ -86,6 +88,8 @@
 - Update references (0b80c03…)
 
 - Update Paper PDF Draft (74ab75a…)
+
+- Final updates to paper.md (20b500c…)
 
 
 
