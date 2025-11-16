@@ -5,6 +5,9 @@ on:
       - paper/**
       - .github/workflows/draft-pdf.yml
 
+permissions:
+  contents: write
+
 jobs:
   paper:
     runs-on: ubuntu-latest
@@ -15,12 +18,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Ensure on main branch
+        run: |
+          git switch -C main
+
       - name: Build draft PDF
         uses: openjournals/openjournals-draft-action@master
         with:
           journal: joss
           # This should be the path to the paper within your repo.
           paper-path: paper/paper.md
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
@@ -29,6 +37,7 @@ jobs:
           # PDF. Note, this should be the same directory as the input
           # paper.md
           path: paper/paper.pdf
+
       - name: Commit PDF to repository
         uses: EndBug/add-and-commit@v9
         with:
