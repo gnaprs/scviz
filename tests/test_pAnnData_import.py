@@ -125,6 +125,7 @@ def test_suggest_obs_columns_hyphen_delimiter():
     diann_file = str(test_dir / 'test_diann-delimiter.tsv')
 
     obs_columns = pAnnData.suggest_obs_columns(source_type='diann', source=diann_file)
+    assert obs_columns is not None
 
 def test_import_no_obs_uniform():
     test_dir = Path(__file__).parent
