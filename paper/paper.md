@@ -25,7 +25,7 @@ affiliations:
    index: 1
  - name: Proteome Exploration Laboratory, Beckman Institute, California Institute of Technology, 1200 E. California Blvd, Pasadena, CA 91125
    index: 2
-date: 13 August 2025
+date: 15 November 2025
 bibliography: paper.bib
 
 ---
@@ -50,7 +50,7 @@ The applications of `scpviz` span diverse areas of life sciences research, from 
 
 # Acknowledgements
 
-We acknowledge contributions from Pierre Walker, and support from the A*STAR Scholarship (BS-PhD) during the genesis of this project. The Proteome Exploration Laboratory is partially supported by Caltech Beckman Institute Endowment Funds.
+We thank Pierre Walker for his many insightful discussions and guidance. We also acknowledge support from the A*STAR BS-PhD Scholarship. The Proteome Exploration Laboratory is partially supported by the Caltech Beckman Institute Endowment Funds.
 
 <!-- If you want to cite a software repository URL (e.g. something on GitHub without a preferred
 citation) then you can do it with the example BibTeX entry below for @fidgit. -->
