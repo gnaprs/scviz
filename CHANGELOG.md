@@ -42,6 +42,8 @@ All notable changes to this project are documented here.
 
 - Update changelogs [skip ci] (0033c88…)
 
+- Update changelogs [skip ci] (5201ba9…)
+
 
 
 #### Fixed
@@ -55,6 +57,13 @@ All notable changes to this project are documented here.
 - Add lfs update to python-package.yml (13f335f…)
 
 - Trigger pytest workflow (1a44b79…)
+
+
+
+##### (Lfs)
+
+
+- Fix LFS tracking for DIANN parquet fixture (9417883…)
 
 
 

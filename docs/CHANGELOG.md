@@ -46,6 +46,8 @@
 
 - Update changelogs [skip ci] (0033c88…)
 
+- Update changelogs [skip ci] (5201ba9…)
+
 
 
 
@@ -60,6 +62,13 @@
 - Add lfs update to python-package.yml (13f335f…)
 
 - Trigger pytest workflow (1a44b79…)
+
+
+
+##### (Lfs)
+
+
+- Fix LFS tracking for DIANN parquet fixture (9417883…)
 
 
 
