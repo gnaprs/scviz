@@ -32,6 +32,8 @@ All notable changes to this project are documented here.
 
 - Update workflow to pull before pushing due to changelog upload (514d580…)
 
+- Remove dynamic ref logic to fix wrong head (ee792f4…)
+
 
 
 #### Chores
@@ -59,6 +61,8 @@ All notable changes to this project are documented here.
 - Update changelogs [skip ci] (d35654a…)
 
 - Update changelogs [skip ci] (1450a6d…)
+
+- Update changelogs [skip ci] (14c452a…)
 
 
 

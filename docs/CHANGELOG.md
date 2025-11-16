@@ -36,6 +36,8 @@
 
 - Update workflow to pull before pushing due to changelog upload (514d580…)
 
+- Remove dynamic ref logic to fix wrong head (ee792f4…)
+
 
 
 
@@ -64,6 +66,8 @@
 - Update changelogs [skip ci] (d35654a…)
 
 - Update changelogs [skip ci] (1450a6d…)
+
+- Update changelogs [skip ci] (14c452a…)
 
 
 
