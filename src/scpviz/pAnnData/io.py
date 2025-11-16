@@ -98,7 +98,8 @@ def import_data(source_type: str, **kwargs):
     obs_columns = kwargs.get('obs_columns', None)
     if obs_columns is None:
         source = kwargs.get('report_file') if 'report_file' in kwargs else kwargs.get('prot_file')
-        format_info, fallback_columns, fallback_obs = resolve_obs_columns(source, source_type)
+        delimiter = kwargs.get('delimiter') if 'delimiter' in kwargs else None
+        format_info, fallback_columns, fallback_obs = resolve_obs_columns(source, source_type, delimiter=delimiter)
 
         if format_info["uniform"]:
             # Prompt user to rerun with obs_columns
@@ -335,7 +336,7 @@ def _import_proteomeDiscoverer(prot_file: Optional[str] = None, pep_file: Option
 
     return pdata
 
-def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, prot_value: str = 'PG.MaxLFQ', pep_value: str = 'Precursor.Normalised', prot_var_columns: List[str] = ['Genes', 'Master.Protein'], pep_var_columns: List[str] = ['Genes', 'Protein.Group', 'Precursor.Charge', 'Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes'], **kwargs):
+def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, delimiter: Optional[str] = '_', prot_value: str = 'PG.MaxLFQ', pep_value: str = 'Precursor.Normalised', prot_var_columns: List[str] = ['Genes', 'Master.Protein'], pep_var_columns: List[str] = ['Genes', 'Protein.Group', 'Precursor.Charge', 'Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes'], **kwargs):
     """
     Import DIA-NN output into a `pAnnData` object.
 
@@ -345,6 +346,7 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
     Args:
         report_file (str): Path to the DIA-NN report file (required).
         obs_columns (list of str): List of metadata columns to extract from the filename for `.obs`.
+        delimiter (str): Character to split file names by to set up metadata in obs.
         prot_value (str): Column name in DIA-NN output to use for protein quantification.
             Default: `'PG.MaxLFQ'`.
         pep_value (str): Column name in DIA-NN output to use for peptide quantification.
@@ -374,9 +376,9 @@ def import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[s
         - DIA-NN report should contain both protein group and precursor-level information.
         - Metadata columns in filenames must be consistently formatted to extract `.obs`.
     """
-    return import_data(source_type='diann', report_file=report_file, obs_columns=obs_columns, prot_value=prot_value, pep_value=pep_value, prot_var_columns=prot_var_columns, pep_var_columns=pep_var_columns, **kwargs)
+    return import_data(source_type='diann', report_file=report_file, obs_columns=obs_columns, delimiter = delimiter, prot_value=prot_value, pep_value=pep_value, prot_var_columns=prot_var_columns, pep_var_columns=pep_var_columns, **kwargs)
 
-def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, obs: Optional[pd.DataFrame] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Normalised', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes'], **kwargs):
+def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[str]] = None, delimiter: Optional[str] = '_', obs: Optional[pd.DataFrame] = None, prot_value = 'PG.MaxLFQ', pep_value = 'Precursor.Normalised', prot_var_columns = ['Genes', 'Master.Protein'], pep_var_columns = ['Genes', 'Protein.Group', 'Precursor.Charge','Modified.Sequence', 'Stripped.Sequence', 'Precursor.Id', 'All Mapped Proteins', 'All Mapped Genes'], **kwargs):
     if not report_file:
         raise ValueError(f"{format_log_prefix('error')} Importing from DIA-NN: report.tsv or report.parquet must be provided to function. Try report_file='report.tsv' or report_file='report.parquet'")
     print("--------------------------\nStarting import [DIA-NN]\n")
@@ -427,7 +429,7 @@ def _import_diann(report_file: Optional[str] = None, obs_columns: Optional[List[
         prot_obs = obs
         # obs_columns = obs_columns
     else:
-        prot_obs = pd.DataFrame(prot_X_pivot.columns.values, columns=['Run'])['Run'].str.split('_', expand=True).rename(columns=dict(enumerate(obs_columns)))
+        prot_obs = pd.DataFrame(prot_X_pivot.columns.values, columns=['Run'])['Run'].str.split(delimiter, expand=True).rename(columns=dict(enumerate(obs_columns)))
     
     # PG.Q.Value layer (sample x protein)
     if 'PG.Q.Value' in report_all.columns:

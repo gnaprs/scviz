@@ -107,6 +107,25 @@ def test_import_diann_new():
     assert pdata.pep is not None
     assert pdata.rs is not None
 
+def test_import_diann_old_delimiter():
+    # pre diann v1.8.1
+    test_dir = Path(__file__).parent
+    diann_file = str(test_dir / 'test_diann-delimiter.tsv')
+
+    obs_columns = ['name','amt','enzyme','date','MS','acquisition','method','gradient','replicate']
+    pdata = pAnnData.import_data(source_type='diann', report_file=diann_file, obs_columns=obs_columns, delimiter='-')
+    assert pdata is not None
+    assert pdata.prot is not None
+    assert pdata.pep is not None
+    assert pdata.rs is not None
+
+def test_suggest_obs_columns_hyphen_delimiter():
+    # pre diann v1.8.1
+    test_dir = Path(__file__).parent
+    diann_file = str(test_dir / 'test_diann-delimiter.tsv')
+
+    obs_columns = pAnnData.suggest_obs_columns(source_type='diann', source=diann_file)
+
 def test_import_no_obs_uniform():
     test_dir = Path(__file__).parent
     prot_file = str(test_dir / 'test_pd_prot.txt')
