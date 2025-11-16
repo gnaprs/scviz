@@ -14,6 +14,9 @@ jobs:
         with:
           fetch-depth: 0  # full history needed for git-cliff
 
+      - name: Wait to avoid conflict with ongoing workflow
+        run: sleep 120
+
       - name: Fetch all tags
         run: git fetch --tags --force
 

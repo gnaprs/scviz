@@ -53,7 +53,7 @@ The applications of `scpviz` span diverse areas of life sciences research, from 
 We thank Pierre Walker for his many insightful discussions and guidance. We also acknowledge support from the A*STAR BS-PhD Scholarship. The Proteome Exploration Laboratory is partially supported by the Caltech Beckman Institute Endowment Funds.
 
 <!-- If you want to cite a software repository URL (e.g. something on GitHub without a preferred
-citation) then you can do it with the example BibTeX entry below for @fidgit. --> 
+citation) then you can do it with the example BibTeX entry below for @fidgit. -->  
 
 <!-- Figures can be included like this:
 ![Caption for example figure.\label{fig:example}](figure.png)
