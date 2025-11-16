@@ -34,6 +34,8 @@ All notable changes to this project are documented here.
 
 - Remove dynamic ref logic to fix wrong head (ee792f4…)
 
+- Add local checkout to main for pull (959a605…)
+
 
 
 #### Chores
@@ -65,6 +67,8 @@ All notable changes to this project are documented here.
 - Update changelogs [skip ci] (14c452a…)
 
 - Update changelogs [skip ci] (f920f5b…)
+
+- Update changelogs [skip ci] (b73cbc1…)
 
 
 
