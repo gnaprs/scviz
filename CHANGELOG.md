@@ -38,6 +38,8 @@ All notable changes to this project are documented here.
 
 - Update changelogs [skip ci] (3b72040…)
 
+- Update changelogs [skip ci] (ddbbfd8…)
+
 
 
 #### Fixed
@@ -47,6 +49,8 @@ All notable changes to this project are documented here.
 
 
 - Parquets were updated to lfs, add lfs request to pytest checks (391bb8b…)
+
+- Add lfs update to python-package.yml (13f335f…)
 
 
 
