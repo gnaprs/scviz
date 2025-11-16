@@ -17,6 +17,11 @@ jobs:
       - name: Wait to avoid conflict with ongoing workflow
         run: sleep 120
 
+      - name: Ensure branch is up-to-date
+        run: |
+          git switch -C main
+          git pull --rebase origin main     # <-- IMPORTANT (pull BEFORE cliffs)
+
       - name: Fetch all tags
         run: git fetch --tags --force
 
