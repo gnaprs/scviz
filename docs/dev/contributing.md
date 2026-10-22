@@ -63,7 +63,7 @@ To contribute to scpviz, use the **fork and pull request** workflow described be
 
 4. Install scpviz and its development dependencies:
 
-       pip install -e .[dev]
+       pip install -e ".[dev]"
 
    You may also want to create and activate a virtual environment before installing dependencies:
 
@@ -85,7 +85,7 @@ Please follow these best practices when contributing code:
 * Add [pytest](https://docs.pytest.org/) unit tests for new functions and features.
 * Use meaningful variable names and comments where appropriate.
 * Keep imports organized and minimal.
-* When modifying documentation, ensure that `mkdocs build --strict` completes successfully.
+* When modifying documentation, ensure that `mkdocs build` completes successfully. Do not require `--strict` (pre-existing docstring warnings).
 
 ---
 
@@ -130,7 +130,7 @@ Your changes will automatically rebuild the site in your browser.
 
 When merged to `main`, the documentation is automatically deployed to  
 [https://gnaprs.github.io/scpviz/](https://gnaprs.github.io/scpviz/)  
-via GitHub Actions (`ci.yml`).
+via GitHub Actions (`docs.yml`).
 
 ---
 
@@ -138,18 +138,14 @@ via GitHub Actions (`ci.yml`).
 
 When ready to publish a new version:
 
-1. Update the version number in `pyproject.toml`.
-2. Commit, tag, and push:
+1. Update the version in `pyproject.toml` and the docs badge in `README.md`.
+2. Commit, tag, and push the tag (version is read from `pyproject.toml`; there is no version in `setup.py`):
    ```bash
    git commit -am "Bump version to v0.X.Y"
    git tag -a v0.X.Y -m "Release v0.X.Y"
    git push origin main --tags
    ```
-3. Build and upload to PyPI:
-   ```bash
-   python -m build
-   twine upload dist/*
-   ```
+3. Draft and publish a GitHub Release for that tag. This triggers `publish.yml`, which builds and uploads to PyPI. Do not upload with `twine` locally.
 4. Verify:
    - PyPI: https://pypi.org/project/scpviz/
    - Docs: https://gnaprs.github.io/scpviz/

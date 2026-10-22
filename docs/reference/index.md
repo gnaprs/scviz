@@ -49,7 +49,7 @@ from scpviz import utils as scutils
 pdata = pAnnData.import_data(source_type='diann', report_file ="report.tsv")
 
 # From Proteome Discoverer output
-pdata = pAnnData.import_data(source_type='pd', prot_file ="proteomediscoverer_prot.txt", pept_file ="proteomediscoverer_pep.txt")
+pdata = pAnnData.import_data(source_type='pd', prot_file ="proteomediscoverer_prot.txt", pep_file ="proteomediscoverer_pep.txt")
 ```
 
 See the [importing tutorial](../tutorials/importing.md) for more information.

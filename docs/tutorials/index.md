@@ -54,13 +54,13 @@ H .-> I
 - Automatically parse sample metadata (`.obs`) from filenames.
 - Understand the `prot`, `pep`, and `rs` matrices.
 
-### 2. [Filtering and Normalization](filtering.md)
+### 2. [Filtering](filtering.md)
 - Filter proteins by peptide support (e.g. ≥2 unique peptides).
 - Apply sample-level filters and advanced queries on `.obs` or `.summary`.
-- Normalize intensities by global scale, reference features, or other strategies.
 
-### 3. [Imputation](imputation.md)
+### 3. [Imputation + Normalization](imputation.md)
 - Handle missing values using KNN-based or group-wise strategies.
+- Normalize intensities by global scale, reference features, or other strategies.
 - Summarize imputation statistics stored in `pdata.stats`.
 
 ### 4. [Plotting](plotting.md)

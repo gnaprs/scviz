@@ -3,6 +3,7 @@
 **Priority key:** H = high | M = medium | L = backlog  
 **Status key:** [ ] = todo | [~] = in progress | [x] = done
 
+H4C1: add to histone housekeeping list
 
 ---
 
@@ -87,6 +88,7 @@ Quick view of what to work on. Full tables below.
 | H | [x] | doc-1 | Tutorial: integrate with scanpy features |
 | L | [ ] | doc-2 | QC tutorial |
 | L | [ ] | doc-3 | search_annotation tutorial |
+| M | [ ] | doc-4 | Finish under-construction tutorials: `imputation.md`, `de.md`, `enrichment.md` |
 
 
 

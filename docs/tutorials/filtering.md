@@ -1,11 +1,11 @@
-# Tutorial 2: Filtering and Normalization
+# Tutorial 2: Filtering
 
 [![Download Notebook](https://img.shields.io/badge/download-filtering__tutorial-blue?logo=icloud&style=flat-square)](https://github.com/gnaprs/scpviz/raw/main/docs/tutorials/filtering.ipynb)
 [![Open In Colab](https://img.shields.io/badge/open%20in-colab-yellow?logo=googlecolab&style=flat-square)](https://colab.research.google.com/github/gnaprs/scpviz/blob/main/docs/tutorials/filtering.ipynb)
 
 Learn how to filter proteins and peptides in your dataset.
 
-All filter functions return a **copy** of the `pAnnData` object unless `inplace=True` is specified.
+All filter functions return a **copy** of the `pAnnData` object unless `return_copy=False` is specified.
 
 There are three main filtering functions:
 

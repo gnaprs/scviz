@@ -1,5 +1,5 @@
 # about versions
-1. For scikit-learn, need ver >1.2 so that we can handle sparse arrays in Imputer 
+1. Declared constraint is `scikit-learn>=1.0` in `pyproject.toml`. Sparse `Imputer` needs 1.2+; tighten the pin if that still matters. 
 
 # rebuild docs
 `pip install -e ".[docs]"`    # after changing pyproject / first time
@@ -29,10 +29,9 @@ Use format:
 # version release
 ## Things to update
 1. pyproject.toml -> version
-2. readme.md -> documentation version
-3. setup.py -> version
+2. readme.md -> documentation version badge
 3. Push tag -> automatically updates changelog and deploys docs
-4. Draft and publish GitHub Release -> automatically uploads to PyPI
+4. Draft and publish GitHub Release -> automatically uploads to PyPI (`publish.yml`; do not twine locally)
 
 ## Add tag (open repo in git bash)
 git fetch origin
