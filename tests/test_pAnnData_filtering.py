@@ -863,6 +863,16 @@ def test_filter_prot_significant_precedence_diann(pdata_diann):
     assert any("Significant In: Global" in c for c in pdata_diann.prot.var.columns)
     assert pdata_filt is not None
 
+def test_filter_prot_significant_skips_none_layer_key(pdata_diann, monkeypatch):
+    """anndata >= 0.13 stores .X as layers[None]; q-value detection must skip it."""
+    adata = pdata_diann.prot
+    named_keys = [k for k in adata.layers.keys() if isinstance(k, str)]
+    monkeypatch.setattr(adata.layers, "keys", lambda: [None, *named_keys])
+    out = pdata_diann.filter_prot_significant(fdr_threshold=0.05, return_copy=True, verbose=False)
+    assert out is not None
+    assert out.prot.shape[1] <= pdata_diann.prot.shape[1]
+
+
 def test_filter_prot_significant_missing_qval_and_global(pdata):
     """Ensure ValueError raised when neither per-sample qvals nor global q-values exist."""
     # Remove both sources of significance

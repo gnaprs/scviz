@@ -127,8 +127,8 @@ def test_export_creates_csv_files(pdata, tmp_path):
     for file in expected_files:
         assert Path(file).exists()
 
-    # Check at least one protein layer file
-    protein_layers = list(pdata.prot.layers.keys())
+    # Check at least one named protein layer file (skip layers[None] = .X on anndata >= 0.13)
+    protein_layers = [k for k in pdata.prot.layers.keys() if isinstance(k, str)]
     if protein_layers:
         layer_file = f"{output_prefix}_protein_{protein_layers[0]}.csv"
         assert Path(layer_file).exists()
@@ -265,3 +265,12 @@ def test_set_rs_invalid_shape(pdata_diann):
     rs = np.ones((10, 10))  # incorrect shape
     with pytest.raises(ValueError, match="RS shape .* does not match expected"):
         pdata_diann._set_RS(rs, validate=True)
+
+def test_repr_skips_none_layer_key(pdata_diann, monkeypatch):
+    """anndata >= 0.13 stores .X as layers[None]; __repr__ must skip non-string keys."""
+    monkeypatch.setattr(pdata_diann.prot.layers, "keys", lambda: [None, "X_raw", "X_qval"])
+    if pdata_diann.pep is not None:
+        monkeypatch.setattr(pdata_diann.pep.layers, "keys", lambda: [None, "X_raw"])
+    text = repr(pdata_diann)
+    assert "X_raw" in text
+    assert "X_qval" in text

@@ -106,7 +106,8 @@ class pAnnData(BaseMixin, ValidationMixin, SummaryMixin, MetricsMixin,
             obs_cols = ', '.join(adata.obs.columns[:5]) + ('...' if len(adata.obs.columns) > 5 else '')
             var_cols = ', '.join(adata.var.columns[:5]) + ('...' if len(adata.var.columns) > 5 else '')
             obsm_keys = ', '.join(adata.obsm.keys())
-            layers_keys = ', '.join(adata.layers.keys())
+            # anndata >= 0.13 stores .X as layers[None]
+            layers_keys = ', '.join(k for k in adata.layers.keys() if isinstance(k, str))
 
             obs_line = "  obs:    (same as protein)" if shared_obs and label == "Peptide" else f"  obs:    {obs_cols or '—'}"
 

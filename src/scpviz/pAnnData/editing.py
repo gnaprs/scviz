@@ -245,6 +245,8 @@ class EditingMixin:
                 print(f"{format_log_prefix('result_only',2)} Exported protein matrix → {filename}_protein.csv")
 
             for layer in self.prot.layers:
+                if not isinstance(layer, str):
+                    continue  # anndata >= 0.13 stores .X as layers[None]
                 arr = self.prot.layers[layer]
                 if hasattr(arr, 'toarray'):
                     arr = arr.toarray()
@@ -260,6 +262,8 @@ class EditingMixin:
                 print(f"{format_log_prefix('result_only',2)} Exported peptide matrix → {filename}_peptide.csv")
 
             for layer in self.pep.layers:
+                if not isinstance(layer, str):
+                    continue  # anndata >= 0.13 stores .X as layers[None]
                 arr = self.pep.layers[layer]
                 if hasattr(arr, 'toarray'):
                     arr = arr.toarray()

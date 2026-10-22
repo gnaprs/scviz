@@ -639,9 +639,11 @@ class FilterMixin:
         adata = self.prot 
         var = adata.var
 
-        # Detect per-sample significance layer
+        # Detect per-sample significance layer.
+        # anndata >= 0.13 stores .X as layers[None]; skip non-string keys.
         has_protein_level_significance = any(
-            k.lower().endswith("_qval") or k.lower().endswith("_fdr") for k in adata.layers.keys()
+            isinstance(k, str) and (k.lower().endswith("_qval") or k.lower().endswith("_fdr"))
+            for k in adata.layers.keys()
         )
 
         # --- Handle missing significance data entirely ---
