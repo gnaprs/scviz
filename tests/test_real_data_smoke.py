@@ -606,3 +606,44 @@ def test_diann_plot_clustermap_separate_legend(pdata_diann):
     assert isinstance(out, tuple) and len(out) == 2
     plt.close(out[0])
     plt.close(out[1])
+
+
+# ---------------------------------------------------------------------------
+# STRING mapping cache
+# ---------------------------------------------------------------------------
+
+
+def test_pd_update_string_mapping_add(pdata_pd_sample_column):
+    """PD: write a STRING ID onto `.prot.var`."""
+    pdata = pdata_pd_sample_column.copy()
+    acc = str(pdata.prot.var_names[0])
+    pdata.update_string_mapping({acc: "9606.ENSP00000000001"}, verbose=False)
+    assert pdata.prot.var.at[acc, "STRING"] == "9606.ENSP00000000001"
+    assert pdata.metadata.get("string_map_history")
+
+
+def test_pd_update_string_mapping_skip_existing(pdata_pd_sample_column):
+    """PD: overwrite=False leaves an existing STRING ID unchanged."""
+    pdata = pdata_pd_sample_column.copy()
+    acc = str(pdata.prot.var_names[0])
+    pdata.update_string_mapping({acc: "9606.OLD"}, verbose=False)
+    pdata.update_string_mapping({acc: "9606.NEW"}, overwrite=False, verbose=False)
+    assert pdata.prot.var.at[acc, "STRING"] == "9606.OLD"
+
+
+def test_diann_update_string_mapping_with_taxon(pdata_diann):
+    """DIA-NN: write STRING ID and taxon together."""
+    pdata = pdata_diann.copy()
+    acc = str(pdata.prot.var_names[0])
+    pdata.update_string_mapping({acc: "9606.ENSP1"}, taxon=9606, verbose=False)
+    assert pdata.prot.var.at[acc, "STRING"] == "9606.ENSP1"
+    assert str(pdata.prot.var.at[acc, "ncbi_taxon_id"]) == "9606"
+
+
+def test_diann_update_string_mapping_overwrite(pdata_diann):
+    """DIA-NN: overwrite=True replaces a cached STRING ID."""
+    pdata = pdata_diann.copy()
+    acc = str(pdata.prot.var_names[0])
+    pdata.update_string_mapping({acc: "9606.OLD"}, verbose=False)
+    pdata.update_string_mapping({acc: "9606.NEW"}, overwrite=True, verbose=False)
+    assert pdata.prot.var.at[acc, "STRING"] == "9606.NEW"

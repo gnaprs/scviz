@@ -1,3 +1,4 @@
+import datetime
 import requests
 import pandas as pd
 import numpy as np
@@ -27,6 +28,7 @@ class EnrichmentMixin:
         list_enrichments: Lists available enrichment results and DE comparisons.
         plot_enrichment_svg: Displays a STRING enrichment SVG inline or saves it to file.
         get_string_mappings: Maps UniProt accessions to STRING IDs using the STRING API.
+        update_string_mapping: Add or overwrite cached STRING IDs on `.prot.var`.
         resolve_to_accessions: Resolves gene names or mixed inputs to accessions using internal mappings.
         get_string_network_link: Generates a direct STRING network URL for visualization.
     """
@@ -38,11 +40,13 @@ class EnrichmentMixin:
         2) For any still-missing rows, query STRING get_string_ids, batched by organism_id.
 
         This method retrieves corresponding STRING identifiers for a list of UniProt accessions
-        and stores the result in `self.prot.var["STRING_id"]` for downstream use.
+        and stores the result in `self.prot.var["STRING"]` for downstream use.
 
         Args:
             identifiers (list of str): List of UniProt accession IDs to map.
-            batch_size (int): Number of accessions to include in each API query (default is 300).
+            overwrite (bool): If True, re-query even when a STRING ID is already cached.
+            cache_col (str): `.prot.var` column used as the STRING ID cache (default: `"STRING"`).
+            batch_size (int): Number of accessions to include in each API query (default is 100).
             debug (bool): If True, prints progress and response info.
 
         Returns:
@@ -50,6 +54,8 @@ class EnrichmentMixin:
 
         Note:
             This is a helper method used primarily by `enrichment_functional()` and `enrichment_ppi()`.
+            Identifiers still unmapped after UniProt and STRING are printed so they can be looked
+            up manually and added with `update_string_mapping()`.
         """
 
         identifiers = [str(x).strip() for x in identifiers if x is not None and str(x).strip()]
@@ -123,6 +129,25 @@ class EnrichmentMixin:
         elif missing:
             print(f"{format_log_prefix('warn_only',3)} No STRING mappings returned from STRING API.")
 
+        leftover = []
+        for acc in identifiers:
+            sid = found_ids.get(
+                acc,
+                prot_var.at[acc, cache_col] if acc in prot_var.index else pd.NA,
+            )
+            if not (pd.notna(sid) and str(sid).strip()):
+                leftover.append(acc)
+        if leftover:
+            preview_n = 20
+            preview = ", ".join(leftover[:preview_n])
+            extra = f" ... (+{len(leftover) - preview_n} more)" if len(leftover) > preview_n else ""
+            print(
+                f"{format_log_prefix('warn_only', 3)} {len(leftover)} identifier(s) still unmapped: {preview}{extra}"
+            )
+            print(
+                f"{format_log_prefix('blank', 3)}Tip: look these up on STRING, then "
+                f"`pdata.update_string_mapping({{'ACCESSION': '9606.ENSP...'}})`."
+            )
 
         # ------------------------------------
         # Build and MERGE UniProt results into out_df
@@ -144,6 +169,119 @@ class EnrichmentMixin:
 
         return out_df
 
+
+    def update_string_mapping(
+        self, mapping, overwrite=False, verbose=True, taxon=None, cache_col="STRING"
+    ):
+        """
+        Update cached STRING IDs on `.prot.var` with user-supplied mappings.
+
+        Use this after `get_string_mappings()` reports identifiers that UniProt and STRING
+        could not resolve. New or empty cache entries are filled even when `overwrite=False`;
+        existing STRING IDs are left unchanged unless `overwrite=True`.
+
+        Args:
+            mapping (dict): Dictionary of `{accession: STRING_id}` mappings to add.
+            overwrite (bool): If True, replace existing cached STRING IDs. Default False.
+            verbose (bool): If True, print a summary of added, overwritten, and skipped keys.
+            taxon (int, str, or dict, optional): NCBI taxonomy ID to write to
+                `.prot.var["ncbi_taxon_id"]` for keys that are added or overwritten.
+                A scalar applies to all updated accessions; a dict maps accession → taxon.
+            cache_col (str): `.prot.var` column used as the STRING ID cache (default: `"STRING"`).
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: If `mapping` is not a dictionary.
+
+        Example:
+            Add STRING IDs for accessions that were not mapped automatically:
+                ```python
+                pdata.update_string_mapping({
+                    "P12345": "9606.ENSP00000229277",
+                    "Q9Y2X3": "9606.ENSP00000312345",
+                })
+                ```
+
+            Overwrite an existing cached STRING ID and set taxon:
+                ```python
+                pdata.update_string_mapping(
+                    {"P12345": "9606.ENSP00000229277"},
+                    taxon=9606,
+                    overwrite=True,
+                )
+                ```
+        """
+        if not isinstance(mapping, dict):
+            raise ValueError("`mapping` must be a dict of {accession: STRING_id}.")
+
+        prot_var = self.prot.var
+        if cache_col not in prot_var.columns:
+            prot_var[cache_col] = pd.NA
+        if "ncbi_taxon_id" not in prot_var.columns:
+            prot_var["ncbi_taxon_id"] = pd.NA
+
+        added, updated, skipped = 0, 0, 0
+        unknown = []
+
+        for acc, sid in mapping.items():
+            acc = str(acc).strip()
+            sid_ok = pd.notna(sid) and str(sid).strip()
+            if acc not in prot_var.index:
+                unknown.append(acc)
+                skipped += 1
+                continue
+            if not sid_ok:
+                skipped += 1
+                continue
+
+            existing = prot_var.at[acc, cache_col]
+            has_existing = pd.notna(existing) and str(existing).strip()
+            if has_existing and not overwrite:
+                skipped += 1
+                continue
+
+            prot_var.at[acc, cache_col] = str(sid).strip()
+            if has_existing:
+                updated += 1
+            else:
+                added += 1
+
+            tax_val = taxon.get(acc) if isinstance(taxon, dict) else taxon
+            if tax_val is not None:
+                tax_val = utils.scalarize_taxon(tax_val)
+                if tax_val is not pd.NA and pd.notna(tax_val):
+                    prot_var.at[acc, "ncbi_taxon_id"] = str(tax_val)
+
+        message = (
+            f"prot: STRING mapping update: {added} added, {updated} overwritten, {skipped} skipped."
+        )
+        if verbose:
+            print(f"{format_log_prefix('update')} STRING mapping: {added} added, {updated} overwritten, {skipped} skipped.")
+            if unknown:
+                preview_n = 20
+                preview = ", ".join(unknown[:preview_n])
+                extra = f" ... (+{len(unknown) - preview_n} more)" if len(unknown) > preview_n else ""
+                print(
+                    f"{format_log_prefix('warn')} Accessions not in .prot.var (skipped): {preview}{extra}"
+                )
+        self._append_history(message)  # type: ignore[attr-defined], HistoryMixin
+
+        record = {
+            "cache_col": cache_col,
+            "input_mapping": dict(mapping),
+            "overwrite": overwrite,
+            "taxon": taxon if not isinstance(taxon, dict) else dict(taxon),
+            "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+            "summary": {
+                "added": added,
+                "updated": updated,
+                "skipped": skipped,
+                "unknown": list(unknown),
+            },
+        }
+        self.metadata.setdefault("string_map_history", []).append(record)
 
     def resolve_to_accessions(self, mixed_list):
         """
@@ -182,7 +320,7 @@ class EnrichmentMixin:
         self,
         genes=None,
         from_de=True,
-        top_n=150,
+        top_n=None,
         score_col="significance_score",
         gene_col="Genes",
         de_key="de_results",
@@ -203,7 +341,9 @@ class EnrichmentMixin:
         Args:
             genes (list of str, optional): List of gene symbols to analyze. Ignored if `from_de=True`.
             from_de (bool): If True (default), selects genes from stored differential expression results.
-            top_n (int): Number of top-ranked genes to use when `from_de=True` (default is 150).
+            top_n (int, optional): If set, keep this many top-ranked genes per tail when
+                `from_de=True`, ranked by `score_col`. Default `None` uses all significant
+                DE genes (upregulated and downregulated).
             score_col (str): Column name in the DE table to rank genes by (default is `"significance_score"`).
             gene_col (str): Column name in `.prot.var` or DE results that contains gene names.
             de_key (str): Key to retrieve stored DE results from `.stats["de_results"]`.
@@ -223,7 +363,7 @@ class EnrichmentMixin:
                 - If `genes` is provided, returns a single enrichment DataFrame.
 
         Example:
-            Run differential expression, then perform STRING enrichment on top-ranked genes:
+            Run differential expression, then perform STRING enrichment on all significant genes:
                 ```python
                 case1 = {'cellline': 'AS', 'treatment': 'sc'} # legacy style: class_type = ["group", "condition"]
                 case2 = {'cellline': 'BE', 'treatment': 'sc'} # legacy style: values = [["GroupA", "Treatment1"], ["GroupA", "Control"]]
@@ -268,11 +408,29 @@ class EnrichmentMixin:
         if genes is None and from_de:
             resolved_key = _resolve_de_key(self.stats, de_key)
             de_df = self.stats[resolved_key]
-            sig_df = de_df[de_df["significance"] != "not significant"].copy()
             print(f"{format_log_prefix('user')} Running STRING enrichment [DE-based: {resolved_key}]")
 
-            up_genes = sig_df[sig_df[score_col] > 0][gene_col].dropna().head(top_n).tolist()
-            down_genes = sig_df[sig_df[score_col] < 0][gene_col].dropna().head(top_n).tolist()
+            sig_up = de_df[de_df["significance"] == "upregulated"].copy()
+            sig_down = de_df[de_df["significance"] == "downregulated"].copy()
+            sig_up = sig_up[sig_up[gene_col].notna()]
+            sig_down = sig_down[sig_down[gene_col].notna()]
+
+            if top_n is not None:
+                try:
+                    n_keep = int(top_n)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("`top_n` must be a positive integer or None.") from exc
+                if n_keep <= 0:
+                    raise ValueError("`top_n` must be a positive integer or None.")
+                print(
+                    f"{format_log_prefix('info_only', 2)} Truncating to top {n_keep} genes per tail "
+                    f"(by {score_col}; {len(sig_up)} up, {len(sig_down)} down before truncation)."
+                )
+                sig_up = sig_up.sort_values(score_col, ascending=False).head(n_keep)
+                sig_down = sig_down.sort_values(score_col, ascending=True).head(n_keep)
+
+            up_genes = sig_up[gene_col].tolist()
+            down_genes = sig_down[gene_col].tolist()
 
             up_accs, up_unresolved = self.resolve_to_accessions(up_genes)
             down_accs, down_unresolved = self.resolve_to_accessions(down_genes)

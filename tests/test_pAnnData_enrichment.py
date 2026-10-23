@@ -183,6 +183,83 @@ def test_de_based_functional(mock_post, pdata_with_de):
         assert "result" in pdata_with_de.stats["functional"][pretty_key]
         assert isinstance(pdata_with_de.stats["functional"][pretty_key]["result"], pd.DataFrame)
 
+
+def _plant_ranked_de(pdata, stored, n_up=5, n_down=4):
+    """Label unique accessions as up/down with increasing |score| down the table."""
+    de_df = pdata.stats[stored]
+    de_df["significance"] = "not significant"
+    de_df["significance_score"] = 0.0
+    de_df["Genes"] = de_df.index.astype(str)
+    idx = list(de_df.index)
+    up_ids = idx[:n_up]
+    down_ids = idx[n_up:n_up + n_down]
+    for i, acc in enumerate(up_ids):
+        de_df.at[acc, "significance"] = "upregulated"
+        de_df.at[acc, "significance_score"] = float(i + 1)
+    for i, acc in enumerate(down_ids):
+        de_df.at[acc, "significance"] = "downregulated"
+        de_df.at[acc, "significance_score"] = -float(i + 1)
+    return up_ids, down_ids
+
+
+def test_enrichment_functional_default_sends_all_de_genes(monkeypatch, pdata_with_de):
+    """top_n=None (default) sends every upregulated and downregulated gene."""
+    stored = "[{'cellline': 'BE', 'treatment': 'kd'}] vs [{'cellline': 'BE', 'treatment': 'sc'}]"
+    up_ids, down_ids = _plant_ranked_de(pdata_with_de, stored, n_up=5, n_down=4)
+    seen = []
+
+    def fake_map(accs, **kwargs):
+        accs = list(accs)
+        seen.append(accs)
+        return pd.DataFrame({
+            "input_identifier": accs,
+            "string_identifier": [f"S_{a}" for a in accs],
+            "ncbi_taxon_id": [10090] * len(accs),
+        })
+
+    monkeypatch.setattr(pdata_with_de, "get_string_mappings", fake_map)
+    mock_post = Mock()
+    mock_post.return_value.json.return_value = mock_enrichment_response
+    monkeypatch.setattr("scpviz.enrichment.requests.post", mock_post)
+
+    pdata_with_de.enrichment_functional(from_de=True, de_key=stored)
+    assert set(seen[0]) == set(up_ids)
+    assert set(seen[1]) == set(down_ids)
+
+
+def test_enrichment_functional_top_n_ranks_by_score(monkeypatch, pdata_with_de):
+    """Explicit top_n keeps the highest |significance_score| per tail, not table order."""
+    stored = "[{'cellline': 'BE', 'treatment': 'kd'}] vs [{'cellline': 'BE', 'treatment': 'sc'}]"
+    up_ids, down_ids = _plant_ranked_de(pdata_with_de, stored, n_up=5, n_down=4)
+    seen = []
+
+    def fake_map(accs, **kwargs):
+        accs = list(accs)
+        seen.append(accs)
+        return pd.DataFrame({
+            "input_identifier": accs,
+            "string_identifier": [f"S_{a}" for a in accs],
+            "ncbi_taxon_id": [10090] * len(accs),
+        })
+
+    monkeypatch.setattr(pdata_with_de, "get_string_mappings", fake_map)
+    mock_post = Mock()
+    mock_post.return_value.json.return_value = mock_enrichment_response
+    monkeypatch.setattr("scpviz.enrichment.requests.post", mock_post)
+
+    pdata_with_de.enrichment_functional(from_de=True, de_key=stored, top_n=2)
+    assert set(seen[0]) == {up_ids[-1], up_ids[-2]}
+    assert set(seen[1]) == {down_ids[-1], down_ids[-2]}
+
+
+def test_enrichment_functional_invalid_top_n(pdata_with_de):
+    stored = "[{'cellline': 'BE', 'treatment': 'kd'}] vs [{'cellline': 'BE', 'treatment': 'sc'}]"
+    with pytest.raises(ValueError, match="positive integer or None"):
+        pdata_with_de.enrichment_functional(from_de=True, de_key=stored, top_n=0)
+    with pytest.raises(ValueError, match="positive integer or None"):
+        pdata_with_de.enrichment_functional(from_de=True, de_key=stored, top_n=-3)
+
+
 @patch("scpviz.enrichment.requests.post")
 def test_user_supplied_ppi(mock_post, pdata):
     mock_string_responses(mock_post, mock_mapping_response, mock_ppi_response, total_pairs=1)
@@ -267,6 +344,112 @@ def test_get_string_mappings_scalarize_taxon_from_cache_only(monkeypatch, pdata)
     assert str(got.loc[ids[1]]) == "10090"
     assert pd.isna(got.loc[ids[2]])
     assert pd.isna(got.loc[ids[3]])
+
+
+def test_get_string_mappings_prints_leftover(monkeypatch, pdata, capsys):
+    """Unmapped accessions after UniProt+STRING are printed at indent 3."""
+    import scpviz.utils as utils_mod
+
+    ids = pdata.prot.var_names[:3].tolist()
+    pdata.prot.var["STRING"] = pd.NA
+
+    def fake_map(identifiers, **kwargs):
+        return pd.DataFrame({
+            "input_identifier": [ids[0]],
+            "string_identifier": ["9606.ENSP1"],
+            "ncbi_taxon_id": ["9606"],
+        })
+
+    monkeypatch.setattr(utils_mod, "get_string_mappings", fake_map)
+    df = pdata.get_string_mappings(ids, debug=False)
+    out = capsys.readouterr().out
+
+    assert "still unmapped" in out
+    assert ids[1] in out
+    assert ids[2] in out
+    assert "update_string_mapping" in out
+    got = df.set_index("input_identifier")["string_identifier"]
+    assert got.loc[ids[0]] == "9606.ENSP1"
+    assert pd.isna(got.loc[ids[1]])
+    assert pd.isna(got.loc[ids[2]])
+
+
+def test_get_string_mappings_no_leftover_when_complete(monkeypatch, pdata, capsys):
+    """Fully cached identifiers should not print a leftover warning or hit the API."""
+    import scpviz.utils as utils_mod
+
+    ids = pdata.prot.var_names[:3].tolist()
+    pdata.prot.var["STRING"] = pd.NA
+    pdata.prot.var.loc[ids, "STRING"] = ["S1", "S2", "S3"]
+
+    monkeypatch.setattr(
+        utils_mod,
+        "get_string_mappings",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("API should not be called")),
+    )
+    df = pdata.get_string_mappings(ids, debug=False)
+    out = capsys.readouterr().out
+    assert "still unmapped" not in out
+    assert df["string_identifier"].tolist() == ["S1", "S2", "S3"]
+
+
+def test_update_string_mapping_add_skip_overwrite(pdata):
+    """NA cache is fillable without overwrite; filled cache requires overwrite=True."""
+    acc = pdata.prot.var_names[0]
+    pdata.prot.var["STRING"] = pd.NA
+
+    pdata.update_string_mapping({acc: "9606.NEW"}, verbose=False)
+    assert pdata.prot.var.at[acc, "STRING"] == "9606.NEW"
+
+    pdata.update_string_mapping({acc: "9606.SKIPPED"}, overwrite=False, verbose=False)
+    assert pdata.prot.var.at[acc, "STRING"] == "9606.NEW"
+
+    pdata.update_string_mapping({acc: "9606.OVERWRITE"}, overwrite=True, verbose=False)
+    assert pdata.prot.var.at[acc, "STRING"] == "9606.OVERWRITE"
+
+    history = pdata.metadata.get("string_map_history", [])
+    assert len(history) == 3
+    assert history[0]["summary"]["added"] == 1
+    assert history[1]["summary"]["skipped"] == 1
+    assert history[2]["summary"]["updated"] == 1
+
+
+def test_update_string_mapping_unknown_and_taxon(pdata, capsys):
+    """Unknown accessions are skipped; taxon is written for successful updates."""
+    acc = pdata.prot.var_names[0]
+    pdata.prot.var["STRING"] = pd.NA
+    pdata.update_string_mapping(
+        {acc: "9606.ENSP1", "NOT_A_REAL_ACC": "9606.ENSP2"},
+        taxon={acc: 9606},
+        verbose=True,
+    )
+    out = capsys.readouterr().out
+    assert "NOT_A_REAL_ACC" in out
+    assert pdata.prot.var.at[acc, "STRING"] == "9606.ENSP1"
+    assert str(pdata.prot.var.at[acc, "ncbi_taxon_id"]) == "9606"
+    assert "NOT_A_REAL_ACC" not in pdata.prot.var.index
+
+
+def test_update_string_mapping_invalid_mapping_raises(pdata):
+    with pytest.raises(ValueError, match="must be a dict"):
+        pdata.update_string_mapping(["P12345", "9606.ENSP1"])
+
+
+def test_update_string_mapping_used_as_cache(monkeypatch, pdata):
+    """Manual STRING IDs are reused by get_string_mappings without an API call."""
+    import scpviz.utils as utils_mod
+
+    acc = pdata.prot.var_names[0]
+    pdata.update_string_mapping({acc: "9606.MANUAL"}, taxon="9606", verbose=False)
+    monkeypatch.setattr(
+        utils_mod,
+        "get_string_mappings",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("API should not be called")),
+    )
+    df = pdata.get_string_mappings([acc], debug=False)
+    row = df.set_index("input_identifier").loc[acc]
+    assert row["string_identifier"] == "9606.MANUAL"
+    assert str(row["ncbi_taxon_id"]) == "9606"
 
 # ----------------------------------------------------------------------
 # resolve_to_accessions edge case
